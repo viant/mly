@@ -67,9 +67,9 @@ Depending on keyspace size the library supports 3 level of caching.
 
 By default client inherit web service cache settings.
 
-When in memory process is both client and web service manage they cache independently, meaning if data is missing in 
+When in memory cache is used, both client and web service manage they cache independently, meaning if data is missing in 
 local client cache, client send request to ml endpoint.
-When external cache is configure client first check external cache that is shared with web service, if data is found, 
+When external cache is used, client first check external cache that is shared with web service, if data is found, 
 it's copied to local in memory cache. Memory cache uses [scache](https://github.com/viant/scache) most recently used implementation.
 
 Example of service with in memory cache
