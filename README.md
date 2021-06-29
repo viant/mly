@@ -133,9 +133,9 @@ initiate dictionary reload and invalidates cache entries lazily.
 The server accept configuration with the following options
 * _Models_ : list of models
   - ID: required model ID
-  - URL: required model location 
-        * to use s3, export AWS_SDK_LOAD_CONFIG=true
-        * to use gs, export GOOGLE_APPLICATION_CREDENTIALS=true
+  - URL: required model location  
+    * to use s3, export AWS_SDK_LOAD_CONFIG=true
+    * to use gs, export GOOGLE_APPLICATION_CREDENTIALS=true
   - Tags: optional model tags (default "serve")
   - OutputType required output type (int64, float32, etc..)
   - UseDict optional flag to use dictionary/caching (true by default)
