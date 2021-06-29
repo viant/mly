@@ -242,10 +242,11 @@ The custom transformer has to use the following function signature
 type Transformer func(ctx context.Context, signature *Signature, input *gtly.Object, output interface{}) (common.Storable, error)
 ```
 
-
+```go
 func init() {
   transformer.Register("myTransformer", aTransformer)
 }
+```
 
 
 #### Metrics
