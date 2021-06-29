@@ -2,17 +2,17 @@ package domain
 
 import (
 	"context"
+	"github.com/viant/gtly"
 	"github.com/viant/mly/common"
 	"github.com/viant/mly/common/storable"
 )
 
 //Transformer represents output transformer
-type Transformer func(ctx context.Context, signature *Signature, input, output interface{}) (common.Storable, error)
+type Transformer func(ctx context.Context, signature *Signature, input *gtly.Object, output interface{}) (common.Storable, error)
 
 //Transform transform default model output
-func Transform(ctx context.Context, signature *Signature, input, output interface{}) (common.Storable, error) {
+func Transform(ctx context.Context, signature *Signature, input *gtly.Object, output interface{}) (common.Storable, error) {
 	result := storable.New(storable.NewFields(signature.Output.Name, signature.Output.DataType))
-
 	name := signature.Output.Name
 	var outputValue interface{}
 	switch val := output.(type) {

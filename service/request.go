@@ -3,17 +3,19 @@ package service
 import (
 	"fmt"
 	"github.com/francoispqt/gojay"
+	"github.com/viant/gtly"
 	"github.com/viant/mly/service/domain"
 	"reflect"
 	"strconv"
 )
 
 type Request struct {
-	Key      string
-	Feeds    []interface{}
-	inputs   map[string]*domain.Input
-	supplied int
-	Pairs    []*Pairs
+	Key       string
+	BatchSize int
+	Feeds     []interface{}
+	inputs    map[string]*domain.Input
+	supplied  int
+	input     *gtly.Object
 }
 
 type Pairs struct {
@@ -22,6 +24,7 @@ type Pairs struct {
 }
 
 func (r *Request) Put(key string, value string) error {
+
 	//r.Pairs = append(r.Pairs, &Pairs{key , value})
 	if input, ok := r.inputs[key]; ok {
 		r.supplied++
@@ -69,6 +72,10 @@ func (r *Request) Put(key string, value string) error {
 
 func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	switch key {
+	case "_batchSize":
+		if err := dec.Int(&r.BatchSize); err != nil {
+			return err
+		}
 	case "_key":
 		if err := dec.String(&r.Key); err != nil {
 			return err
@@ -82,6 +89,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 				if err := dec.String(&value); err != nil {
 					return err
 				}
+				r.input.SetString(key, value)
 				r.Feeds[input.Index] = [][]string{{value}}
 			case reflect.Bool:
 				value := false
@@ -89,39 +97,51 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					return err
 				}
 				r.Feeds[input.Index] = [][]bool{{value}}
+				r.input.SetBool(key, value)
 			case reflect.Int:
 				value := 0
 				if err := dec.Int(&value); err != nil {
 					return err
 				}
 				r.Feeds[input.Index] = [][]int{{value}}
+				r.input.SetInt(key, value)
 			case reflect.Int64:
 				value := 0
 				if err := dec.Int(&value); err != nil {
 					return err
 				}
 				r.Feeds[input.Index] = [][]int64{{int64(value)}}
+				r.input.SetInt(key, value)
 			case reflect.Float64:
 				value := float64(0)
 				if err := dec.Float64(&value); err != nil {
 					return err
 				}
 				r.Feeds[input.Index] = [][]float64{{value}}
+				r.input.SetFloat(key, value)
 			case reflect.Float32:
 				value := float64(0)
 				if err := dec.Float64(&value); err != nil {
 					return err
 				}
 				r.Feeds[input.Index] = [][]float64{{value}}
+				r.input.SetFloat(key, value)
 			default:
 				//TODO add more type support
 				return fmt.Errorf("unsupported input type: %T", reflect.New(input.Type).Interface())
 			}
+		} else {
+			value := ""
+			if err := dec.String(&value); err != nil {
+				return err
+			}
+			r.input.SetString(key, value)
 		}
 	}
 	return nil
 }
 
+//Validate validates if request is valid
 func (r *Request) Validate() error {
 	if len(r.inputs) != r.supplied {
 		missing := make([]string, 0)

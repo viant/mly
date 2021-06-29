@@ -6,6 +6,7 @@ import (
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
 	"github.com/viant/gmetric"
+	"github.com/viant/gtly"
 	"github.com/viant/mly/common"
 	"github.com/viant/mly/common/storable"
 	"github.com/viant/mly/service/config"
@@ -38,6 +39,7 @@ type Service struct {
 	serviceMetric   *gmetric.Operation
 	evaluatorMetric *gmetric.Operation
 	closed          int32
+	inputProvider   *gtly.Provider
 }
 
 func (s *Service) Close() error {
@@ -100,7 +102,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	if err != nil {
 		return err
 	}
-	transformed, err := s.transformer(ctx, s.signature, request, output)
+	transformed, err := s.transformer(ctx, s.signature, request.input, output)
 	if err != nil {
 		return err
 	}
@@ -212,7 +214,7 @@ func (s *Service) isModified(lastModified time.Time) bool {
 }
 
 func (s *Service) NewRequest() *Request {
-	return &Request{inputs: s.inputs, Feeds: make([]interface{}, len(s.inputs))}
+	return &Request{inputs: s.inputs, Feeds: make([]interface{}, len(s.inputs)), input: s.inputProvider.NewObject()}
 }
 
 func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[string]*datastore.Service) error {
@@ -261,6 +263,7 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 		evaluatorMetric: metrics.MultiOperationCounter(location, cfg.ID+"Eval", cfg.ID+" evaluator performance", time.Microsecond, time.Minute, 2, sstat.NewService()),
 		useDatastore:    cfg.UseDictionary() && cfg.DataStore != "",
 		inputs:          make(map[string]*domain.Input),
+		inputProvider:   gtly.NewProvider("input"),
 	}
 	err := result.init(ctx, cfg, datastores)
 	return result, err

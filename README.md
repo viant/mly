@@ -16,15 +16,14 @@ Please refer to [`CHANGELOG.md`](CHANGELOG.md) if you encounter breaking changes
 
 ## Motivation
 
-The goal of this library to provide generic HTTP web service tensorflow ML wrapper which can speed up end to end execution by leveraging a caching. 
+The goal of this library to provide generic tensorflow ML wrapper web service which can speed up end to end execution by leveraging a caching. 
 Caching has to be seamless, meaning client behind the scene should take care of dictionary based key generation and any model changes automatically. 
 
 In order to get benefit of cache the model dictionary has to use enumerated layers, with keyspace providing  reasonable cache hit rate.
 In practise this library can provide substantial (100x) e2e execution improvement from client side perspective, with
 keyspace ranging from  millions of billions distinct keys. 
 
-Performance transparency: each model provide both tensorflow and cache level performance metrics exposed vi REST API. 
-
+Performance transparency: each model provide both tensorflow and cache level performance metrics exposed vi REST API.
 
 ## Introduction
 
@@ -135,16 +134,74 @@ where optional options can be one of the following:
 
 #### Server
 
+To build server executable you can use the following code
+
+```go
+package main
+
+import (
+	"github.com/viant/mly/service/endpoint"
+	"os"
+)
+
+const (
+	Version = "1.0"
+)
+func main() {
+	endpoint.RunApp(Version, os.Args)
+}
+```
+
 
 
 #### Client
 
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"github.com/viant/mly/client"
+	"log"
+)
+
+type Prediction struct {
+	Output float32
+}
+
+func main() {
+	aClient, err := client.New("$modelID", []*client.Host{client.NewHost("mlyEndpointHost", 8080)})
+	if err != nil {
+		log.Fatal(err)
+	}
+	response := &client.Response{Data: &Prediction{}}
+	msg := aClient.NewMessage()
+	msg.StringKey("input1", "val1")
+	//....
+	msg.IntKey("inputN", 1)
+	
+	err = aClient.Run(context.TODO(), msg, response)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("response: %+v\n", response)
+}
+```
 
 
 #### Output Customization
 
+By default, model signature output name alongside with model prediction gets used to produce cachable output.
+This process can be customized to specific needs, 
 
 
+
+#### Metrics
+
+The following URI expose webservice 
+ -  /v1/api/metric/operations - all metrics register in the web service
+-  /v1/api/metric/operation/$MetricID - individual metric
 
 #### Deployment
 

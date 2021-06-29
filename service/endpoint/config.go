@@ -20,6 +20,7 @@ const (
 	configURI = "/v1/api/config/"
 )
 
+//Config represents an endpoint config
 type Config struct {
 	config.ModelList
 	sconfig.DatastoreList
@@ -27,12 +28,14 @@ type Config struct {
 	AllowedSubnet []string
 }
 
+//Init initialise config
 func (c *Config) Init() {
 	c.ModelList.Init()
 	c.DatastoreList.Init()
 	c.Endpoint.Init()
 }
 
+//Validate validates config
 func (c *Config) Validate() error {
 	if err := c.ModelList.Validate(); err != nil {
 		return err
@@ -43,6 +46,7 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+//NewConfigFromURL creates a new config from URL
 func NewConfigFromURL(ctx context.Context, URL string) (*Config, error) {
 	fs := afs.New()
 	reader, err := fs.OpenURL(ctx, URL)
