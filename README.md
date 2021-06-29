@@ -124,7 +124,7 @@ Connections:
 In caching mode, in order to manage cache and client/server consistency every time model/dictionary gets re/loaded, 
 mly computes global dictionary hash code. This hash code got stored in the cache alongside model prediction, 
 as well its being passed to client in every response. Once client detect dict hash code difference it automatically
-initiate dictionary reload and invalidates cache entries lazily.
+initiate dictionary reload and invalidates cache entries.
 
 ## Configuration
 
