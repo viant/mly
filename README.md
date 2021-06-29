@@ -215,17 +215,17 @@ type Prediction struct {
 }
 
 func main() {
-	aClient, err := client.New("$modelID", []*client.Host{client.NewHost("mlyEndpointHost", 8080)})
+	mly, err := client.New("$modelID", []*client.Host{client.NewHost("mlyEndpointHost", 8080)})
 	if err != nil {
 		log.Fatal(err)
 	}
 	response := &client.Response{Data: &Prediction{}}
-	msg := aClient.NewMessage()
+	msg := mly.NewMessage()
 	msg.StringKey("input1", "val1")
 	//....
 	msg.IntKey("inputN", 1)
 	
-	err = aClient.Run(context.TODO(), msg, response)
+	err = mly.Run(context.TODO(), msg, response)
 	if err != nil {
 		log.Fatal(err)
 	}
