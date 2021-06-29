@@ -3,7 +3,7 @@ package domain
 type (
 	Dictionary struct {
 		Layers []Layer
-		Hash int
+		Hash   int
 	}
 
 	Layer struct {

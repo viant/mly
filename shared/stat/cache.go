@@ -13,7 +13,6 @@ const (
 	CacheExpired   = "expired"
 	Timeout        = "timeout"
 	Down           = "down"
-
 )
 
 type cache struct{}

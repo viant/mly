@@ -5,11 +5,12 @@ import (
 	"time"
 )
 
+//Timeout timout setting
 type Timeout struct {
 	Unit       string
 	Connection int
 	Socket     int
-	Total    int
+	Total      int
 }
 
 func (t *Timeout) DurationUnit() time.Duration {

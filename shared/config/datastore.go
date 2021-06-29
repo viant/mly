@@ -2,34 +2,32 @@ package config
 
 import (
 	"fmt"
-	"github.com/viant/mly/common"
 	"github.com/viant/mly/common/storable"
 	"github.com/viant/mly/shared/config/datastore"
 	"github.com/viant/scache"
-	"reflect"
 )
 
+//Datastore represents datastore
 type Datastore struct {
 	ID    string
 	Cache *scache.Config
 	*datastore.Reference
-	L2            *datastore.Reference
-	Storable      string
-	Fields        []*Field
-	storableTypes []reflect.Type
+	L2       *datastore.Reference
+	Storable string
+	Fields   []*storable.Field
 }
 
-func (d *Datastore) StorableTypes() []reflect.Type {
-	return d.storableTypes
-}
-
+//Init initialises datastore
 func (d *Datastore) Init() {
-
+	if d.Reference == nil {
+		d.Reference = &datastore.Reference{}
+	}
+	d.Reference.Init()
 }
 
-func (d *Datastore) FieldsDescriptor(fields []*Field) error {
+//FieldsDescriptor sets field descriptors
+func (d *Datastore) FieldsDescriptor(fields []*storable.Field) error {
 	d.Fields = fields
-	d.storableTypes = make([]reflect.Type, 0)
 	for _, field := range d.Fields {
 		if err := field.Init(); err != nil {
 			return err
@@ -38,11 +36,12 @@ func (d *Datastore) FieldsDescriptor(fields []*Field) error {
 	return nil
 }
 
+//Validate checks if datastore settings are valid
 func (d *Datastore) Validate() error {
 	if d.ID == "" {
 		return fmt.Errorf("datastore ID was empty")
 	}
-	if d.Reference != nil {
+	if d.Reference.Connection != "" {
 		if d.Dataset == "" {
 			return fmt.Errorf("datastore Dataset was empty")
 		}
@@ -51,37 +50,10 @@ func (d *Datastore) Validate() error {
 		}
 	}
 	if d.Storable != "" {
-		if _, err := storable.Singleton().Lookup(d.Storable);err != nil {
+		if _, err := storable.Singleton().Lookup(d.Storable); err != nil {
 			return fmt.Errorf("unknown storable: %v, on datastore: %v", d.Storable, d.ID)
 		}
 		return fmt.Errorf("datastore ID was empty")
 	}
 	return nil
-}
-
-//Field represents a  default storable field descriptor
-type Field struct {
-	Name     string
-	DataType string
-	dataType reflect.Type
-}
-
-func (f *Field) Type() reflect.Type {
-	return f.dataType
-}
-
-func (f *Field) Init() (err error) {
-	if f.dataType != nil {
-		return nil
-	}
-	f.dataType, err = common.DataType(f.DataType)
-	return err
-}
-
-//NewFields create new fields
-func NewFields(name string, dataType string) []*Field {
-	field := &Field{Name: name, DataType: dataType}
-	return []*Field{
-		field,
-	}
 }

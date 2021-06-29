@@ -15,7 +15,7 @@ func (r *Registry) Register(key string, fn func() common.Storable) {
 
 func (r *Registry) Lookup(key string) (func() common.Storable, error) {
 	fn, ok := r.registry[key]
-	if ! ok {
+	if !ok {
 		return nil, fmt.Errorf("failed to lookup storable provider: %v", key)
 	}
 	return fn, nil

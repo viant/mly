@@ -20,10 +20,9 @@ func (l *ModelList) Validate() error {
 		return fmt.Errorf("models were empty")
 	}
 	for _, model := range l.Models {
-		if err := model.Validate();err != nil {
+		if err := model.Validate(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
-

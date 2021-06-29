@@ -11,4 +11,3 @@ type Input struct {
 	reflect.Type
 	Placeholder tf.Output
 }
-

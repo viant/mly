@@ -4,15 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/francoispqt/gojay"
-	"github.com/viant/mly/client/msgbuf"
 )
 
+//NewReader creates a new data reader
 func NewReader(data interface{}) ([]byte, error) {
 	if data == nil {
 		return nil, fmt.Errorf("data was nil")
 	}
 	switch val := data.(type) {
-	case *msgbuf.Message:
+	case *Message:
+		if !val.isValid() {
+			return nil, fmt.Errorf("invalid message: has been already sent before")
+		}
+		val.end()
 		return val.Bytes(), nil
 	case gojay.MarshalerJSONObject:
 		data, err := gojay.Marshal(val)

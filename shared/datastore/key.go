@@ -4,13 +4,11 @@ import (
 	"fmt"
 	aero "github.com/aerospike/aerospike-client-go"
 	"github.com/viant/mly/shared/config"
-	"github.com/viant/toolbox"
-	"github.vianttech.com/adelphic/mediator/filter/store/pool"
 	"strconv"
-	"strings"
 	"time"
 )
 
+//Key represents a datastore key
 type Key struct {
 	Namespace string
 	Set       string
@@ -38,7 +36,7 @@ func (k *Key) Key() (*aero.Key, error) {
 }
 
 func (k *Key) WritePolicy(generation uint32) *aero.WritePolicy {
-	policy := pool.Policy.Get().(*aero.WritePolicy)
+	policy := aero.NewWritePolicy(0, 0)
 	if k.TimeToLive == 0 {
 		k.TimeToLive = time.Hour
 	}
@@ -54,14 +52,14 @@ func NewKey(cfg *config.Datastore, key string) *Key {
 	storeKey := &Key{
 		Namespace:  cfg.Namespace,
 		Set:        cfg.Dataset,
-		Value:      strings.ToLower(toolbox.AsString(key)),
+		Value:      key,
 		TimeToLive: cfg.TimeToLive(),
 	}
 	if cfg.L2 != nil {
 		storeKey.L2 = &Key{
 			Namespace:  cfg.L2.Namespace,
 			Set:        cfg.L2.Dataset,
-			Value:      strings.ToLower(toolbox.AsString(key)),
+			Value:      key,
 			TimeToLive: cfg.L2.TimeToLive(),
 		}
 	}

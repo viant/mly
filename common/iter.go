@@ -5,7 +5,6 @@ type (
 	Pair     func(key string, value interface{}) error
 )
 
-
 func (r Iterator) ToMap() (map[string]interface{}, error) {
 	var result = make(map[string]interface{})
 	err := r(func(key string, value interface{}) error {

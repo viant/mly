@@ -1,8 +1,8 @@
 package stat
 
 import (
-	"github.com/viant/mly/shared/stat"
 	"github.com/viant/gmetric/counter"
+	"github.com/viant/mly/shared/stat"
 )
 
 const (

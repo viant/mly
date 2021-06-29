@@ -45,7 +45,7 @@ func (e *Evaluator) Close() error {
 	return e.session.Close()
 }
 
-func NewEvaluator(signature *domain.Signature,  session *tf.Session) *Evaluator {
+func NewEvaluator(signature *domain.Signature, session *tf.Session) *Evaluator {
 	return &Evaluator{
 		Signature: *signature,
 		session:   session,

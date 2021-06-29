@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/francoispqt/gojay"
 	"github.com/posener/h2conn"
+	"github.com/viant/mly/common"
 	"github.com/viant/mly/service/buffer"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ type handler struct {
 	pool        *buffer.Pool
 }
 
+//NewContext creates a new context
 func (h *handler) NewContext() (context.Context, context.CancelFunc) {
 	ctx := context.Background()
 	return context.WithTimeout(ctx, h.maxDuration)
@@ -34,7 +36,6 @@ func (h *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-
 func (h *handler) serveHTTP2(writer http.ResponseWriter, httpRequest *http.Request) error {
 	conn, err := h2conn.Accept(writer, httpRequest)
 	if err != nil {
@@ -43,7 +44,7 @@ func (h *handler) serveHTTP2(writer http.ResponseWriter, httpRequest *http.Reque
 	defer conn.Close()
 	data := h.pool.Get()
 	defer h.pool.Put(data)
-	for ; ; {
+	for {
 		if err = h.handleHTTP2(conn, data); err != nil {
 			break
 		}
@@ -52,13 +53,13 @@ func (h *handler) serveHTTP2(writer http.ResponseWriter, httpRequest *http.Reque
 }
 
 func (h *handler) handleHTTP2(conn io.ReadWriter, data []byte) error {
-	ctx, cancel := h.NewContext()
-	defer cancel()
-	response := &Response{Status: "ok", started: time.Now()}
+	response := &Response{Status: common.StatusOK, started: time.Now()} //this is bit
 	size, err := conn.Read(data)
 	if err != nil {
 		return err
 	}
+	ctx, cancel := h.NewContext()
+	defer cancel()
 	request := h.service.NewRequest()
 	if err = gojay.Unmarshal(data[:size], request); err != nil {
 		return err

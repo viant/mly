@@ -6,12 +6,13 @@ import (
 	"time"
 )
 
+//Response represents a response
 type Response struct {
-	Status      string
-	Error       string
-	ServiceTime time.Duration
-	ModelHash   int
-	Data        interface{}
+	Status      string        `json:"status"`
+	Error       string        `json:"error,omitempty"`
+	ServiceTime time.Duration `json:"serviceTime"`
+	DictHash    int           `json:"dictHash"`
+	Data        interface{}   `json:"data"`
 }
 
 func (r *Response) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
@@ -24,8 +25,8 @@ func (r *Response) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 		if err := dec.String(&r.Error); err != nil {
 			return err
 		}
-	case "modelHash":
-		if err := dec.Int(&r.ModelHash); err != nil {
+	case "dictHash":
+		if err := dec.Int(&r.DictHash); err != nil {
 			return err
 		}
 	case "serviceTimeMcs":
@@ -36,18 +37,16 @@ func (r *Response) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 		r.ServiceTime = time.Duration(serviceTime) * time.Microsecond
 	case "data":
 		isEmpty := r.Data == nil
-		var embedded = gojay.EmbeddedJSON{}
 
+		var embedded = gojay.EmbeddedJSON{}
 		if !isEmpty {
 			if unmarshaler, ok := r.Data.(gojay.UnmarshalerJSONObject); ok {
 				return dec.Object(unmarshaler)
 			}
 		}
-
 		if err := dec.EmbeddedJSON(&embedded); err != nil {
 			return err
 		}
-
 		if isEmpty {
 			var aMap = make(map[string]interface{})
 			if err := json.Unmarshal(embedded, &aMap); err != nil {

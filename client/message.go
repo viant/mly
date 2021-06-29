@@ -1,70 +1,43 @@
-package msgbuf
+package client
 
 import (
-	"io"
+	"github.com/viant/mly/common"
 	"strconv"
 	"sync"
 )
 
 //Message represents a message
 type Message struct {
-	buf   []byte
-	index int
-	mux   sync.Mutex
-	pool  *pool
+	buf        []byte
+	index      int
+	mux        sync.RWMutex
+	pool       *messages
+	keys       []string
+	key        string
+	rawKey     []byte
+	dictionary *dictionary
 }
 
 func (m *Message) Size() int {
 	return m.index
 }
 
-func (m *Message) StartObject(key string) {
-	m.nextItemIfNeeded()
-	m.appendByte('"')
-	m.appendString(key)
-	m.appendString(`":`)
+func (m *Message) start() {
 	m.appendByte('{')
 }
 
-func (m *Message) Start() {
-	m.nextItemIfNeeded()
-	m.appendByte('{')
-}
-
-func (m *Message) nextItemIfNeeded() {
-	if m.index == 0 {
-		return
+func (m *Message) end() {
+	if len(m.keys) > 0 {
+		m.addCacheKey()
 	}
-	switch m.buf[m.index-1] {
-	case ',', '{', '[':
-	default:
-		m.appendByte(',')
-	}
-}
-
-func (m *Message) End() {
 	m.trim(',')
-	m.appendString("}")
-}
-
-func (m *Message) EndObject() {
-	m.trim(',')
-	m.appendByte('}')
-}
-
-func (m *Message) StartArray(key string) {
-	m.nextItemIfNeeded()
-	m.appendByte('"')
-	m.appendString(key)
-	m.appendString(`":[`)
-}
-
-func (m *Message) EndArray() {
-	m.trim(',')
-	m.appendByte(']')
+	m.appendString("}\n")
 }
 
 func (m *Message) StringKey(key, value string) {
+	if key, index := m.dictionary.lookupString(key, value); index != unknownKeyField {
+		m.keys[index] = key
+	}
 	m.appendByte('"')
 	m.appendString(key)
 	m.appendString(`":"`)
@@ -101,6 +74,9 @@ func (m *Message) IntsKey(key string, values []int) {
 }
 
 func (m *Message) IntKey(key string, value int) {
+	if key, index := m.dictionary.lookupInt(key, value); index != unknownKeyField {
+		m.keys[index] = strconv.Itoa(key)
+	}
 	m.appendByte('"')
 	m.appendString(key)
 	m.appendString(`":`)
@@ -108,15 +84,18 @@ func (m *Message) IntKey(key string, value int) {
 	m.appendString(`,`)
 }
 
-func (m *Message) FloatKey(key string, value float64) {
+func (m *Message) FloatKey(key string, value float32) {
+	if key, index := m.dictionary.lookupFloat(key, value); index != unknownKeyField {
+		m.keys[index] = strconv.FormatFloat(float64(key), 'f', 10, 32)
+	}
 	m.appendByte('"')
 	m.appendString(key)
 	m.appendString(`":`)
-	m.appendFloat(value, 64)
+	m.appendFloat(value, 32)
 	m.appendString(`,`)
 }
 
-func (m *Message) FloatsKey(key string, values []float64) {
+func (m *Message) FloatsKey(key string, values []float32) {
 	m.appendByte('"')
 	m.appendString(key)
 	m.appendString(`":`)
@@ -124,7 +103,7 @@ func (m *Message) FloatsKey(key string, values []float64) {
 		if i > 0 {
 			m.appendByte(',')
 		}
-		m.appendFloat(item, 64)
+		m.appendFloat(item, 32)
 	}
 	m.appendString(`,`)
 }
@@ -140,20 +119,6 @@ func (m *Message) BoolKey(key string, value bool) {
 
 	}
 	m.appendString(`,`)
-}
-
-func (m *Message) WriteTo(w io.Writer) (int64, error) {
-	if m.index == 0 {
-		return 0, nil
-	}
-	offset := 0
-	for {
-		n, err := w.Write(m.buf[offset:m.index])
-		offset += n
-		if err != nil || offset >= m.index {
-			return int64(offset), err
-		}
-	}
 }
 
 func (m *Message) quotedString(s string) {
@@ -228,8 +193,8 @@ func (m *Message) appendBool(v bool) {
 }
 
 // AppendFloat appends a float to the underlying buffer.
-func (m *Message) appendFloat(f float64, bitSize int) {
-	s := strconv.FormatFloat(f, 'f', -1, bitSize)
+func (m *Message) appendFloat(f float32, bitSize int) {
+	s := strconv.FormatFloat(float64(f), 'f', -1, bitSize)
 	m.appendString(s)
 }
 
@@ -238,6 +203,13 @@ func (m *Message) trim(ch byte) {
 	if m.buf[m.index-1] == ch && m.index > 0 {
 		m.index--
 	}
+}
+
+func (m *Message) isValid() bool {
+	m.mux.RLock()
+	pool := m.pool
+	m.mux.RUnlock()
+	return pool != nil
 }
 
 func (m *Message) Release() {
@@ -249,4 +221,28 @@ func (m *Message) Release() {
 	pool := m.pool
 	m.pool = nil
 	pool.put(m)
+}
+
+func (m *Message) CacheKey() string {
+	if m.key != "" {
+		return m.key
+	}
+	offset := copy(m.rawKey, m.keys[0])
+	for i := 1; i < len(m.keys); i++ {
+		m.rawKey[offset] = common.KeyDelimiter
+		offset++
+		copied := copy(m.rawKey[offset:], m.keys[i])
+		offset += copied
+	}
+	rawKey := m.rawKey[:offset]
+	m.key = string(rawKey)
+	return m.key
+}
+
+func (m *Message) addCacheKey() {
+	aKey := m.CacheKey()
+	if aKey == "" {
+		return
+	}
+	m.StringKey("_key", aKey)
 }

@@ -10,16 +10,19 @@ import (
 	"time"
 )
 
+//NewStores creates new stores
 func NewStores(cfg *config.DatastoreList, gmetrics *gmetric.Service) (map[string]*Service, error) {
 	var result = make(map[string]*Service)
 	location := reflect.TypeOf(Service{}).PkgPath()
 	var connections = map[string]client.Service{}
-	for i, connection := range cfg.Connections {
-		aero, err := client.New(cfg.Connections[i])
-		if err != nil {
-			return nil, fmt.Errorf("failed to create client for %v, due to %w", connection.ID, err)
+	if len(cfg.Connections) > 0 {
+		for i, connection := range cfg.Connections {
+			aero, err := client.New(cfg.Connections[i])
+			if err != nil {
+				return nil, fmt.Errorf("failed to create client for %v, due to %w", connection.ID, err)
+			}
+			connections[connection.ID] = aero
 		}
-		connections[connection.ID] = aero
 	}
 	for i, db := range cfg.Datastores {
 		l1Client, l2Client, err := getClient(db, connections)
@@ -41,11 +44,10 @@ func NewStores(cfg *config.DatastoreList, gmetrics *gmetric.Service) (map[string
 	return result, nil
 }
 
-
 func getClient(db *config.Datastore, connections map[string]client.Service) (client.Service, client.Service, error) {
 	var l1Client, l2Client client.Service
 	var ok bool
-	if db.Reference != nil {
+	if db.Reference.Connection != "" {
 		if l1Client, ok = connections[db.Reference.Connection]; !ok {
 			return nil, nil, fmt.Errorf("faild to lookup datastore connection %v, for %v", db.Reference.Connection, db.ID)
 		}

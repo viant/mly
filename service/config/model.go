@@ -14,7 +14,6 @@ type Model struct {
 	Tags        []string
 	OutputType  string
 	UseDict     *bool
-	MaxWorkers  int
 	Transformer string
 	DataStore   string
 	KeyFields   []string
@@ -27,9 +26,6 @@ func (m Model) UseDictionary() bool {
 func (m *Model) Init() {
 	if len(m.Tags) == 0 {
 		m.Tags = []string{"serve"}
-	}
-	if m.MaxWorkers == 0 {
-		m.MaxWorkers = 20
 	}
 	if m.Location == "" {
 		m.Location = path.Join(os.TempDir(), m.ID)

@@ -9,7 +9,6 @@ import (
 //NodeDownError node down error
 var NodeDownError = errors.New("node is down")
 
-
 //IsKeyNotFound returns true if key not found error
 func IsKeyNotFound(err error) bool {
 	if err == nil {
@@ -69,5 +68,3 @@ func IsInvalidNode(err error) bool {
 	}
 	return aeroError.ResultCode() == types.INVALID_NODE_ERROR
 }
-
-

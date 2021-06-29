@@ -11,8 +11,7 @@ func getStorable(cfg *config.Datastore) func() common.Storable {
 	if err == nil && result != nil {
 		return result
 	} //otherwise return default storable
-	descriptorTypes := cfg.StorableTypes()
 	return func() common.Storable {
-		return storable.New(descriptorTypes)
+		return storable.New(cfg.Fields)
 	}
 }

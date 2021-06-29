@@ -29,7 +29,6 @@ func (p service) Map(value interface{}) int {
 	return -1
 }
 
-
 func NewService() counter.Provider {
 	return &service{}
 }

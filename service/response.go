@@ -1,7 +1,9 @@
 package service
 
 import (
+	"encoding/json"
 	"github.com/francoispqt/gojay"
+	"github.com/viant/mly/common"
 	"time"
 )
 
@@ -9,8 +11,8 @@ type Response struct {
 	started        time.Time
 	Status         string
 	Error          string
-	ModelHash      int
-	Data           gojay.MarshalerJSONObject
+	DictHash       int
+	Data           interface{}
 	ServiceTimeMcs int
 }
 
@@ -19,16 +21,23 @@ func (r *Response) SetError(err error) {
 		return
 	}
 	r.Error = err.Error()
-	r.Status = "error"
+	r.Status = common.StatusError
 }
 
 func (r *Response) MarshalJSONObject(enc *gojay.Encoder) {
 	enc.StringKeyOmitEmpty("status", r.Status)
 	enc.StringKeyOmitEmpty("error", r.Error)
-	enc.IntKeyOmitEmpty("modelHash", r.ModelHash)
+	enc.IntKeyOmitEmpty("dictHash", r.DictHash)
 	enc.IntKey("serviceTimeMcs", r.ServiceTimeMcs)
 	if r.Data != nil {
-		enc.ObjectKey("data", r.Data)
+		if marshaler, ok := r.Data.(gojay.MarshalerJSONObject); ok {
+			enc.ObjectKey("data", marshaler)
+		} else {
+			if data, err := json.Marshal(r.Data); err == nil {
+				embeded := gojay.EmbeddedJSON(data)
+				enc.EncodeEmbeddedJSON(&embeded)
+			}
+		}
 	}
 }
 

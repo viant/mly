@@ -20,11 +20,11 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 	for k, v := range signature.Outputs {
 		output.Name = k
 		operationName := v.Name
-		if index := strings.Index(operationName ,":");index !=-1 {
-			operationName= operationName[:index]
+		if index := strings.Index(operationName, ":"); index != -1 {
+			operationName = operationName[:index]
 		}
 		if output.Operation = model.Graph.Operation(operationName); output.Operation == nil {
-			return nil, fmt.Errorf("failed to lookup operation '%v' for output: %v",operationName, k)
+			return nil, fmt.Errorf("failed to lookup operation '%v' for output: %v", operationName, k)
 		}
 	}
 

@@ -38,4 +38,3 @@ func (e *Endpoint) Init() {
 		e.BufferSize = 1024
 	}
 }
-

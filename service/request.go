@@ -13,9 +13,16 @@ type Request struct {
 	Feeds    []interface{}
 	inputs   map[string]*domain.Input
 	supplied int
+	Pairs    []*Pairs
+}
+
+type Pairs struct {
+	Name  string
+	Value string
 }
 
 func (r *Request) Put(key string, value string) error {
+	//r.Pairs = append(r.Pairs, &Pairs{key , value})
 	if input, ok := r.inputs[key]; ok {
 		r.supplied++
 		switch input.Type.Kind() {
@@ -41,13 +48,13 @@ func (r *Request) Put(key string, value string) error {
 			}
 			r.Feeds[input.Index] = val
 		case reflect.Float64:
-			val, err := strconv.ParseFloat(value,  64)
+			val, err := strconv.ParseFloat(value, 64)
 			if err != nil {
 				return fmt.Errorf("failed to parse float64: '%v' for %v, %w", val, key, err)
 			}
 			r.Feeds[input.Index] = val
 		case reflect.Float32:
-			val, err := strconv.ParseFloat(value,  32)
+			val, err := strconv.ParseFloat(value, 32)
 			if err != nil {
 				return fmt.Errorf("failed to parse float32: '%v' for %v, %w", val, key, err)
 			}
@@ -114,7 +121,6 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	}
 	return nil
 }
-
 
 func (r *Request) Validate() error {
 	if len(r.inputs) != r.supplied {

@@ -12,24 +12,23 @@ import (
 	"unsafe"
 )
 
-func Dictionary(signature *domain.Signature, graph *tf.Graph) (*domain.Dictionary, error) {
-
+func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signature) (*domain.Dictionary, error) {
 	var layers []string
 	for _, input := range signature.Inputs {
 		layers = append(layers, input.Name)
 	}
-	dictionary, err := discoverDictionary(graph, layers)
+	dictionary, err := discoverDictionary(session, graph, layers)
 	if err != nil {
 		return dictionary, err
 	}
 	return dictionary, nil
 }
 
-func discoverDictionary(graph *tf.Graph, layers []string) (*domain.Dictionary, error) {
+func discoverDictionary(session *tf.Session, graph *tf.Graph, layers []string) (*domain.Dictionary, error) {
 	var result = &domain.Dictionary{}
 	for _, name := range layers {
 		aHash := fnv.New64()
-		exported, err := tfmodel.Export(graph, name)
+		exported, err := tfmodel.Export(session, graph, name)
 		if err != nil {
 			return nil, err
 		}

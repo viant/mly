@@ -16,6 +16,7 @@ type Breaker struct {
 	initialResetDuration time.Duration
 }
 
+//IsUp returns true if resource is up
 func (b *Breaker) IsUp() bool {
 	isUp := atomic.LoadInt32(&b.Down) == 0
 	if !isUp {
@@ -24,6 +25,7 @@ func (b *Breaker) IsUp() bool {
 	return isUp
 }
 
+//FlagUp flags resource down
 func (b *Breaker) FlagUp() {
 	b.mux.Lock()
 	b.Down = 0

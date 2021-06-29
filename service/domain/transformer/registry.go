@@ -15,7 +15,7 @@ func (r *Registry) Register(key string, transformer domain.Transformer) {
 
 func (r *Registry) Lookup(key string) (domain.Transformer, error) {
 	transformer, ok := r.registry[key]
-	if ! ok {
+	if !ok {
 		return nil, fmt.Errorf("failed to lookup transformer: %v", key)
 	}
 	return transformer, nil

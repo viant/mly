@@ -20,8 +20,6 @@ const (
 	configURI = "/v1/api/config/"
 )
 
-
-
 type Config struct {
 	config.ModelList
 	sconfig.DatastoreList
@@ -34,7 +32,6 @@ func (c *Config) Init() {
 	c.DatastoreList.Init()
 	c.Endpoint.Init()
 }
-
 
 func (c *Config) Validate() error {
 	if err := c.ModelList.Validate(); err != nil {
@@ -72,8 +69,6 @@ func NewConfigFromURL(ctx context.Context, URL string) (*Config, error) {
 	return cfg, cfg.Validate()
 }
 
-
-
 type configHandler struct {
 	*Config
 }
@@ -92,4 +87,3 @@ func (h *configHandler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 func NewConfigHandler(config *Config) http.Handler {
 	return &configHandler{Config: config}
 }
-

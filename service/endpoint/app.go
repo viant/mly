@@ -8,7 +8,6 @@ import (
 	"sync"
 )
 
-
 var Started sync.WaitGroup
 
 //RunApp run application
@@ -40,7 +39,6 @@ func RunApp(Version string, args []string) {
 	app.ListenAndServe()
 }
 
-
 func isHelpOption(args []string) bool {
 	for _, arg := range args {
 		if arg == "-h" {
@@ -49,4 +47,3 @@ func isHelpOption(args []string) bool {
 	}
 	return false
 }
-

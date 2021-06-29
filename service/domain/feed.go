@@ -1,9 +1,6 @@
 package domain
 
-
 type Feed struct {
-	Name string
+	Name  string
 	Value interface{}
 }
-
-

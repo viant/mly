@@ -2,6 +2,7 @@ package datastore
 
 import "fmt"
 
+//Connection represents a connection
 type Connection struct {
 	ID string
 	//Hosts coma separated list of hostnmae
@@ -10,6 +11,7 @@ type Connection struct {
 	Timeout   *Timeout
 }
 
+//Init initialises connection
 func (c *Connection) Init() {
 	if c.Port == 0 {
 		c.Port = 3000

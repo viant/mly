@@ -12,47 +12,62 @@ import (
 	"github.com/viant/mly/shared/datastore/client"
 	"github.com/viant/mly/shared/stat"
 	"github.com/viant/scache"
+	"github.com/viant/toolbox"
 	"time"
 )
 
 type CacheStatus int
 
 const (
+	//CacheStatusFoundNoSuchKey cacheable no such key status
 	CacheStatusFoundNoSuchKey = CacheStatus(iota)
+	//CacheStatusNotFound no such key status
 	CacheStatusNotFound
+	//CacheStatusFound entry found status
 	CacheStatusFound
 )
 
+//Service datastore service
 type Service struct {
-	counter  *gmetric.Operation
-	l1Client client.Service
-	l2Client client.Service
-	useCache bool
-	cache    *scache.Cache
-	Config   *config.Datastore
+	counter    *gmetric.Operation
+	l1Client   client.Service
+	l2Client   client.Service
+	useCache   bool
+	cache      *scache.Cache
+	Config     *config.Datastore
+	ClientMode bool
 }
 
-func (s *Service) Put(ctx context.Context, key *Key, storable common.Storable) error {
+//Put puts entry to the datastore
+func (s *Service) Put(ctx context.Context, key *Key, value Value) error {
 	//Add to local cache first
-	if err := s.updateCache(key, storable); err != nil {
+	if err := s.updateCache(key, value); err != nil {
 		return nil
 	}
-	value, err := storable.Iterator().ToMap()
+	if s.l1Client == nil || s.ClientMode {
+		return nil
+	}
+	storable := getStorable(value)
+	bins, err := storable.Iterator().ToMap()
 	if err != nil {
 		return err
+	}
+	if hash := common.Hash(value); hash != 0 {
+		bins[common.HashBin] = hash
 	}
 	writeKey, _ := key.Key()
 	wp := key.WritePolicy(0)
 	wp.SendKey = true
-	return s.l1Client.Put(ctx, wp, writeKey, value)
+	return s.l1Client.Put(ctx, wp, writeKey, bins)
 }
 
-func (s *Service) GetInto(ctx context.Context, key *Key, storable common.Storable) (err error) {
+//GetInto gets data into storable or error
+func (s *Service) GetInto(ctx context.Context, key *Key, storable Value) (err error) {
 	err = s.getInto(ctx, key, storable)
 	return err
 }
 
-func (s *Service) getInto(ctx context.Context, key *Key, storable common.Storable) error {
+func (s *Service) getInto(ctx context.Context, key *Key, storable Value) error {
 	onDone := s.counter.Begin(time.Now())
 	stats := stat.NewValues()
 	defer func() {
@@ -78,7 +93,8 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable common.Storabl
 	if common.IsInvalidNode(err) {
 		stats.Append(stat.Down)
 	}
-	if s.useCache {
+	if s.useCache && key != nil {
+
 		if err == nil {
 			err = s.updateCache(key, storable)
 		} else if common.IsKeyNotFound(err) {
@@ -109,6 +125,11 @@ func (s *Service) updateCache(key *Key, entryData EntryData) error {
 		Data:   entryData,
 		Expiry: time.Now().Add(s.Config.TimeToLive()),
 	}
+
+	if hash := common.Hash(entryData); hash != 0 {
+		entry.Hash = hash
+	}
+
 	data, err := bintly.Encode(entry)
 	if err != nil {
 		return fmt.Errorf("failed to marshal cache: %v, due to:%w ", key.AsString(), err)
@@ -120,13 +141,13 @@ func (s *Service) updateCache(key *Key, entryData EntryData) error {
 	return nil
 }
 
-func (s *Service) readFromCache(key *Key, storable common.Storable, stats *stat.Values) (CacheStatus, error) {
+func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (CacheStatus, error) {
 	data, _ := s.cache.Get(key.AsString())
 	if len(data) == 0 {
 		return CacheStatusNotFound, nil
 	}
 	entry := &Entry{
-		Data: storable.(EntryData),
+		Data: value.(EntryData),
 	}
 	err := bintly.Decode(data, entry)
 	if err != nil {
@@ -143,6 +164,8 @@ func (s *Service) readFromCache(key *Key, storable common.Storable, stats *stat.
 		return CacheStatusFoundNoSuchKey, nil
 	}
 
+	common.SetHash(entry.Data, entry.Hash)
+
 	if key.AsString() == entry.Key {
 		stats.Append(stat.CacheHit)
 		return CacheStatusFound, nil
@@ -151,7 +174,7 @@ func (s *Service) readFromCache(key *Key, storable common.Storable, stats *stat.
 	return CacheStatusNotFound, nil
 }
 
-func (s *Service) getFromClient(ctx context.Context, key *Key, storable common.Storable, stats *stat.Values) error {
+func (s *Service) getFromClient(ctx context.Context, key *Key, storable Value, stats *stat.Values) error {
 	err := s.fromL1Client(ctx, key, storable)
 	if common.IsKeyNotFound(err) {
 		stats.Append(stat.NoSuchKey)
@@ -170,8 +193,7 @@ func (s *Service) getFromClient(ctx context.Context, key *Key, storable common.S
 			}
 			return err
 		}
-
-		s.copyTOL1(ctx, storable, key, stats)
+		_ = s.copyTOL1(ctx, storable, key, stats)
 		stats.Append(stat.HasValue)
 		return nil
 	}
@@ -186,13 +208,14 @@ func (s *Service) getFromClient(ctx context.Context, key *Key, storable common.S
 	return nil
 }
 
-func (s *Service) copyTOL1(ctx context.Context, storable common.Storable, key *Key, stats *stat.Values) error {
-	value, err := storable.Iterator().ToMap()
+func (s *Service) copyTOL1(ctx context.Context, value Value, key *Key, stats *stat.Values) error {
+	storable := getStorable(value)
+	bins, err := storable.Iterator().ToMap()
 	if err != nil {
 		return err
 	}
 	writeKey, _ := key.Key()
-	err = s.l1Client.Put(ctx, key.WritePolicy(0), writeKey, aerospike.BinMap(value))
+	err = s.l1Client.Put(ctx, key.WritePolicy(0), writeKey, aerospike.BinMap(bins))
 	if err != nil {
 		stats.Append(err)
 		return err
@@ -201,18 +224,18 @@ func (s *Service) copyTOL1(ctx context.Context, storable common.Storable, key *K
 	return nil
 }
 
-func (s *Service) fromL2Client(ctx context.Context, key *Key, storable common.Storable) error {
+func (s *Service) fromL2Client(ctx context.Context, key *Key, storable Value) error {
 	return s.fromClient(ctx, s.l2Client, key, storable)
 }
 
-func (s *Service) fromL1Client(ctx context.Context, key *Key, storable common.Storable) error {
+func (s *Service) fromL1Client(ctx context.Context, key *Key, storable Value) error {
 	return s.fromClient(ctx, s.l1Client, key, storable)
 }
 
-func (s *Service) fromClient(ctx context.Context, client client.Service, key *Key, storable common.Storable) error {
+func (s *Service) fromClient(ctx context.Context, client client.Service, key *Key, value Value) error {
 	clientKey, err := key.Key()
 	if err != nil {
-		return fmt.Errorf( "failed to create key: %+v, due to %w", key, err)
+		return fmt.Errorf("failed to create key: %+v, due to %w", key, err)
 	}
 	record, err := client.Get(ctx, clientKey)
 	if err != nil {
@@ -221,9 +244,13 @@ func (s *Service) fromClient(ctx context.Context, client client.Service, key *Ke
 	if record == nil && len(record.Bins) == 0 {
 		return nil
 	}
+	storable := getStorable(value)
 	err = storable.Set(common.MapToIterator(record.Bins))
 	if err != nil {
-		return fmt.Errorf( "failed to map record: %+v, due to %w", key, err)
+		return fmt.Errorf("failed to map record: %+v, due to %w", key, err)
+	}
+	if dictHash, ok := record.Bins[common.HashBin]; ok {
+		common.SetHash(storable, toolbox.AsInt(dictHash))
 	}
 	return nil
 }

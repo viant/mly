@@ -2,7 +2,6 @@ package stat
 
 import "github.com/viant/gmetric/counter"
 
-
 type store struct{}
 
 func (p store) Keys() []string {
@@ -13,7 +12,6 @@ func (p store) Keys() []string {
 		Down,
 	}
 }
-
 
 func (p store) Map(value interface{}) int {
 	if value == nil {
@@ -34,7 +32,6 @@ func (p store) Map(value interface{}) int {
 	}
 	return -1
 }
-
 
 func NewStore() counter.Provider {
 	return &store{}
