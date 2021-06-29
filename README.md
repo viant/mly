@@ -70,10 +70,51 @@ local client cache, client send request to ml endpoint.
 When external cache is configure client first check external cache that is shared with web service, if data is found, 
 it's copied to local in memory cache. Memory cache uses [scache](https://github.com/viant/scache) most recently used implementation.
 
+Example of service with in memory cache
+```yaml
+Endpoint:
+  Port: 8086
+Models:
+  - ID: mlX
+    URL: s3://myBucket/myModelX
+    OutputType: float32
+    Datastore: mem
+
+Datastores:
+  - ID: mem
+    Cache:
+      SizeMB: 100
+```
+
+
 To deal with large key-spaces, external cache can be further configured as L1 and L2. 
 In this scenario L2 can be very large SSD backed aerospike instance and L1 could be small all 
 memory based instance. In this case data is first check in memory, followed by L1 and L2, and then respectively
 synchronized from L2 to L1 and L1 to local memory. 
+
+Example of service with both in memory and aerospike cache
+```yaml
+Endpoint:
+  Port: 8080
+Models:
+  - ID: mlv
+    URL: s3://myBucket/myModelX
+    OutputType: float32
+    Datastore: mlxCache
+
+Datastores:
+  - ID: mlxCache
+    Cache:
+      SizeMB: 1024
+    Connection: local
+    Namespace: udb
+    Dataset: mlvX
+
+Connections:
+  - ID: local
+    Hostnames: 127.0.0.1
+
+```
 
 #### Dictionary hash code.
 
