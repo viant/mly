@@ -237,7 +237,7 @@ func main() {
 #### Output Customization
 
 By default, model signature output name alongside with model prediction gets used to produce cachable output.
-This process can be customized to specific needs, 
+This process can be customized for specific needs.
 
 
 The custom transformer has to use the following function signature
