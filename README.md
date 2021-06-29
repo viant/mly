@@ -55,9 +55,11 @@ Models:
 
 #### Caching
 
-The main performance benefit comes from trading CPU with I/O, depending on keyspace the library support 3 level of caching.
-In order to use cache, a client has to generate the caching key. 
+The main performance benefit comes from trading CPU with I/O.
+In order to use cache, a client has to generate the caching key.
 Native mly client handles key generation and passing automatically.
+
+Depending on keyspace size the library supports 3 level of caching.
 
 - in process memory
 - external aerospike cache
