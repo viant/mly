@@ -1,1 +1,2 @@
--  Add input hooks
+- Add input hooks
+- Add some examples
