@@ -15,6 +15,7 @@ type Response struct {
 	Data        interface{}   `json:"data"`
 }
 
+//UnmarshalJSONObject unmsrhal JSON (gojay API)
 func (r *Response) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	switch key {
 	case "status":
@@ -68,6 +69,7 @@ func (r *Response) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	return nil
 }
 
+//NKeys returns object keys JSON (gojay API)
 func (r *Response) NKeys() int {
 	return 0
 }

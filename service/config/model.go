@@ -7,6 +7,7 @@ import (
 	"path"
 )
 
+//Model represents model config
 type Model struct {
 	ID          string
 	URL         string
@@ -19,10 +20,12 @@ type Model struct {
 	KeyFields   []string
 }
 
+//UseDictionary returns true if dictionary can be used
 func (m Model) UseDictionary() bool {
 	return m.UseDict == nil || *m.UseDict
 }
 
+//Init initialises model config
 func (m *Model) Init() {
 	if len(m.Tags) == 0 {
 		m.Tags = []string{"serve"}
@@ -34,6 +37,7 @@ func (m *Model) Init() {
 
 }
 
+//Validate validates model config
 func (m *Model) Validate() error {
 	if m.ID == "" {
 		return fmt.Errorf("model.ID was empty")

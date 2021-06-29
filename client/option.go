@@ -20,6 +20,7 @@ type cacheSizeOpt struct {
 	sizeMB int
 }
 
+//Apply applies settings
 func (o *cacheSizeOpt) Apply(c *Service) {
 	c.Config.CacheSizeMb = &o.sizeMB
 }
@@ -38,7 +39,7 @@ func (o *gmetricsOpt) Apply(c *Service) {
 	c.gmetrics = o.gmetrics
 }
 
-//NewCacheSize returns cache size MB
+//NewGmetric returns gmetric options
 func NewGmetric(gmetrics *gmetric.Service) Option {
 	return &gmetricsOpt{gmetrics: gmetrics}
 }

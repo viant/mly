@@ -23,6 +23,7 @@ import (
 	"time"
 )
 
+//Service represents ml service
 type Service struct {
 	mux             sync.RWMutex
 	fs              afs.Service
@@ -42,6 +43,7 @@ type Service struct {
 	inputProvider   *gtly.Provider
 }
 
+//Close closes service
 func (s *Service) Close() error {
 	if !atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
 		return fmt.Errorf("already closed")
@@ -52,14 +54,17 @@ func (s *Service) Close() error {
 	return s.evaluator.Close()
 }
 
+//Config returns service config
 func (s *Service) Config() *config.Model {
 	return s.config
 }
 
+//Dictionary returns servie dictionary
 func (s *Service) Dictionary() *domain.Dictionary {
 	return s.dictionary
 }
 
+//Do handles service request
 func (s *Service) Do(ctx context.Context, request *Request, response *Response) error {
 	err := s.do(ctx, request, response)
 	if err != nil {
@@ -85,7 +90,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 
 		err := s.datastore.GetInto(ctx, key, sink)
 		if err == nil {
-			hasher, isHasher := sink.(common.Hasher)
+			hasher, isHasher := sink.(common.Hashed)
 			if !isHasher {
 				response.Data = sink
 				return nil
@@ -108,7 +113,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	}
 	response.Data = transformed
 	if useDatastore {
-		if hasher, ok := transformed.(common.Hasher); ok {
+		if hasher, ok := transformed.(common.Hashed); ok {
 			hasher.SetHash(s.dictionary.Hash)
 		}
 		_ = s.datastore.Put(ctx, key, transformed)
@@ -213,6 +218,7 @@ func (s *Service) isModified(lastModified time.Time) bool {
 	return !modified.Equal(lastModified)
 }
 
+//NewRequest creates a new request
 func (s *Service) NewRequest() *Request {
 	return &Request{inputs: s.inputs, Feeds: make([]interface{}, len(s.inputs)), input: s.inputProvider.NewObject()}
 }
@@ -254,6 +260,7 @@ func (s *Service) scheduleModelReload() {
 	}
 }
 
+//New creates a service
 func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, datastores map[string]*datastore.Service) (*Service, error) {
 	location := reflect.TypeOf(&Service{}).PkgPath()
 	result := &Service{

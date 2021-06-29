@@ -20,6 +20,7 @@ type Reporter struct {
 	AvgCacheTimeMcs    int64
 }
 
+//NewReporter creates a reporter
 func NewReporter() processor.Reporter {
 	return &Reporter{
 		BaseReporter: processor.BaseReporter{

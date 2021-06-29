@@ -5,6 +5,7 @@ import (
 	"reflect"
 )
 
+//Input represents model input
 type Input struct {
 	Name  string
 	Index int

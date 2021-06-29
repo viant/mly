@@ -33,7 +33,7 @@ type service struct {
 //Get returns record for supplied key and optional bin names.
 func (s *service) Get(ctx context.Context, key *aero.Key, binNames ...string) (record *aero.Record, err error) {
 	if !s.IsUp() {
-		return nil, common.NodeDownError
+		return nil, common.ErrNodeDown
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -48,7 +48,7 @@ func (s *service) Get(ctx context.Context, key *aero.Key, binNames ...string) (r
 //Put put record to the store
 func (s *service) Put(ctx context.Context, writePolicy *aero.WritePolicy, key *aero.Key, value aero.BinMap) error {
 	if !s.IsUp() {
-		return common.NodeDownError
+		return common.ErrNodeDown
 	}
 	err := s.Client.Put(writePolicy, key, value)
 	s.checkConnectionError(err)

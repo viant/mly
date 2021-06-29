@@ -6,11 +6,13 @@ import (
 )
 
 const (
+	//EvalKey eval key
 	EvalKey = "eval"
 )
 
 type service struct{}
 
+//Keys returns metric keys
 func (p service) Keys() []string {
 	return []string{
 		stat.ErrorKey,
@@ -19,6 +21,7 @@ func (p service) Keys() []string {
 	}
 }
 
+//Map maps metric key into value index
 func (p service) Map(value interface{}) int {
 	if value == nil {
 		return -1
@@ -37,6 +40,7 @@ func (p service) Map(value interface{}) int {
 	return -1
 }
 
+//NewService creates service metrics
 func NewService() counter.Provider {
 	return &service{}
 }

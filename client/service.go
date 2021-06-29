@@ -263,6 +263,7 @@ func (s *Service) initDatastore() error {
 	return nil
 }
 
+//Close closes the service
 func (s *Service) Close() error {
 	conn, err := s.conn()
 	if err != nil {

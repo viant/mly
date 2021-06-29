@@ -28,6 +28,7 @@ type Config struct {
 	NewResponseData func() interface{}
 }
 
+//Init initialises config
 func (c *Config) Init(ctx context.Context, fs afs.Service) error {
 	c.Config.InitWithNoLimit()
 	if c.NewResponseData == nil {
@@ -38,6 +39,7 @@ func (c *Config) Init(ctx context.Context, fs afs.Service) error {
 	return c.Config.Init(ctx, fs)
 }
 
+//Validate validates config
 func (c *Config) Validate() error {
 	if len(c.Model) == 0 {
 		return fmt.Errorf("hostname was empty")

@@ -29,6 +29,7 @@ func (p *Processor) Pre(ctx context.Context, reporter processor.Reporter) (conte
 	return context.WithValue(ctx, keyValue, aClient), nil
 }
 
+//Process runs prediction
 func (p *Processor) Process(ctx context.Context, data []byte, reporter processor.Reporter) error {
 	aReporter := reporter.(*Reporter)
 	values := strings.Split(string(data), ",")
@@ -72,6 +73,7 @@ func (p *Processor) Process(ctx context.Context, data []byte, reporter processor
 	return err
 }
 
+//Post runs post processing logic
 func (p *Processor) Post(ctx context.Context, reporter processor.Reporter) error {
 	aReporter := reporter.(*Reporter)
 	aReporter.AvgResponseTimeMcs = int64(float32(aReporter.ResponseTimeMcs) / float32(aReporter.ResponseCount))

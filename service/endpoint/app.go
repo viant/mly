@@ -8,6 +8,7 @@ import (
 	"sync"
 )
 
+//Started started flag
 var Started sync.WaitGroup
 
 //RunApp run application

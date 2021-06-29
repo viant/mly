@@ -4,6 +4,7 @@ import (
 	"time"
 )
 
+//Endpoint represents an endpoint
 type Endpoint struct {
 	Port           int
 	ReadTimeoutMs  int

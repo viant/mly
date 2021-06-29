@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+//Response represents service response
 type Response struct {
 	started        time.Time
 	Status         string
@@ -16,7 +17,8 @@ type Response struct {
 	ServiceTimeMcs int
 }
 
-func (r *Response) SetError(err error) {
+//setError sets errors
+func (r *Response) setError(err error) {
 	if err == nil {
 		return
 	}
@@ -24,6 +26,7 @@ func (r *Response) SetError(err error) {
 	r.Status = common.StatusError
 }
 
+//MarshalJSONObject marshal response
 func (r *Response) MarshalJSONObject(enc *gojay.Encoder) {
 	enc.StringKeyOmitEmpty("status", r.Status)
 	enc.StringKeyOmitEmpty("error", r.Error)
@@ -41,6 +44,7 @@ func (r *Response) MarshalJSONObject(enc *gojay.Encoder) {
 	}
 }
 
+//IsNil returns true if nil (gojay json API)
 func (r *Response) IsNil() bool {
 	return false
 }

@@ -18,6 +18,7 @@ type Message struct {
 	dictionary *dictionary
 }
 
+//Size returns message size
 func (m *Message) Size() int {
 	return m.index
 }
@@ -34,6 +35,7 @@ func (m *Message) end() {
 	m.appendString("}\n")
 }
 
+//StringKey sets key/value pair
 func (m *Message) StringKey(key, value string) {
 	if key, index := m.dictionary.lookupString(key, value); index != unknownKeyField {
 		m.keys[index] = key
@@ -45,6 +47,7 @@ func (m *Message) StringKey(key, value string) {
 	m.appendString(`",`)
 }
 
+//StringsKey sets key/values pair
 func (m *Message) StringsKey(key string, values []string) {
 	m.appendByte('"')
 	m.appendString(key)
@@ -60,6 +63,7 @@ func (m *Message) StringsKey(key string, values []string) {
 	m.appendString(`],`)
 }
 
+//IntsKey sets key/values pair
 func (m *Message) IntsKey(key string, values []int) {
 	m.appendByte('"')
 	m.appendString(key)
@@ -73,6 +77,7 @@ func (m *Message) IntsKey(key string, values []int) {
 	m.appendString(`],`)
 }
 
+//IntKey sets key/value pair
 func (m *Message) IntKey(key string, value int) {
 	if key, index := m.dictionary.lookupInt(key, value); index != unknownKeyField {
 		m.keys[index] = strconv.Itoa(key)
@@ -84,6 +89,7 @@ func (m *Message) IntKey(key string, value int) {
 	m.appendString(`,`)
 }
 
+//FloatKey sets key/value pair
 func (m *Message) FloatKey(key string, value float32) {
 	if key, index := m.dictionary.lookupFloat(key, value); index != unknownKeyField {
 		m.keys[index] = strconv.FormatFloat(float64(key), 'f', 10, 32)
@@ -95,6 +101,7 @@ func (m *Message) FloatKey(key string, value float32) {
 	m.appendString(`,`)
 }
 
+//FloatsKey sets key/values pair
 func (m *Message) FloatsKey(key string, values []float32) {
 	m.appendByte('"')
 	m.appendString(key)
@@ -108,6 +115,7 @@ func (m *Message) FloatsKey(key string, values []float32) {
 	m.appendString(`,`)
 }
 
+//BoolKey sets key/value pair
 func (m *Message) BoolKey(key string, value bool) {
 	m.appendByte('"')
 	m.appendString(key)
@@ -169,6 +177,7 @@ func (m *Message) appendString(s string) {
 	m.index += sLen
 }
 
+//Bytes returns message bytes
 func (m *Message) Bytes() []byte {
 	return m.buf[:m.index]
 }
@@ -212,6 +221,7 @@ func (m *Message) isValid() bool {
 	return pool != nil
 }
 
+//Release releases message to the pool
 func (m *Message) Release() {
 	m.mux.Lock()
 	defer m.mux.Unlock()
@@ -223,6 +233,7 @@ func (m *Message) Release() {
 	pool.put(m)
 }
 
+//CacheKey returns cache key
 func (m *Message) CacheKey() string {
 	if m.key != "" {
 		return m.key

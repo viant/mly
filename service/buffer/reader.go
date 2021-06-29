@@ -34,11 +34,13 @@ func Read(pool httputil.BufferPool, reader io.Reader) ([]byte, int, error) {
 	return data, readTotal, nil
 }
 
+//Reader represents a reader
 type Reader struct {
 	Data []byte
 	io.Reader
 }
 
+//Close closes reader
 func (r *Reader) Close() error {
 	return nil
 }

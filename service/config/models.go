@@ -2,10 +2,12 @@ package config
 
 import "fmt"
 
+//ModelList represents model
 type ModelList struct {
 	Models []*Model
 }
 
+//Init initialises model list
 func (l *ModelList) Init() {
 	if len(l.Models) == 0 {
 		return
@@ -15,6 +17,7 @@ func (l *ModelList) Init() {
 	}
 }
 
+//Validate validates model list
 func (l *ModelList) Validate() error {
 	if len(l.Models) == 0 {
 		return fmt.Errorf("models were empty")

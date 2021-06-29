@@ -9,6 +9,7 @@ import (
 	"strconv"
 )
 
+//Request represent a request
 type Request struct {
 	Key       string
 	BatchSize int
@@ -18,13 +19,9 @@ type Request struct {
 	input     *gtly.Object
 }
 
-type Pairs struct {
-	Name  string
-	Value string
-}
 
+//Put puts data to request
 func (r *Request) Put(key string, value string) error {
-
 	//r.Pairs = append(r.Pairs, &Pairs{key , value})
 	if input, ok := r.inputs[key]; ok {
 		r.supplied++
@@ -70,6 +67,7 @@ func (r *Request) Put(key string, value string) error {
 	return nil
 }
 
+//UnmarshalJSONObject umarshal
 func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	switch key {
 	case "_batchSize":
@@ -155,6 +153,7 @@ func (r *Request) Validate() error {
 	return nil
 }
 
+//NKeys returns object keys
 func (r *Request) NKeys() int {
-	return 1 + len(r.inputs)
+	return 2 + len(r.inputs)
 }

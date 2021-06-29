@@ -196,12 +196,22 @@ By default, model signature output name alongside with model prediction gets use
 This process can be customized to specific needs, 
 
 
+The custom transformer has to use the following function signature
+```go
+type Transformer func(ctx context.Context, signature *Signature, input *gtly.Object, output interface{}) (common.Storable, error)
+```
+
+
+func init() {
+  transformer.Register("myTransformer", aTransformer)
+}
+
 
 #### Metrics
 
 The following URI expose webservice 
  -  /v1/api/metric/operations - all metrics register in the web service
--  /v1/api/metric/operation/$MetricID - individual metric
+ -  /v1/api/metric/operation/$MetricID - individual metric
 
 #### Deployment
 

@@ -10,7 +10,7 @@ const (
 	operationExportTemplate = "%s_lookup_index_table_lookup_table_export_values/LookupTableExportV2"
 )
 
-//Export RunExport model layer, or error
+//Export run model export, or error
 func Export(session *tf.Session, graph *tf.Graph, name string) (interface{}, error) {
 	operationName := name
 	if !strings.HasSuffix(name, "/LookupTableExportV2") {

@@ -28,42 +28,61 @@ type Service struct {
 	fs      afs.Service
 }
 
-//Operation returns perf
-func (r *Service) Metric() *gmetric.Service {
-	return r.metrics
+//Metric returns operation metrics
+func (s *Service) Metric() *gmetric.Service {
+	return s.metrics
 }
 
 //ListenAndServe start http endpoint
-func (r *Service) ListenAndServe() error {
-	fmt.Printf("starting mly service endpoint: %v\n", r.config.Endpoint.Port)
-	return r.server.ListenAndServe()
+func (s *Service) ListenAndServe() error {
+	fmt.Printf("starting mly service endpoint: %v\n", s.config.Endpoint.Port)
+	return s.server.ListenAndServe()
 }
 
-//ListenAndServe start http endpoint on secure port
-func (r *Service) ListenAndServeTLS(certFile, keyFile string) error {
-	fmt.Printf("starting mly service endpoint: %v\n", r.config.Endpoint.Port)
-	return r.server.ListenAndServeTLS(certFile, keyFile)
+//ListenAndServeTLS start https endpoint on secure port
+func (s *Service) ListenAndServeTLS(certFile, keyFile string) error {
+	fmt.Printf("starting mly service endpoint: %v\n", s.config.Endpoint.Port)
+	return s.server.ListenAndServeTLS(certFile, keyFile)
 }
 
-func (r *Service) Shutdown(ctx context.Context) error {
-	return r.server.Shutdown(ctx)
+//Shutdown stops server
+func (s *Service) Shutdown(ctx context.Context) error {
+	return s.server.Shutdown(ctx)
+}
+
+
+
+func (s *Service) initModelHandler(datastores map[string]*datastore.Service, pool *buffer.Pool, mux *http.ServeMux) error {
+	for i, model := range s.config.ModelList.Models {
+		srv, err := service.New(context.TODO(), s.fs, s.config.ModelList.Models[i], s.metrics, datastores)
+		if err != nil {
+			return fmt.Errorf("failed to create service for modelService: %v, due to %w", model.ID, err)
+		}
+		handler := service.NewHandler(srv, pool, s.config.Endpoint.WriteTimeout-time.Millisecond)
+		mux.Handle(fmt.Sprintf(common.ModelURI, model.ID), handler)
+		metaHandler := newMetaHandler(srv, &s.config.DatastoreList)
+		mux.Handle(fmt.Sprintf(common.MetaURI, model.ID), metaHandler)
+	}
+	return nil
 }
 
 //ShutdownOnInterrupt
-func (r *Service) shutdownOnInterrupt() {
+func (s *Service) shutdownOnInterrupt() {
 	closed := make(chan struct{})
 	go func() {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, os.Interrupt)
 		<-sigint
 		// We received an interrupt signal, shut down.
-		if err := r.Shutdown(context.Background()); err != nil {
+		if err := s.Shutdown(context.Background()); err != nil {
 			// Error from closing listeners, or context timeout:
 			log.Printf("HTTP Service Shutdown: %v", err)
 		}
 		close(closed)
 	}()
 }
+
+
 
 //New creates a bridge Service
 func New(config *Config) (*Service, error) {
@@ -95,18 +114,4 @@ func New(config *Config) (*Service, error) {
 	}
 	result.shutdownOnInterrupt()
 	return result, nil
-}
-
-func (s *Service) initModelHandler(datastores map[string]*datastore.Service, pool *buffer.Pool, mux *http.ServeMux) error {
-	for i, model := range s.config.ModelList.Models {
-		srv, err := service.New(context.TODO(), s.fs, s.config.ModelList.Models[i], s.metrics, datastores)
-		if err != nil {
-			return fmt.Errorf("failed to create service for modelService: %v, due to %w", model.ID, err)
-		}
-		handler := service.NewHandler(srv, pool, s.config.Endpoint.WriteTimeout-time.Millisecond)
-		mux.Handle(fmt.Sprintf(common.ModelURI, model.ID), handler)
-		metaHandler := newMetaHandler(srv, &s.config.DatastoreList)
-		mux.Handle(fmt.Sprintf(common.MetaURI, model.ID), metaHandler)
-	}
-	return nil
 }

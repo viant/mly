@@ -6,11 +6,13 @@ import (
 	"reflect"
 )
 
-type generic struct {
+//Generic represents generic storable
+type Generic struct {
 	Value interface{}
 }
 
-func (s generic) Iterator() common.Iterator {
+//Iterator returns iterator
+func (s Generic) Iterator() common.Iterator {
 	v := reflect.ValueOf(s.Value)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
@@ -50,7 +52,8 @@ func (s generic) Iterator() common.Iterator {
 	}
 }
 
-func (s *generic) Set(iter common.Iterator) error {
+//Set sets values
+func (s *Generic) Set(iter common.Iterator) error {
 	v := reflect.ValueOf(s.Value)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
@@ -91,6 +94,7 @@ func (s *generic) Set(iter common.Iterator) error {
 	})
 }
 
-func NewGeneric(value interface{}) *generic {
-	return &generic{Value: value}
+//NewGeneric creates a Generic storable (for struct/map)
+func NewGeneric(value interface{}) *Generic {
+	return &Generic{Value: value}
 }

@@ -10,20 +10,24 @@ import (
 	"strings"
 )
 
+//Slice represents slice registry
 type Slice struct {
 	hash   int
 	Values []interface{}
 	Fields []*Field
 }
 
+//SetHash sets hash
 func (s *Slice) SetHash(hash int) {
 	s.hash = hash
 }
 
+//Hash returns hash
 func (s *Slice) Hash() int {
 	return s.hash
 }
 
+//Set sets value
 func (s *Slice) Set(iter common.Iterator) error {
 	s.Values = make([]interface{}, len(s.Fields))
 	err := iter(func(key string, value interface{}) error {
@@ -43,6 +47,7 @@ func (s *Slice) Set(iter common.Iterator) error {
 	return err
 }
 
+//Iterator return storable iterator
 func (s *Slice) Iterator() common.Iterator {
 	return func(pair common.Pair) error {
 		for i, field := range s.Fields {
@@ -120,7 +125,7 @@ func (s *Slice) MarshalJSONObject(enc *gojay.Encoder) {
 func (s *Slice) IsNil() bool {
 	return s == nil
 }
-
+//UnmarshalJSONObject unmarshal json with gojay parser
 func (s *Slice) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	s.Values = make([]interface{}, len(s.Fields))
 	for i, field := range s.Fields {
@@ -165,10 +170,12 @@ func (s *Slice) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	return nil
 }
 
+//NKeys returns object key count
 func (s *Slice) NKeys() int {
 	return 0
 }
 
+//MarshalJSON default json marshaler
 func (s *Slice) MarshalJSON() ([]byte, error) {
 	builder := strings.Builder{}
 	builder.WriteByte('{')

@@ -12,6 +12,7 @@ import (
 	"unsafe"
 )
 
+//Dictionary returns dictionary
 func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signature) (*domain.Dictionary, error) {
 	var layers []string
 	for _, input := range signature.Inputs {

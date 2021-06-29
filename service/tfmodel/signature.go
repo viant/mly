@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+//Signature returns model signature or error
 func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 	signature, ok := model.Signatures[domain.DefaultSignatureKey]
 	if !ok {

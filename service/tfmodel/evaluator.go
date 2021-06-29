@@ -6,6 +6,7 @@ import (
 	"github.com/viant/mly/service/domain"
 )
 
+//Evaluator represents evaluator
 type Evaluator struct {
 	session *tf.Session
 	fetches []tf.Output
@@ -25,6 +26,7 @@ func (e *Evaluator) feeds(feeds []interface{}) (map[tf.Output]*tf.Tensor, error)
 	return result, nil
 }
 
+//Evaluate evaluates model
 func (e *Evaluator) Evaluate(params []interface{}) (interface{}, error) {
 	feeds, err := e.feeds(params)
 	if err != nil {
@@ -41,10 +43,12 @@ func (e *Evaluator) Evaluate(params []interface{}) (interface{}, error) {
 	return value, nil
 }
 
+//Close closes evaluator
 func (e *Evaluator) Close() error {
 	return e.session.Close()
 }
 
+//NewEvaluator creates new evaluator
 func NewEvaluator(signature *domain.Signature, session *tf.Session) *Evaluator {
 	return &Evaluator{
 		Signature: *signature,

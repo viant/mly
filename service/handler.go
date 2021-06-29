@@ -24,6 +24,7 @@ func (h *handler) NewContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, h.maxDuration)
 }
 
+//ServeHTTP serve HTTP
 func (h *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if request.Method == "PUT" {
 		if err := h.serveHTTP2(writer, request); err != nil {
@@ -82,7 +83,7 @@ func (h *handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		err = request.Validate()
 	}
 	if err != nil {
-		response.SetError(err)
+		response.setError(err)
 		return h.writeResponse(writer, response)
 	}
 	return h.handleAppRequest(ctx, writer, request, response)
@@ -114,14 +115,14 @@ func (h *handler) buildRequestFromBody(httpRequest *http.Request, request *Reque
 func (h *handler) handleAppRequest(ctx context.Context, writer io.Writer, request *Request, response *Response) error {
 	err := request.Validate()
 	if err != nil {
-		response.SetError(err)
+		response.setError(err)
 		if err = h.writeResponse(writer, response); err != nil {
 			return err
 		}
 		return nil
 	}
 	if err = h.service.Do(ctx, request, response); err != nil {
-		response.SetError(err)
+		response.setError(err)
 	}
 	if err = h.writeResponse(writer, response); err != nil {
 		return err
