@@ -31,7 +31,7 @@ This project provides library for both client and ML web service.
 Service support multiple tensorflow models integration on URI level, with GET/POST method support, 
 and PUT with HTTP 2.0 in full duplex mode. Service automatically detects and reloads any model changes.
 Technically any HTTP client can work with the service, but to get seamless caching benefit,
-it's recommended to use provide client.
+it's recommended to use provided client.
 
 
 To start HTTP service with 2 models, create service config.yaml file, so you can 
