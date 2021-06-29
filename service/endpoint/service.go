@@ -66,6 +66,7 @@ func (s *Service) initModelHandler(datastores map[string]*datastore.Service, poo
 	return nil
 }
 
+
 //ShutdownOnInterrupt
 func (s *Service) shutdownOnInterrupt() {
 	closed := make(chan struct{})
