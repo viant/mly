@@ -46,32 +46,33 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-//NewConfigFromURL creates a new config from URL
-func NewConfigFromURL(ctx context.Context, URL string) (*Config, error) {
+
+
+func (c *Config) LoadFromURL(ctx context.Context, URL string, target interface{}) error {
 	fs := afs.New()
 	reader, err := fs.OpenURL(ctx, URL)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get config: %v", URL)
+		return errors.Wrapf(err, "failed to get config: %v", URL)
 	}
 	defer reader.Close()
 	data, err := ioutil.ReadAll(reader)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to load config: %v", URL)
+		return errors.Wrapf(err, "failed to load config: %v", URL)
 	}
 	transient := map[string]interface{}{}
 	if err := yaml.Unmarshal(data, &transient); err != nil {
-		return nil, err
+		return err
 	}
 	aMap := map[string]interface{}{}
 	yaml.Unmarshal(data, &aMap)
-	cfg := &Config{}
-	err = toolbox.DefaultConverter.AssignConverted(cfg, aMap)
+	err = toolbox.DefaultConverter.AssignConverted(target, aMap)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to convert config: %v", URL)
+		return errors.Wrapf(err, "failed to convert config: %v", URL)
 	}
-	cfg.Init()
-	return cfg, cfg.Validate()
+	return nil
 }
+
+
 
 type configHandler struct {
 	*Config
@@ -91,3 +92,16 @@ func (h *configHandler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 func NewConfigHandler(config *Config) http.Handler {
 	return &configHandler{Config: config}
 }
+
+
+//NewConfigFromURL creates a new config from URL
+func NewConfigFromURL(ctx context.Context, URL string) (*Config, error) {
+	cfg := &Config{}
+	if err :=cfg.LoadFromURL(ctx, URL, cfg); err != nil {
+		return nil, err
+	}
+	cfg.Init()
+	return cfg, cfg.Validate()
+}
+
+

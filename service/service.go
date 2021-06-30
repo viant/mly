@@ -35,7 +35,7 @@ type Service struct {
 	datastore       *datastore.Service
 	transformer     domain.Transformer
 	newStorable     func() common.Storable
-	modified        time.Time
+	modified        *Modified
 	config          *config.Model
 	serviceMetric   *gmetric.Operation
 	evaluatorMetric *gmetric.Operation
@@ -139,11 +139,11 @@ func (s *Service) evaluate(ctx context.Context, params []interface{}) (interface
 }
 
 func (s *Service) reloadIfNeeded(ctx context.Context) error {
-	lastModified, err := s.lastModified(ctx, s.config.URL, s.modified)
+	modified, err := s.lastModified(ctx, s.config.URL, &Modified{})
 	if err != nil {
 		return err
 	}
-	if !s.isModified(lastModified) {
+	if !s.isModified(modified) {
 		return nil
 	}
 	model, err := s.loadModel(ctx, err)
@@ -172,32 +172,42 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	s.signature = signature
 	s.dictionary = dictionary
 	s.inputs = inputs
-	s.modified = lastModified
+	s.modified = modified
 	return nil
 }
 
 //lastModified return last modified time of object from the URL
-func (s *Service) lastModified(ctx context.Context, URL string, lastModified time.Time) (time.Time, error) {
+func (s *Service) lastModified(ctx context.Context, URL string, resource *Modified) (*Modified, error) {
 	objects, err := s.fs.List(ctx, URL)
 	if err != nil {
-		return lastModified, err
+		return resource, err
 	}
 	for i, item := range objects {
 		if item.IsDir() && i == 0 {
 			continue
 		}
 		if item.IsDir() {
-			lastModified, err = s.lastModified(ctx, item.URL(), lastModified)
+			resource, err = s.lastModified(ctx, item.URL(), resource)
 			if err != nil {
-				return lastModified, err
+				return resource, err
 			}
 		}
-		if item.ModTime().After(lastModified) {
-			lastModified = item.ModTime()
+
+		if resource.Max.IsZero() {
+			resource.Max = item.ModTime()
+		}
+		if resource.Min.IsZero() {
+			resource.Min = item.ModTime()
+		}
+
+		if item.ModTime().After(resource.Max) {
+			resource.Max = item.ModTime()
+		}
+		if item.ModTime().Before(resource.Min) {
+			resource.Min = item.ModTime()
 		}
 	}
-	return lastModified, nil
-
+	return resource, nil
 }
 
 func (s *Service) loadModel(ctx context.Context, err error) (*tf.SavedModel, error) {
@@ -211,11 +221,14 @@ func (s *Service) loadModel(ctx context.Context, err error) (*tf.SavedModel, err
 	return model, nil
 }
 
-func (s *Service) isModified(lastModified time.Time) bool {
+func (s *Service) isModified(snapshot *Modified) bool {
+	if snapshot.Span() > time.Hour {
+		return false
+	}
 	s.mux.RLock()
 	modified := s.modified
 	s.mux.RUnlock()
-	return !modified.Equal(lastModified)
+	return !(modified.Max.Equal(snapshot.Max) && modified.Min.Equal(snapshot.Min))
 }
 
 //NewRequest creates a new request
@@ -230,6 +243,10 @@ func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[st
 	}
 	s.transformer = getTransformer(cfg.Transformer, s.signature)
 	if s.useDatastore {
+		if s.signature == nil {
+			return fmt.Errorf("signature was emtpy")
+		}
+		fmt.Printf("SIGNATUER: %v\n", s.signature)
 		if len(cfg.KeyFields) == 0 {
 			for _, input := range s.signature.Inputs {
 				cfg.KeyFields = append(cfg.KeyFields, input.Name)
@@ -264,6 +281,7 @@ func (s *Service) scheduleModelReload() {
 func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, datastores map[string]*datastore.Service) (*Service, error) {
 	location := reflect.TypeOf(&Service{}).PkgPath()
 	result := &Service{
+		modified:        &Modified{},
 		fs:              fs,
 		config:          cfg,
 		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID, cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewService()),

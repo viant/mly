@@ -288,6 +288,7 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 	return aClient, aClient.init(options)
 }
 
+
 func discoverConfig(URL string) (*config.Datastore, error) {
 	response, err := http.DefaultClient.Get(URL)
 	if err != nil {

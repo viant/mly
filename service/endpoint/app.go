@@ -11,6 +11,28 @@ import (
 //Started started flag
 var Started sync.WaitGroup
 
+//RunAppWithConfig run application
+func RunAppWithConfig(Version string, args []string, configProvider func(options *Options) (*Config, error)) {
+	common.Version = Version
+	options := &Options{}
+	_, err := flags.ParseArgs(options, args)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if IsHelpOption(args) {
+		return
+	}
+	if options.Version {
+		log.Printf("Mly: Version: %v\n", Version)
+		return
+	}
+	config, err := configProvider(options)
+	if err != nil {
+		log.Fatal(err)
+	}
+	runApp(config)
+}
+
 //RunApp run application
 func RunApp(Version string, args []string) {
 	common.Version = Version
@@ -19,7 +41,7 @@ func RunApp(Version string, args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if isHelpOption(args) {
+	if IsHelpOption(args) {
 		return
 	}
 	if options.Version {
@@ -32,6 +54,14 @@ func RunApp(Version string, args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	config.Init()
+	runApp(config)
+}
+
+func runApp(config *Config) {
+	if err := config.Validate();err != nil {
+		log.Fatal(err)
+	}
 	app, err := New(config)
 	if err != nil {
 		log.Fatal(err)
@@ -40,7 +70,8 @@ func RunApp(Version string, args []string) {
 	app.ListenAndServe()
 }
 
-func isHelpOption(args []string) bool {
+//IsHelpOption returns true if helper
+func IsHelpOption(args []string) bool {
 	for _, arg := range args {
 		if arg == "-h" {
 			return true
