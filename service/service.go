@@ -139,11 +139,11 @@ func (s *Service) evaluate(ctx context.Context, params []interface{}) (interface
 }
 
 func (s *Service) reloadIfNeeded(ctx context.Context) error {
-	modified, err := s.lastModified(ctx, s.config.URL, &Modified{})
+	snapshot, err := s.modifiedSnapshot(ctx, s.config.URL, &Modified{})
 	if err != nil {
 		return err
 	}
-	if !s.isModified(modified) {
+	if !s.isModified(snapshot) {
 		return nil
 	}
 	model, err := s.loadModel(ctx, err)
@@ -172,12 +172,12 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	s.signature = signature
 	s.dictionary = dictionary
 	s.inputs = inputs
-	s.modified = modified
+	s.modified = snapshot
 	return nil
 }
 
-//lastModified return last modified time of object from the URL
-func (s *Service) lastModified(ctx context.Context, URL string, resource *Modified) (*Modified, error) {
+//modifiedSnapshot return last modified time of object from the URL
+func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *Modified) (*Modified, error) {
 	objects, err := s.fs.List(ctx, URL)
 	if err != nil {
 		return resource, err
@@ -187,7 +187,7 @@ func (s *Service) lastModified(ctx context.Context, URL string, resource *Modifi
 			continue
 		}
 		if item.IsDir() {
-			resource, err = s.lastModified(ctx, item.URL(), resource)
+			resource, err = s.modifiedSnapshot(ctx, item.URL(), resource)
 			if err != nil {
 				return resource, err
 			}
@@ -222,7 +222,7 @@ func (s *Service) loadModel(ctx context.Context, err error) (*tf.SavedModel, err
 }
 
 func (s *Service) isModified(snapshot *Modified) bool {
-	if snapshot.Span() > time.Hour {
+	if snapshot.Span() > time.Hour || snapshot.Max.IsZero() {
 		return false
 	}
 	s.mux.RLock()
