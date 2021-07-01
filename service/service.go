@@ -191,8 +191,8 @@ func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *Mo
 			if err != nil {
 				return resource, err
 			}
+			continue
 		}
-
 		if resource.Max.IsZero() {
 			resource.Max = item.ModTime()
 		}
