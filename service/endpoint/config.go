@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/pkg/errors"
 	"github.com/viant/afs"
+	"github.com/viant/mly/common"
 	"github.com/viant/mly/service/config"
 	econfig "github.com/viant/mly/service/endpoint/config"
 	sconfig "github.com/viant/mly/shared/config"
@@ -12,7 +13,6 @@ import (
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 
-	"github.vianttech.com/adelphic/mediator/common"
 	"net/http"
 )
 

@@ -3,7 +3,6 @@ package endpoint
 import (
 	"context"
 	"github.com/jessevdk/go-flags"
-	"github.vianttech.com/adelphic/mediator/common"
 	"log"
 	"sync"
 )
@@ -13,7 +12,6 @@ var Started sync.WaitGroup
 
 //RunAppWithConfig run application
 func RunAppWithConfig(Version string, args []string, configProvider func(options *Options) (*Config, error)) {
-	common.Version = Version
 	options := &Options{}
 	_, err := flags.ParseArgs(options, args)
 	if err != nil {
@@ -35,7 +33,6 @@ func RunAppWithConfig(Version string, args []string, configProvider func(options
 
 //RunApp run application
 func RunApp(Version string, args []string) {
-	common.Version = Version
 	options := &Options{}
 	_, err := flags.ParseArgs(options, args)
 	if err != nil {
