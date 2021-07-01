@@ -80,16 +80,16 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		return err
 	}
 	cachableKey, ok := input.(Cachable)
-	if response.Data == nil && s.newStorable != nil{
+	if response.Data == nil && s.newStorable != nil {
 		response.Data = s.newStorable()
 	}
 	var key *datastore.Key
-	if ok && s.datastore != nil && s.Config.CacheSize() > 0 {
+	if ok && s.datastore != nil {
 		key = datastore.NewKey(s.datastore.Config, cachableKey.CacheKey())
 		if err = s.datastore.GetInto(ctx, key, response.Data); err == nil {
 			response.Status = common.StatusCached
 			response.DictHash = common.Hash(response.Data)
-			if response.DictHash > 0 && response.DictHash == s.dictionary().hash {
+			if response.DictHash == 0 || response.DictHash == s.dictionary().hash {
 				return nil
 			}
 		}
@@ -287,7 +287,6 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 	}
 	return aClient, aClient.init(options)
 }
-
 
 func discoverConfig(URL string) (*config.Datastore, error) {
 	response, err := http.DefaultClient.Get(URL)

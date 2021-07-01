@@ -7,7 +7,6 @@ import (
 	"strconv"
 )
 
-
 //Config represents a client config
 type Config struct {
 	Hosts       []*Host
@@ -29,7 +28,7 @@ func (c *Config) CacheSize() int {
 func (c *Config) updateCache() {
 	if c.CacheSizeMb > 0 {
 		if c.Datastore != nil && c.Datastore.Cache != nil {
-			c.CacheSizeMb = c.Datastore.Cache.SizeMb
+			c.Datastore.Cache.SizeMb = c.CacheSizeMb
 		}
 	}
 
@@ -37,14 +36,14 @@ func (c *Config) updateCache() {
 	if scope == nil {
 		return
 	}
-	if ! scope.IsL2() &&  c.Datastore != nil {
-		 c.Datastore.Datastore.L2 = nil
+	if !scope.IsL2() && c.Datastore != nil {
+		c.Datastore.Datastore.L2 = nil
 	}
-	if ! scope.IsL1() &&  c.Datastore != nil {
+	if !scope.IsL1() && c.Datastore != nil {
 		c.Datastore.Datastore.Connection = ""
 		c.Datastore.Connections = nil
 	}
-	if ! scope.IsLocal() &&  c.Datastore != nil {
+	if !scope.IsLocal() && c.Datastore != nil {
 		c.Datastore = nil
 	}
 }

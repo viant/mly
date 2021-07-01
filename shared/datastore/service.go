@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/aerospike/aerospike-client-go"
 	"github.com/aerospike/aerospike-client-go/types"
@@ -42,7 +43,7 @@ type Service struct {
 func (s *Service) Put(ctx context.Context, key *Key, value Value) error {
 	//Add to local cache first
 	if err := s.updateCache(key, value); err != nil {
-		return nil
+		return err
 	}
 	if s.l1Client == nil || s.ClientMode {
 		return nil
@@ -120,6 +121,13 @@ func (s *Service) updateNotFound(key *Key) error {
 }
 
 func (s *Service) updateCache(key *Key, entryData EntryData) error {
+	entryData, ok := entryData.(map[string]interface{})
+	if ok {
+		if value, err := json.Marshal(entryData);err == nil  {
+			entryData = value
+		}
+	}
+
 	entry := &Entry{
 		Key:    key.AsString(),
 		Data:   entryData,
@@ -129,6 +137,7 @@ func (s *Service) updateCache(key *Key, entryData EntryData) error {
 	if hash := common.Hash(entryData); hash != 0 {
 		entry.Hash = hash
 	}
+
 
 	data, err := bintly.Encode(entry)
 	if err != nil {
@@ -146,6 +155,14 @@ func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (Cach
 	if len(data) == 0 {
 		return CacheStatusNotFound, nil
 	}
+
+
+	aMap, useMap := value.(map[string]interface{})
+	var rawData = []byte{}
+	if useMap {
+		value = &rawData
+	}
+
 	entry := &Entry{
 		Data: value.(EntryData),
 	}
@@ -153,6 +170,13 @@ func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (Cach
 	if err != nil {
 		return CacheStatusNotFound, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
 	}
+
+	if useMap {
+		if err = json.Unmarshal(rawData, &aMap);err != nil {
+			return CacheStatusNotFound, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
+		}
+	}
+
 	if entry.Expiry.Before(time.Now()) {
 		stats.Append(stat.CacheExpired)
 		s.cache.Delete(key.AsString())
