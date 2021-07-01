@@ -35,7 +35,6 @@ type Service struct {
 	datastore       *datastore.Service
 	transformer     domain.Transformer
 	newStorable     func() common.Storable
-	modified        *Modified
 	config          *config.Model
 	serviceMetric   *gmetric.Operation
 	evaluatorMetric *gmetric.Operation
@@ -139,7 +138,7 @@ func (s *Service) evaluate(ctx context.Context, params []interface{}) (interface
 }
 
 func (s *Service) reloadIfNeeded(ctx context.Context) error {
-	snapshot, err := s.modifiedSnapshot(ctx, s.config.URL, &Modified{})
+	snapshot, err := s.modifiedSnapshot(ctx, s.config.URL, &config.Modified{})
 	if err != nil {
 		return err
 	}
@@ -172,12 +171,12 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	s.signature = signature
 	s.dictionary = dictionary
 	s.inputs = inputs
-	s.modified = snapshot
+	s.config.Modified = snapshot
 	return nil
 }
 
 //modifiedSnapshot return last modified time of object from the URL
-func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *Modified) (*Modified, error) {
+func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *config.Modified) (*config.Modified, error) {
 	objects, err := s.fs.List(ctx, URL)
 	if err != nil {
 		return resource, err
@@ -221,12 +220,12 @@ func (s *Service) loadModel(ctx context.Context, err error) (*tf.SavedModel, err
 	return model, nil
 }
 
-func (s *Service) isModified(snapshot *Modified) bool {
+func (s *Service) isModified(snapshot *config.Modified) bool {
 	if snapshot.Span() > time.Hour || snapshot.Max.IsZero() {
 		return false
 	}
 	s.mux.RLock()
-	modified := s.modified
+	modified := s.config.Modified
 	s.mux.RUnlock()
 	return !(modified.Max.Equal(snapshot.Max) && modified.Min.Equal(snapshot.Min))
 }
@@ -279,8 +278,8 @@ func (s *Service) scheduleModelReload() {
 //New creates a service
 func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, datastores map[string]*datastore.Service) (*Service, error) {
 	location := reflect.TypeOf(&Service{}).PkgPath()
+
 	result := &Service{
-		modified:        &Modified{},
 		fs:              fs,
 		config:          cfg,
 		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID, cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewService()),

@@ -18,6 +18,7 @@ type Model struct {
 	Transformer string
 	DataStore   string
 	KeyFields   []string
+	Modified    *Modified
 }
 
 //UseDictionary returns true if dictionary can be used
@@ -34,7 +35,7 @@ func (m *Model) Init() {
 		m.Location = path.Join(os.TempDir(), m.ID)
 	}
 	_ = os.MkdirAll(m.Location, file.DefaultDirOsMode)
-
+	m.Modified = &Modified{}
 }
 
 //Validate validates model config
