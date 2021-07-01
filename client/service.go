@@ -86,6 +86,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	var key *datastore.Key
 	if ok && s.datastore != nil && s.Config.CacheSize() > 0 {
 		key = datastore.NewKey(s.datastore.Config, cachableKey.CacheKey())
+		fmt.Printf("key: %v\n", cachableKey.CacheKey())
 		if err = s.datastore.GetInto(ctx, key, response.Data); err == nil {
 			response.Status = common.StatusCached
 			response.DictHash = common.Hash(response.Data)

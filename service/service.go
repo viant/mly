@@ -228,6 +228,7 @@ func (s *Service) isModified(snapshot *Modified) bool {
 	s.mux.RLock()
 	modified := s.modified
 	s.mux.RUnlock()
+	fmt.Printf("snapshot: min: %v , max: %v loaded: min:%v, max:%v \n", snapshot.Min, snapshot.Max, modified.Min, modified.Max)
 	return !(modified.Max.Equal(snapshot.Max) && modified.Min.Equal(snapshot.Min))
 }
 
