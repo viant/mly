@@ -251,6 +251,21 @@ func init() {
 }
 ```
 
+Optionally you can implements storable provider.
+
+```go
+  func init() {
+    transformer.Register("myType", func() interface{} {
+      return &MyOutputType{}
+  })
+}
+```
+
+Where **MyOutputType** could implements the interface to avoid reflection:
+- [Storable](common/storable.go) (aerospike storage)
+- [Bintly](https://github.com/viant/bintly) (in memory serialization)
+- [Gojay JSON](https://github.com/francoispqt/gojay/) (HTTP response)
+
 
 #### Metrics
 
