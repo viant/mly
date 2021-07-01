@@ -7,8 +7,6 @@ import (
 	"sync"
 )
 
-//Started started flag
-var Started sync.WaitGroup
 
 //RunAppWithConfig run application
 func RunAppWithConfig(Version string, args []string, configProvider func(options *Options) (*Config, error)) {
@@ -28,11 +26,11 @@ func RunAppWithConfig(Version string, args []string, configProvider func(options
 	if err != nil {
 		log.Fatal(err)
 	}
-	runApp(config)
+	runApp(config, nil)
 }
 
 //RunApp run application
-func RunApp(Version string, args []string) {
+func RunApp(Version string, args []string, wg *sync.WaitGroup) {
 	options := &Options{}
 	_, err := flags.ParseArgs(options, args)
 	if err != nil {
@@ -52,10 +50,10 @@ func RunApp(Version string, args []string) {
 		log.Fatal(err)
 	}
 	config.Init()
-	runApp(config)
+	runApp(config, wg)
 }
 
-func runApp(config *Config) {
+func runApp(config *Config, wg *sync.WaitGroup) {
 	if err := config.Validate();err != nil {
 		log.Fatal(err)
 	}
@@ -63,7 +61,9 @@ func runApp(config *Config) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	Started.Done()
+	if wg != nil {
+		wg.Done()
+	}
 	app.ListenAndServe()
 }
 

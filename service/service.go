@@ -246,7 +246,6 @@ func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[st
 		if s.signature == nil {
 			return fmt.Errorf("signature was emtpy")
 		}
-		fmt.Printf("SIGNATUER: %v\n", s.signature)
 		if len(cfg.KeyFields) == 0 {
 			for _, input := range s.signature.Inputs {
 				cfg.KeyFields = append(cfg.KeyFields, input.Name)
