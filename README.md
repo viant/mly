@@ -167,10 +167,7 @@ mly := client.New("$modelID", []*client.Host{client.NewHost("mlServiceHost", mlS
 ```
 where optional options can be one of the following:
   * NewCacheSize(sizeOption)
-    - where sizeOption:
-        * -1 - disables local and mly server cache for this client calls
-        * 0 - disables local cache only
-        * positive number local cache size in MB
+  * NewCacheScope(CacheScopeLocal|CacheScopeL1)
   * NewGmetric() - custom instance of gemetric service
 
 
