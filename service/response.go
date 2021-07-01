@@ -33,9 +33,11 @@ func (r *Response) MarshalJSONObject(enc *gojay.Encoder) {
 	enc.IntKeyOmitEmpty("dictHash", r.DictHash)
 	enc.IntKey("serviceTimeMcs", r.ServiceTimeMcs)
 	if r.Data != nil {
+
 		if marshaler, ok := r.Data.(gojay.MarshalerJSONObject); ok {
 			enc.ObjectKey("data", marshaler)
 		} else {
+
 			if data, err := json.Marshal(r.Data); err == nil {
 				embeded := gojay.EmbeddedJSON(data)
 				enc.EncodeEmbeddedJSON(&embeded)

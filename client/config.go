@@ -7,38 +7,45 @@ import (
 	"strconv"
 )
 
+
 //Config represents a client config
 type Config struct {
 	Hosts       []*Host
 	Model       string
-	CacheSizeMb *int
+	CacheSizeMb int
+	CacheScope  *CacheScope
 	Datastore   *config.Datastore
 	MaxRetry    int
 }
 
 //CacheSize returns cache size
 func (c *Config) CacheSize() int {
-	if c.CacheSizeMb == nil {
+	if c.CacheSizeMb == 0 {
 		return 0
 	}
-	return 1024 * 1024 * (*c.CacheSizeMb)
+	return 1024 * 1024 * (c.CacheSizeMb)
 }
 
 func (c *Config) updateCache() {
-	if c.CacheSizeMb == nil {
+	if c.CacheSizeMb > 0 {
 		if c.Datastore != nil && c.Datastore.Cache != nil {
-			c.CacheSizeMb = &c.Datastore.Cache.SizeMb
+			c.CacheSizeMb = c.Datastore.Cache.SizeMb
 		}
+	}
+
+	scope := c.CacheScope
+	if scope == nil {
 		return
 	}
-	if *c.CacheSizeMb == NoCache {
+	if ! scope.IsL2() &&  c.Datastore != nil {
+		 c.Datastore.Datastore.L2 = nil
+	}
+	if ! scope.IsL1() &&  c.Datastore != nil {
+		c.Datastore.Datastore.Connection = ""
+		c.Datastore.Connections = nil
+	}
+	if ! scope.IsLocal() &&  c.Datastore != nil {
 		c.Datastore = nil
-		return
-	}
-	if c.Datastore != nil {
-		if cache := c.Datastore.Cache; cache != nil {
-			cache.SizeMb = *c.CacheSizeMb
-		}
 	}
 }
 

@@ -45,6 +45,7 @@ func (r *Response) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 				return dec.Object(unmarshaler)
 			}
 		}
+
 		if err := dec.EmbeddedJSON(&embedded); err != nil {
 			return err
 		}

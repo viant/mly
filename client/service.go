@@ -80,7 +80,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		return err
 	}
 	cachableKey, ok := input.(Cachable)
-	if response.Data == nil {
+	if response.Data == nil && s.newStorable != nil{
 		response.Data = s.newStorable()
 	}
 	var key *datastore.Key

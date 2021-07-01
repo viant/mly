@@ -53,7 +53,6 @@ func (d *Datastore) Validate() error {
 		if _, err := storable.Singleton().Lookup(d.Storable); err != nil {
 			return fmt.Errorf("unknown storable: %v, on datastore: %v", d.Storable, d.ID)
 		}
-		return fmt.Errorf("datastore ID was empty")
 	}
 	return nil
 }

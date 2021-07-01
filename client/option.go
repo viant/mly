@@ -4,12 +4,6 @@ import (
 	"github.com/viant/gmetric"
 )
 
-const (
-	//NoCache no cache option
-	NoCache = -1 //clients does not read/write to local and remote cache
-	//NoLocalCache no local cache
-	NoLocalCache = 0 //client does not read/write to local, but it passes key so server may still use hash
-)
 
 //Option client option
 type Option interface {
@@ -22,12 +16,26 @@ type cacheSizeOpt struct {
 
 //Apply applies settings
 func (o *cacheSizeOpt) Apply(c *Service) {
-	c.Config.CacheSizeMb = &o.sizeMB
+	c.Config.CacheSizeMb = o.sizeMB
 }
 
 //NewCacheSize returns cache size MB
 func NewCacheSize(sizeMB int) Option {
 	return &cacheSizeOpt{sizeMB: sizeMB}
+}
+
+type cacheScopeOpt struct {
+	scope CacheScope
+}
+
+//Apply applies settings
+func (o *cacheScopeOpt) Apply(c *Service) {
+	c.Config.CacheScope = &o.scope
+}
+
+//NewCacheScope returns cache scope
+func NewCacheScope(scope CacheScope) Option {
+	return &cacheScopeOpt{scope: scope}
 }
 
 type gmetricsOpt struct {
