@@ -9,6 +9,7 @@ import (
 	"github.com/viant/gtly"
 	"github.com/viant/mly/common"
 	"github.com/viant/mly/common/storable"
+	"github.com/viant/mly/log"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/layers"
@@ -16,7 +17,6 @@ import (
 	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/shared/datastore"
 	sstat "github.com/viant/mly/shared/stat"
-	"log"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -90,6 +90,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 		key = datastore.NewKey(s.datastore.Config, request.Key)
 		sink := s.newStorable()
 		entryDictHash, err := s.datastore.GetInto(ctx, key, sink)
+		log.Debug("fetching: (%v:%v) %+v %v", entryDictHash, dictHash, sink, err)
 		if err == nil {
 			isConsistent := entryDictHash == 0 || entryDictHash == dictHash
 			if isConsistent {
@@ -275,7 +276,7 @@ func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[st
 func (s *Service) scheduleModelReload() {
 	for range time.Tick(time.Minute) {
 		if err := s.reloadIfNeeded(context.Background()); err != nil {
-			log.Printf("failed to reload model: %v, due to %v", s.config.ID, err)
+			fmt.Printf("failed to reload model: %v, due to %v", s.config.ID, err)
 		}
 		if atomic.LoadInt32(&s.closed) != 0 {
 			return
