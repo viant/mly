@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	//EvalKey eval key
-	EvalKey = "eval"
+	//Evaluate eval key
+	Evaluate = "eval"
+	Pending  = "pending"
 )
 
 type service struct{}
@@ -16,7 +17,8 @@ type service struct{}
 func (p service) Keys() []string {
 	return []string{
 		stat.ErrorKey,
-		EvalKey,
+		Evaluate,
+		Pending,
 		stat.Timeout,
 	}
 }
@@ -31,10 +33,12 @@ func (p service) Map(value interface{}) int {
 		return 0
 	case string:
 		switch val {
-		case EvalKey:
+		case Evaluate:
 			return 1
-		case stat.Timeout:
+		case Pending:
 			return 2
+		case stat.Timeout:
+			return 3
 		}
 	}
 	return -1

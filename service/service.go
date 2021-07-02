@@ -74,12 +74,14 @@ func (s *Service) Do(ctx context.Context, request *Request, response *Response) 
 }
 
 func (s *Service) do(ctx context.Context, request *Request, response *Response) error {
-	onDone := s.serviceMetric.Begin(time.Now())
+	startTime := time.Now()
+	onDone := s.serviceMetric.Begin(startTime)
 	stats := sstat.NewValues()
+	onDoneDecrement := s.incrementPending(startTime)
 	defer func() {
 		onDone(time.Now(), stats.Values()...)
+		onDoneDecrement()
 	}()
-
 	useDatastore := s.useDatastore && request.Key != ""
 	var key *datastore.Key
 	if useDatastore {
@@ -97,7 +99,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 		}
 	}
 
-	stats.Append(stat.EvalKey)
+	stats.Append(stat.Evaluate)
 	output, err := s.evaluate(ctx, request.Feeds)
 	if err != nil {
 		return err
@@ -112,6 +114,18 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 		_ = s.datastore.Put(ctx, key, transformed, dictHash)
 	}
 	return nil
+}
+
+func (s *Service) incrementPending(startTime time.Time) func() {
+	s.serviceMetric.IncrementValue(stat.Pending)
+	recentCounter := s.serviceMetric.Recent[s.serviceMetric.Index(startTime)]
+	recentCounter.IncrementValue(stat.Pending)
+
+	return func() {
+		s.serviceMetric.DecrementValue(stat.Pending)
+		recentCounter := s.serviceMetric.Recent[s.serviceMetric.Index(startTime)]
+		recentCounter.DecrementValue(stat.Pending)
+	}
 }
 
 func (s *Service) evaluate(ctx context.Context, params []interface{}) (interface{}, error) {
@@ -276,7 +290,7 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 	result := &Service{
 		fs:              fs,
 		config:          cfg,
-		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID, cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewService()),
+		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewService()),
 		evaluatorMetric: metrics.MultiOperationCounter(location, cfg.ID+"Eval", cfg.ID+" evaluator performance", time.Microsecond, time.Minute, 2, sstat.NewService()),
 		useDatastore:    cfg.UseDictionary() && cfg.DataStore != "",
 		inputs:          make(map[string]*domain.Input),
