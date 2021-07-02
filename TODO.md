@@ -1,2 +1,3 @@
 - Add input hooks
+- Add prediction batching  
 - Add some examples

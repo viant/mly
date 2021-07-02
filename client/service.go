@@ -86,9 +86,9 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	var key *datastore.Key
 	if ok && s.datastore != nil {
 		key = datastore.NewKey(s.datastore.Config, cachableKey.CacheKey())
-		if err = s.datastore.GetInto(ctx, key, response.Data); err == nil {
+		if dictHash, err := s.datastore.GetInto(ctx, key, response.Data); err == nil {
 			response.Status = common.StatusCached
-			response.DictHash = common.Hash(response.Data)
+			response.DictHash = dictHash
 			if response.DictHash == 0 || response.DictHash == s.dictionary().hash {
 				return nil
 			}
@@ -103,7 +103,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		return fmt.Errorf("failed to unmarshal: '%s'; due to %w", body, err)
 	}
 	if key != nil && response.Status == common.StatusOK {
-		s.datastore.Put(ctx, key, response.Data)
+		s.datastore.Put(ctx, key, response.Data, s.dict.hash)
 	}
 	s.assertDictHash(response)
 	return nil

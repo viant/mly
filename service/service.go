@@ -83,24 +83,20 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	useDatastore := s.useDatastore && request.Key != ""
 	var key *datastore.Key
 	if useDatastore {
-		response.DictHash = s.dictionary.Hash
+		dictHash := s.Dictionary().Hash
+		response.DictHash = dictHash
 		key = datastore.NewKey(s.datastore.Config, request.Key)
 		sink := s.newStorable()
-
-		err := s.datastore.GetInto(ctx, key, sink)
+		entryDictHash, err := s.datastore.GetInto(ctx, key, sink)
 		if err == nil {
-			hasher, isHasher := sink.(common.Hashed)
-			if !isHasher {
-				response.Data = sink
-				return nil
-			}
-			sinkHash := hasher.Hash()
-			if hasHashMatch := sinkHash == s.dictionary.Hash; hasHashMatch || sinkHash == 0 {
+			isConsistent := entryDictHash == 0 || entryDictHash == dictHash
+			if isConsistent {
 				response.Data = sink
 				return nil
 			}
 		}
 	}
+
 	stats.Append(stat.EvalKey)
 	output, err := s.evaluate(ctx, request.Feeds)
 	if err != nil {
@@ -112,10 +108,8 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	}
 	response.Data = transformed
 	if useDatastore {
-		if hasher, ok := transformed.(common.Hashed); ok {
-			hasher.SetHash(s.dictionary.Hash)
-		}
-		_ = s.datastore.Put(ctx, key, transformed)
+		dictHash := s.Dictionary().Hash
+		_ = s.datastore.Put(ctx, key, transformed, dictHash)
 	}
 	return nil
 }
