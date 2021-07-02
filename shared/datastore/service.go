@@ -54,15 +54,20 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 	if err != nil {
 		return err
 	}
-	if hash := common.Hash(value); hash != 0 {
-		bins[common.HashBin] = hash
+	if dictHash > 0 {
+		bins[common.HashBin] = dictHash
 	}
 	writeKey, _ := key.Key()
 	wp := key.WritePolicy(0)
 	wp.SendKey = true
 	log.Debug("put %v -> %v\n", key.AsString(), bins)
-	return s.l1Client.Put(ctx, wp, writeKey, bins)
+	if err = s.l1Client.Put(ctx, wp, writeKey, bins); err == nil && s.l2Client != nil {
+		k2Key, _ := key.L2.Key()
+		err = s.l2Client.Put(ctx, wp, k2Key, bins)
+	}
+	return err
 }
+
 
 //GetInto gets data into storable or error
 func (s *Service) GetInto(ctx context.Context, key *Key, storable Value) (dictHash int, err error) {
@@ -96,7 +101,6 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 		stats.Append(stat.Down)
 	}
 
-
 	if s.useCache && key != nil {
 		if err == nil {
 			err = s.updateCache(key, storable, dictHash)
@@ -123,13 +127,13 @@ func (s *Service) updateNotFound(key *Key) error {
 }
 
 func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error {
-	if aMap, ok := entryData.(map[string]interface{});ok {
+	if aMap, ok := entryData.(map[string]interface{}); ok {
 		if data, err := json.Marshal(aMap); err == nil {
 			entryData = data
 		}
 	}
 	entry := &Entry{
-		Hash: dictHash,
+		Hash:   dictHash,
 		Key:    key.AsString(),
 		Data:   entryData,
 		Expiry: time.Now().Add(s.Config.TimeToLive()),
@@ -233,7 +237,7 @@ func (s *Service) copyTOL1(ctx context.Context, value Value, key *Key, dictHash 
 		return err
 	}
 	writeKey, _ := key.Key()
-	if dictHash != 0  && len(bins) > 0 {
+	if dictHash != 0 && len(bins) > 0 {
 		bins[common.HashBin] = dictHash
 	}
 	err = s.l1Client.Put(ctx, key.WritePolicy(0), writeKey, aerospike.BinMap(bins))
