@@ -258,7 +258,7 @@ Optionally you can implements storable provider.
 }
 ```
 
-Where **MyOutputType** could implements the interface to avoid reflection:
+Where **MyOutputType** could implements the following interfaces to avoid reflection:
 - [Storable](common/storable.go) (aerospike storage)
 - [Bintly](https://github.com/viant/bintly) (in memory serialization)
 - [Gojay JSON](https://github.com/francoispqt/gojay/) (HTTP response)
