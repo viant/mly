@@ -9,6 +9,7 @@ import (
 	"github.com/viant/bintly"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/common"
+	"github.com/viant/mly/log"
 	"github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore/client"
 	"github.com/viant/mly/shared/stat"
@@ -59,6 +60,7 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 	writeKey, _ := key.Key()
 	wp := key.WritePolicy(0)
 	wp.SendKey = true
+	log.Debug("put %v -> %v\n", key.AsString(), bins)
 	return s.l1Client.Put(ctx, wp, writeKey, bins)
 }
 
@@ -93,6 +95,8 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 	if common.IsInvalidNode(err) {
 		stats.Append(stat.Down)
 	}
+
+
 	if s.useCache && key != nil {
 		if err == nil {
 			err = s.updateCache(key, storable, dictHash)
@@ -158,10 +162,12 @@ func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (Cach
 	entry := &Entry{
 		Data: value.(EntryData),
 	}
+
 	err := bintly.Decode(data, entry)
 	if err != nil {
 		return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
 	}
+
 
 	if useMap {
 		if err = json.Unmarshal(rawData, &aMap); err != nil {
@@ -263,7 +269,9 @@ func (s *Service) fromClient(ctx context.Context, client client.Service, key *Ke
 	if record == nil && len(record.Bins) == 0 {
 		return 0, nil
 	}
+
 	storable := getStorable(value)
+	log.Debug("fetched %v -> %v\n", key.AsString(), record.Bins)
 	err = storable.Set(common.MapToIterator(record.Bins))
 	if err != nil {
 		return 0, fmt.Errorf("failed to map record: %+v, due to %w", key, err)

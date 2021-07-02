@@ -103,6 +103,10 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		return fmt.Errorf("failed to unmarshal: '%s'; due to %w", body, err)
 	}
 	if key != nil && response.Status == common.StatusOK {
+
+		fmt.Printf("!!! storable: %s %+v\n", body, response)
+
+
 		s.datastore.Put(ctx, key, response.Data, s.dict.hash)
 	}
 	s.assertDictHash(response)
