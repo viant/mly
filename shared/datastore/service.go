@@ -259,6 +259,7 @@ func (s *Service) fromClient(ctx context.Context, client client.Service, key *Ke
 		return 0, fmt.Errorf("failed to create key: %+v, due to %w", key, err)
 	}
 	record, err := client.Get(ctx, clientKey)
+	log.Debug("fetching %v -> %v, %v\n", clientKey.String(), record, err)
 	if err != nil {
 		return 0, err
 	}
