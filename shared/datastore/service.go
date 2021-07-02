@@ -164,7 +164,7 @@ func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (Cach
 	if err != nil {
 		return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
 	}
-	log.Debug("found in local cache: %v %T(%+v), len: %v\n", key, value, value, len(data))
+	log.Debug("found in local cache: %v %T(%+v)\n", key.AsString(), value, value)
 	if useMap {
 		if err = json.Unmarshal(rawData, &aMap); err != nil {
 			return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
