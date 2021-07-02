@@ -144,31 +144,29 @@ func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error
 	if err != nil {
 		return fmt.Errorf("failed to set cache " + err.Error())
 	}
+	log.Debug("updated local cache: %v %T(%+v), len: %v\n", key, entry.Data, entry.Data, len(data))
+
 	return nil
 }
 
 func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (CacheStatus, int, error) {
-	data, _ := s.cache.Get(key.AsString())
+	data, err := s.cache.Get(key.AsString())
 	if len(data) == 0 {
-		return CacheStatusNotFound, 0, nil
+		return CacheStatusNotFound, 0, err
 	}
-
 	aMap, useMap := value.(map[string]interface{})
 	var rawData = []byte{}
 	if useMap {
 		value = &rawData
 	}
-
 	entry := &Entry{
-		Data: value.(EntryData),
+		Data: EntryData(value),
 	}
-
-	err := bintly.Decode(data, entry)
+	err = bintly.Decode(data, entry)
 	if err != nil {
 		return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
 	}
-
-
+	log.Debug("found in local cache: %v %T(%+v), len: %v\n", key, value, value, len(data))
 	if useMap {
 		if err = json.Unmarshal(rawData, &aMap); err != nil {
 			return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)

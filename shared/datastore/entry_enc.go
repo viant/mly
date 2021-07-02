@@ -10,11 +10,9 @@ func (e *Entry) EncodeBinary(stream *bintly.Writer) error {
 	stream.Bool(e.NotFound)
 	stream.Time(e.Expiry)
 	stream.Int(e.Hash)
-
 	if e.Data == nil {
 		stream.MAlloc(0)
 		return nil
-
 	}
 	stream.MAlloc(1)
 	if coder, ok := e.Data.(bintly.Encoder); ok {
