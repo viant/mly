@@ -148,9 +148,9 @@ func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error
 }
 
 func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (CacheStatus, int, error) {
-	data, err := s.cache.Get(key.AsString())
+	data, _ := s.cache.Get(key.AsString())
 	if len(data) == 0 {
-		return CacheStatusNotFound, 0, err
+		return CacheStatusNotFound, 0, nil
 	}
 	aMap, useMap := value.(map[string]interface{})
 	var rawData = []byte{}
@@ -160,7 +160,7 @@ func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (Cach
 	entry := &Entry{
 		Data: EntryData(value),
 	}
-	err = bintly.Decode(data, entry)
+	err := bintly.Decode(data, entry)
 	if err != nil {
 		return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
 	}
