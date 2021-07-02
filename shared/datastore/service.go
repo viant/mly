@@ -123,13 +123,11 @@ func (s *Service) updateNotFound(key *Key) error {
 }
 
 func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error {
-	entryData, ok := entryData.(map[string]interface{})
-	if ok {
-		if value, err := json.Marshal(entryData); err == nil {
-			entryData = value
+	if aMap, ok := entryData.(map[string]interface{});ok {
+		if data, err := json.Marshal(aMap); err == nil {
+			entryData = data
 		}
 	}
-
 	entry := &Entry{
 		Hash: dictHash,
 		Key:    key.AsString(),
@@ -144,7 +142,7 @@ func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error
 	if err != nil {
 		return fmt.Errorf("failed to set cache " + err.Error())
 	}
-	log.Debug("updated local cache: %v %T(%+v), len: %v\n", key, entry.Data, entry.Data, len(data))
+	log.Debug("updated local cache: %v %T(%+v), len: %v\n", key.AsString(), entry.Data, entry.Data, len(data))
 
 	return nil
 }
