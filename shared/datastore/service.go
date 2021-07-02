@@ -142,7 +142,7 @@ func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error
 	if err != nil {
 		return fmt.Errorf("failed to set cache " + err.Error())
 	}
-	log.Debug("updated local cache: %v %T(%+v), len: %v\n", key.AsString(), entry.Data, entry.Data, len(data))
+	log.Debug("updated local cache: %v %T(%+v)\n", key.AsString(), entry.Data, entry.Data)
 
 	return nil
 }
