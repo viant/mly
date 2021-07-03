@@ -201,32 +201,32 @@ func main() {
 package main
 
 import (
-	"context"
-	"fmt"
-	"github.com/viant/mly/client"
-	"log"
+  "context"
+  "fmt"
+  "github.com/viant/mly/shared/client"
+  "log"
 )
 
 type Prediction struct {
-	Output float32
+  Output float32
 }
 
 func main() {
-	mly, err := client.New("$modelID", []*client.Host{client.NewHost("mlyEndpointHost", 8080)})
-	if err != nil {
-		log.Fatal(err)
-	}
-	response := &client.Response{Data: &Prediction{}}
-	msg := mly.NewMessage()
-	msg.StringKey("input1", "val1")
-	//....
-	msg.IntKey("inputN", 1)
-	
-	err = mly.Run(context.TODO(), msg, response)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("response: %+v\n", response)
+  mly, err := client.New("$modelID", []*client.Host{client.NewHost("mlyEndpointHost", 8080)})
+  if err != nil {
+    log.Fatal(err)
+  }
+  response := &client.Response{Data: &Prediction{}}
+  msg := mly.NewMessage()
+  msg.StringKey("input1", "val1")
+  //....
+  msg.IntKey("inputN", 1)
+
+  err = mly.Run(context.TODO(), msg, response)
+  if err != nil {
+    log.Fatal(err)
+  }
+  fmt.Printf("response: %+v\n", response)
 }
 ```
 
@@ -259,7 +259,7 @@ Optionally you can implements storable provider.
 ```
 
 Where **MyOutputType** could implements the following interfaces to avoid reflection:
-- [Storable](common/storable.go) (aerospike storage)
+- [Storable](shared/common/storable.go) (aerospike storage)
 - [Bintly](https://github.com/viant/bintly) (in memory serialization)
 - [Gojay JSON](https://github.com/francoispqt/gojay/) (HTTP response)
 

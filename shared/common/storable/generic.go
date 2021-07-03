@@ -2,7 +2,7 @@ package storable
 
 import (
 	"fmt"
-	"github.com/viant/mly/common"
+	"github.com/viant/mly/shared/common"
 	"reflect"
 )
 

@@ -1,7 +1,7 @@
 package client
 
 import (
-	"github.com/viant/mly/common"
+	"github.com/viant/mly/shared/common"
 	"strconv"
 	"sync"
 )

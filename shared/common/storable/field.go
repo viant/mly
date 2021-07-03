@@ -1,7 +1,7 @@
 package storable
 
 import (
-	"github.com/viant/mly/common"
+	"github.com/viant/mly/shared/common"
 	"reflect"
 )
 

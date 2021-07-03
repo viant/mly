@@ -3,7 +3,7 @@ package service
 import (
 	"encoding/json"
 	"github.com/francoispqt/gojay"
-	"github.com/viant/mly/common"
+	"github.com/viant/mly/shared/common"
 	"time"
 )
 

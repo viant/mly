@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/viant/cloudless/data/processor"
-	"github.com/viant/mly/client"
+	"github.com/viant/mly/shared/client"
 	"strconv"
 	"strings"
 	"sync/atomic"

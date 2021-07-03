@@ -3,8 +3,8 @@ package domain
 import (
 	"context"
 	"github.com/viant/gtly"
-	"github.com/viant/mly/common"
-	"github.com/viant/mly/common/storable"
+	"github.com/viant/mly/shared/common"
+	"github.com/viant/mly/shared/common/storable"
 )
 
 //Transformer represents output transformer

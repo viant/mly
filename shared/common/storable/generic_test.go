@@ -2,7 +2,7 @@ package storable
 
 import (
 	"github.com/stretchr/testify/assert"
-	"github.com/viant/mly/common"
+	"github.com/viant/mly/shared/common"
 	"testing"
 )
 

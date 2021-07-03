@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/bintly"
-	"github.com/viant/mly/common"
+	"github.com/viant/mly/shared/common"
 	"github.com/viant/toolbox"
 	"reflect"
 	"strings"

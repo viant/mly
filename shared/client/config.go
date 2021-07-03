@@ -2,8 +2,8 @@ package client
 
 import (
 	"fmt"
-	"github.com/viant/mly/client/config"
-	"github.com/viant/mly/common"
+	"github.com/viant/mly/shared/client/config"
+	"github.com/viant/mly/shared/common"
 	"strconv"
 )
 
@@ -76,7 +76,7 @@ func NewHost(name string, port int) *Host {
 
 
 //NewHosts creates hosts
-func NewHosts(port int, names []string) []*Host{
+func NewHosts(port int, names []string) []*Host {
 	var result = make([]*Host, 0)
 	for _, name := range names {
 		result = append(result, &Host{Name: name ,Port: port})

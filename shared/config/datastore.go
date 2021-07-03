@@ -2,7 +2,7 @@ package config
 
 import (
 	"fmt"
-	"github.com/viant/mly/common/storable"
+	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/mly/shared/config/datastore"
 	"github.com/viant/scache"
 )

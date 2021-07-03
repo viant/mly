@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/viant/mly/common"
-	"github.com/viant/mly/common/storable"
+	"github.com/viant/mly/shared/common"
+	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/mly/shared/config"
 )
 
