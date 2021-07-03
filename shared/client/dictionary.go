@@ -1,7 +1,7 @@
 package client
 
 import (
-	"github.com/viant/mly/service/domain"
+	"github.com/viant/mly/shared/common"
 )
 
 const (
@@ -74,7 +74,7 @@ func (d *dictionary) lookupFloat(key string, value float32) (float32, int) {
 }
 
 //NewDictionary creates new dictionary
-func newDictionary(dict *domain.Dictionary, keyFields []string) *dictionary {
+func newDictionary(dict *common.Dictionary, keyFields []string) *dictionary {
 	var result = &dictionary{
 		hash:     dict.Hash,
 		keys:     map[string]int{},

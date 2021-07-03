@@ -6,6 +6,7 @@ import (
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/tfmodel"
+	"github.com/viant/mly/shared/common"
 	"hash"
 	"hash/fnv"
 	"sort"
@@ -13,7 +14,7 @@ import (
 )
 
 //Dictionary returns dictionary
-func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signature) (*domain.Dictionary, error) {
+func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signature) (*common.Dictionary, error) {
 	var layers []string
 	for _, input := range signature.Inputs {
 		layers = append(layers, input.Name)
@@ -25,15 +26,15 @@ func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signatur
 	return dictionary, nil
 }
 
-func discoverDictionary(session *tf.Session, graph *tf.Graph, layers []string) (*domain.Dictionary, error) {
-	var result = &domain.Dictionary{}
+func discoverDictionary(session *tf.Session, graph *tf.Graph, layers []string) (*common.Dictionary, error) {
+	var result = &common.Dictionary{}
 	for _, name := range layers {
 		aHash := fnv.New64()
 		exported, err := tfmodel.Export(session, graph, name)
 		if err != nil {
 			return nil, err
 		}
-		layer := domain.Layer{
+		layer := common.Layer{
 			Name: name,
 		}
 		hashValue := uint64(0)

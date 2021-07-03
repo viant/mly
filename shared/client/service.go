@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/gmetric"
-	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/client/config"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
@@ -229,7 +228,7 @@ func (s *Service) loadModelDictionary() error {
 	if err != nil {
 		return fmt.Errorf("failed to read body: %w", err)
 	}
-	dict := &domain.Dictionary{}
+	dict := &common.Dictionary{}
 	if err = json.Unmarshal(data, dict); err != nil {
 		return fmt.Errorf("failed to unmarshal dict: %w", err)
 	}

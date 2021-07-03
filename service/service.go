@@ -29,7 +29,7 @@ type Service struct {
 	fs              afs.Service
 	evaluator       *tfmodel.Evaluator
 	signature       *domain.Signature
-	dictionary      *domain.Dictionary
+	dictionary      *common.Dictionary
 	inputs          map[string]*domain.Input
 	useDatastore    bool
 	datastore       *datastore.Service
@@ -59,7 +59,7 @@ func (s *Service) Config() *config.Model {
 }
 
 //Dictionary returns servie dictionary
-func (s *Service) Dictionary() *domain.Dictionary {
+func (s *Service) Dictionary() *common.Dictionary {
 	return s.dictionary
 }
 
@@ -162,7 +162,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var dictionary *domain.Dictionary
+	var dictionary *common.Dictionary
 	if s.config.UseDictionary() {
 		if dictionary, err = layers.Dictionary(model.Session, model.Graph, signature); err != nil {
 			return err
