@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	defaultStringValue = "[UKN]"
+	defaultStringValue = "[UNK]"
 	defaultIntValue    = 0
 	unknownKeyField    = -1
 )
