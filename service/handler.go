@@ -62,6 +62,7 @@ func (h *handler) handleHTTP2(conn io.ReadWriter, data []byte) error {
 	ctx, cancel := h.NewContext()
 	defer cancel()
 	request := h.service.NewRequest()
+	request.Body = data[:size]
 	if err = gojay.Unmarshal(data[:size], request); err != nil {
 		return err
 	}
@@ -77,7 +78,15 @@ func (h *handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	if httpRequest.Body == nil {
 		err = h.buildRequestFromQuery(httpRequest, request)
 	} else {
-		err = h.buildRequestFromBody(httpRequest, request)
+		data, size, err := buffer.Read(h.pool, httpRequest.Body)
+		defer h.pool.Put(data)
+		if err != nil {
+			return err
+		}
+		request.Body = data[:size]
+		if err := gojay.Unmarshal(data[:size], request); err != nil {
+			return err
+		}
 	}
 	if err == nil {
 		err = request.Validate()
@@ -101,15 +110,6 @@ func (h *handler) buildRequestFromQuery(httpRequest *http.Request, request *Requ
 		}
 	}
 	return nil
-}
-
-func (h *handler) buildRequestFromBody(httpRequest *http.Request, request *Request) error {
-	data, size, err := buffer.Read(h.pool, httpRequest.Body)
-	defer h.pool.Put(data)
-	if err != nil {
-		return err
-	}
-	return gojay.Unmarshal(data[:size], request)
 }
 
 func (h *handler) handleAppRequest(ctx context.Context, writer io.Writer, request *Request, response *Response) error {

@@ -5,6 +5,7 @@ import (
 	"github.com/francoispqt/gojay"
 	"github.com/viant/gtly"
 	"github.com/viant/mly/service/domain"
+	"github.com/viant/mly/shared/common"
 	"reflect"
 	"strconv"
 )
@@ -13,12 +14,12 @@ import (
 type Request struct {
 	Key       string
 	BatchSize int
+	Body   []byte
 	Feeds     []interface{}
 	inputs    map[string]*domain.Input
 	supplied  int
 	input     *gtly.Object
 }
-
 
 //Put puts data to request
 func (r *Request) Put(key string, value string) error {
@@ -70,11 +71,11 @@ func (r *Request) Put(key string, value string) error {
 //UnmarshalJSONObject umarshal
 func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	switch key {
-	case "_batchSize":
+	case common.BatchSizeKey:
 		if err := dec.Int(&r.BatchSize); err != nil {
 			return err
 		}
-	case "_key":
+	case common.CacheKey:
 		if err := dec.String(&r.Key); err != nil {
 			return err
 		}

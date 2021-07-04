@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"github.com/viant/afs/file"
+	"github.com/viant/tapper/config"
 	"os"
 	"path"
 )
@@ -19,7 +20,9 @@ type Model struct {
 	DataStore   string
 	KeyFields   []string
 	Modified    *Modified
+	Stream      *config.Stream
 }
+
 
 //UseDictionary returns true if dictionary can be used
 func (m Model) UseDictionary() bool {

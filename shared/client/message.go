@@ -255,5 +255,5 @@ func (m *Message) addCacheKey() {
 	if aKey == "" {
 		return
 	}
-	m.StringKey("_key", aKey)
+	m.StringKey(common.CacheKey, aKey)
 }

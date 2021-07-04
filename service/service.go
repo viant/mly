@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
@@ -17,6 +18,8 @@ import (
 	"github.com/viant/mly/shared/datastore"
 	"github.com/viant/mly/shared/log"
 	sstat "github.com/viant/mly/shared/stat"
+	tlog "github.com/viant/tapper/log"
+	"github.com/viant/tapper/msg"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -40,6 +43,8 @@ type Service struct {
 	evaluatorMetric *gmetric.Operation
 	closed          int32
 	inputProvider   *gtly.Provider
+	logger          *tlog.Logger
+	msgProvider     *msg.Provider
 }
 
 //Close closes service
@@ -101,7 +106,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	}
 
 	stats.Append(stat.Evaluate)
-	output, err := s.evaluate(ctx, request.Feeds)
+	output, err := s.evaluate(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -129,8 +134,9 @@ func (s *Service) incrementPending(startTime time.Time) func() {
 	}
 }
 
-func (s *Service) evaluate(ctx context.Context, params []interface{}) (interface{}, error) {
-	onDone := s.evaluatorMetric.Begin(time.Now())
+func (s *Service) evaluate(ctx context.Context, request *Request) (interface{}, error) {
+	startTime := time.Now()
+	onDone := s.evaluatorMetric.Begin(startTime)
 	stats := sstat.NewValues()
 	defer func() {
 		onDone(time.Now(), stats.Values()...)
@@ -138,11 +144,12 @@ func (s *Service) evaluate(ctx context.Context, params []interface{}) (interface
 	s.mux.RLock()
 	evaluator := s.evaluator
 	s.mux.RUnlock()
-	result, err := evaluator.Evaluate(params)
+	result, err := evaluator.Evaluate(request.Feeds)
 	if err != nil {
 		stats.Append(err)
 		return nil, err
 	}
+	s.logEvaluation(request, result, time.Now().Sub(startTime))
 	return result, nil
 }
 
@@ -269,6 +276,17 @@ func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[st
 		}
 		s.newStorable = getStorable(datastoreConfig)
 	}
+
+	if s.config.Stream != nil {
+		host, _ := common.GetHostIPv4("localhost")
+		logger, err := tlog.New(s.config.Stream, host, afs.New())
+		if err != nil {
+			return err
+		}
+		s.logger = logger
+		s.msgProvider = msg.NewProvider(2048, 32)
+	}
+
 	go s.scheduleModelReload()
 	return nil
 }
@@ -281,6 +299,41 @@ func (s *Service) scheduleModelReload() {
 		if atomic.LoadInt32(&s.closed) != 0 {
 			return
 		}
+	}
+}
+
+func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken time.Duration) {
+	if s.logger == nil || len(request.Body) == 0 {
+		return
+	}
+	msg := s.msgProvider.NewMessage()
+	defer msg.Free()
+	data := request.Body
+	index := bytes.LastIndexByte(data, '}')
+	if index == -1 {
+		return
+	}
+	msg.Put(data[:index])//include original json request
+	msg.PutByte(',')
+	msg.PutInt("eval_duration", int(timeTaken.Microseconds()))
+
+	switch actual := output.(type) {
+	case [][]float32:
+		if len(actual) > 0 {
+			switch len(actual[0]) {
+			case 0:
+			case 1:
+				msg.PutFloat(s.signature.Output.Name, float64(actual[0][0]))
+			default:
+				//Add support to tapper
+				//msg.PutByte(',')
+				//msg.PutFloats(s.signature.Output.Name, float64(actual[0][0]))
+			}
+		}
+	}
+	msg.End()
+	if err := s.logger.Log(msg); err != nil {
+		fmt.Printf("failed to log model eval: %v %v\n", s.config.ID, err)
 	}
 }
 
