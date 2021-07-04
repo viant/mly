@@ -309,11 +309,12 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	msg := s.msgProvider.NewMessage()
 	defer msg.Free()
 	data := request.Body
-	index := bytes.LastIndexByte(data, '}')
-	if index == -1 {
+	begin := bytes.IndexByte(data, '{')
+	end := bytes.LastIndexByte(data, '}')
+	if end == -1 {
 		return
 	}
-	msg.Put(data[:index])//include original json request
+	msg.Put(data[begin+1:end]) //include original json from request body
 	msg.PutByte(',')
 	msg.PutInt("eval_duration", int(timeTaken.Microseconds()))
 
@@ -331,7 +332,6 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 			}
 		}
 	}
-	msg.End()
 	if err := s.logger.Log(msg); err != nil {
 		fmt.Printf("failed to log model eval: %v %v\n", s.config.ID, err)
 	}
