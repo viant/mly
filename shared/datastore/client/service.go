@@ -7,6 +7,7 @@ import (
 	"github.com/viant/mly/shared/circut"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/config/datastore"
+	"github.com/viant/mly/shared/log"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +51,7 @@ func (s *service) Put(ctx context.Context, writePolicy *aero.WritePolicy, key *a
 	if !s.IsUp() {
 		return common.ErrNodeDown
 	}
+	log.Debug("put %v:%v.%v -> %v", key.Namespace(), key.SetName(), key.Value(), value)
 	err := s.Client.Put(writePolicy, key, value)
 	s.checkConnectionError(err)
 	return err
