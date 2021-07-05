@@ -16,7 +16,6 @@ import (
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/mly/shared/datastore"
-	"github.com/viant/mly/shared/log"
 	sstat "github.com/viant/mly/shared/stat"
 	tlog "github.com/viant/tapper/log"
 	"github.com/viant/tapper/msg"
@@ -95,7 +94,6 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 		key = datastore.NewKey(s.datastore.Config, request.Key)
 		sink := s.newStorable()
 		entryDictHash, err := s.datastore.GetInto(ctx, key, sink)
-		log.Debug("fetching: (%v:%v) %+v %v\n", entryDictHash, dictHash, sink, err)
 		if err == nil {
 			isConsistent := entryDictHash == 0 || entryDictHash == dictHash
 			if isConsistent {

@@ -11,7 +11,6 @@ import (
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore/client"
-	"github.com/viant/mly/shared/log"
 	"github.com/viant/mly/shared/stat"
 	"github.com/viant/scache"
 	"github.com/viant/toolbox"
@@ -60,7 +59,6 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 	writeKey, _ := key.Key()
 	wp := key.WritePolicy(0)
 	wp.SendKey = true
-	log.Debug("put %v -> %v\n", key.AsString(), bins)
 	if err = s.l1Client.Put(ctx, wp, writeKey, bins); err == nil && s.l2Client != nil {
 		k2Key, _ := key.L2.Key()
 		err = s.l2Client.Put(ctx, wp, k2Key, bins)
@@ -146,8 +144,6 @@ func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error
 	if err != nil {
 		return fmt.Errorf("failed to set cache " + err.Error())
 	}
-	log.Debug("updated local cache: %v %T(%+v)\n", key.AsString(), entry.Data, entry.Data)
-
 	return nil
 }
 
@@ -168,7 +164,6 @@ func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (Cach
 	if err != nil {
 		return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
 	}
-	log.Debug("found in local cache: %v %T(%+v)\n", key.AsString(), value, value)
 	if useMap {
 		if err = json.Unmarshal(rawData, &aMap); err != nil {
 			return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
@@ -263,7 +258,6 @@ func (s *Service) fromClient(ctx context.Context, client client.Service, key *Ke
 		return 0, fmt.Errorf("failed to create key: %+v, due to %w", key, err)
 	}
 	record, err := client.Get(ctx, clientKey)
-	log.Debug("fetching %v -> %v, %v\n", clientKey.String(), record, err)
 	if err != nil {
 		return 0, err
 	}
@@ -272,7 +266,6 @@ func (s *Service) fromClient(ctx context.Context, client client.Service, key *Ke
 	}
 
 	storable := getStorable(value)
-	log.Debug("fetched %v -> %v\n", key.AsString(), record.Bins)
 	err = storable.Set(common.MapToIterator(record.Bins))
 	if err != nil {
 		return 0, fmt.Errorf("failed to map record: %+v, due to %w", key, err)
