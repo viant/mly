@@ -12,6 +12,7 @@ import (
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -235,6 +236,7 @@ func (s *Service) loadModelDictionary() error {
 
 	s.RWMutex.Lock()
 	s.dict = newDictionary(dict, s.Datastore.KeyFields)
+	s.messages = newMessages(s.dictionary())
 	s.RWMutex.Unlock()
 
 	return nil
@@ -271,9 +273,12 @@ func (s *Service) Close() error {
 	return conn.Close()
 }
 
+
 func (s *Service) refreshMetadata() {
 	defer atomic.StoreInt32(&s.dictRefresh, 0)
-
+	if err := s.loadModelDictionary();err != nil {
+		log.Printf("failed to refresh meta data: %v", err)
+	}
 }
 
 //New creates new mly client

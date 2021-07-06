@@ -55,7 +55,8 @@ func newMessages(dict *dictionary) Messages {
 					buf:        make([]byte, bufferSize),
 					keys:       make([]string, keysLen),
 					rawKey:     make([]byte, 1024),
-					dictionary: dict}
+					dictionary: dict,
+				}
 			},
 		},
 	}

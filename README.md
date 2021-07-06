@@ -152,7 +152,8 @@ The server accept configuration with the following options
   - ID: required datastore ID (to be matched with Model.DataStore)
   - Connection: optional connection ID
   - Namespace: optional aerospike namespace
-  - Dataset: optional aerospike dataset
+  - Dataset: optional aerospike dataset 
+  - Storable: name of register storable provider
   - Cache: optional in memory cache setting
       * SizeMB: cache size in BM
 
@@ -167,7 +168,7 @@ mly := client.New("$modelID", []*client.Host{client.NewHost("mlServiceHost", mlS
 ```
 where optional options can be one of the following:
   * NewCacheSize(sizeOption)
-  * NewCacheScope(CacheScopeLocal|CacheScopeL1)
+  * NewCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)
   * NewGmetric() - custom instance of gemetric service
 
 
