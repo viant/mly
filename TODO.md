@@ -1,4 +1,3 @@
 - Add input hooks
 - Add prediction batching  
-- Client down flag + probing
 - Add some examples

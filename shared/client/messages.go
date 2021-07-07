@@ -13,7 +13,6 @@ type Messages interface {
 
 type messages struct {
 	pool sync.Pool
-	dict *dictionary
 }
 
 func (p *messages) Borrow() *Message {
@@ -42,20 +41,20 @@ func (p *messages) put(bs *Message) {
 }
 
 //newMessages creates a new message pool
-func newMessages(dict *dictionary) Messages {
+func newMessages(newDict func() *dictionary) Messages {
 	keysLen := 0
+	dict := newDict()
 	if dict != nil {
 		keysLen = len(dict.keys)
 	}
 	return &messages{
-		dict: dict,
 		pool: sync.Pool{
 			New: func() interface{} {
 				return &Message{
 					buf:        make([]byte, bufferSize),
 					keys:       make([]string, keysLen),
 					rawKey:     make([]byte, 1024),
-					dictionary: dict,
+					dictionary: newDict(),
 				}
 			},
 		},

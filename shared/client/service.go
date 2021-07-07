@@ -145,27 +145,28 @@ func (s *Service) postRequest(data []byte) ([]byte, error) {
 	return body, nil
 }
 
-func (s *Service) getHost() *Host {
+func (s *Service) getHost() (*Host, error) {
 	count := len(s.Hosts)
 	switch count {
 	case 1:
-		return s.Hosts[0]
+		candidate := s.Hosts[0]
+		if !candidate.IsUp() {
+			return nil, fmt.Errorf("%v:%v %w", candidate.Name, candidate.Port, common.ErrNodeDown)
+		}
+		return candidate, nil
 	default:
 		index := atomic.AddInt64(&s.hostIndex, 1) % int64(count)
-		return s.Hosts[index]
+		candidate := s.Hosts[index]
+		if candidate.IsUp() {
+			return candidate, nil
+		}
+		for i := 0; i < len(s.Hosts); i++ {
+			if s.Hosts[i].IsUp() {
+				return s.Hosts[i], nil
+			}
+		}
 	}
-}
-
-func (s *Service) evalURL() string {
-	return s.getHost().evalURL(s.Model)
-}
-
-func (s *Service) metaConfigURL() string {
-	return s.getHost().metaConfigURL(s.Model)
-}
-
-func (s *Service) metaDictionaryURL() string {
-	return s.getHost().metaDictionaryURL(s.Model)
+	return nil, fmt.Errorf("%v:%v %w", s.Hosts[0].Name, s.Hosts[0].Port, common.ErrNodeDown)
 }
 
 func (s *Service) init(options []Option) error {
@@ -175,6 +176,7 @@ func (s *Service) init(options []Option) error {
 	if s.Config.MaxRetry == 0 {
 		s.Config.MaxRetry = 3
 	}
+
 	if err := s.loadModelConfig(); err != nil {
 		return err
 	}
@@ -187,9 +189,14 @@ func (s *Service) init(options []Option) error {
 	if err := s.initDatastore(); err != nil {
 		return err
 	}
-	s.messages = newMessages(s.dictionary())
+
 	s.connections.New = func() interface{} {
-		conn, err := newConnection(s.evalURL())
+		host, err := s.getHost()
+		if err != nil {
+			s.poolErr = err
+			return nil
+		}
+		conn, err := newConnection(host, host.evalURL(s.Model))
 		if err != nil {
 			s.poolErr = err
 		}
@@ -201,7 +208,11 @@ func (s *Service) init(options []Option) error {
 func (s *Service) loadModelConfig() error {
 	if s.Datastore == nil {
 		var err error
-		if s.Datastore, err = discoverConfig(s.metaConfigURL()); err != nil {
+		host, err := s.getHost()
+		if err != nil {
+			return err
+		}
+		if s.Datastore, err = discoverConfig(host.metaConfigURL(s.Model)); err != nil {
 			return err
 		}
 	}
@@ -217,7 +228,11 @@ func (s *Service) loadModelDictionary() error {
 	if len(s.Datastore.KeyFields) == 0 {
 		return nil
 	}
-	URL := s.metaDictionaryURL()
+	host, err := s.getHost()
+	if err != nil {
+		return err
+	}
+	URL := host.metaDictionaryURL(s.Model)
 	response, err := http.DefaultClient.Get(URL)
 	if err != nil {
 		return fmt.Errorf("failed to load dictionary: %w", err)
@@ -236,9 +251,8 @@ func (s *Service) loadModelDictionary() error {
 
 	s.RWMutex.Lock()
 	s.dict = newDictionary(dict, s.Datastore.KeyFields)
-	s.messages = newMessages(s.dictionary())
 	s.RWMutex.Unlock()
-
+	s.messages = newMessages(s.dictionary)
 	return nil
 }
 
@@ -273,22 +287,26 @@ func (s *Service) Close() error {
 	return conn.Close()
 }
 
-
 func (s *Service) refreshMetadata() {
 	defer atomic.StoreInt32(&s.dictRefresh, 0)
-	if err := s.loadModelDictionary();err != nil {
+	if err := s.loadModelDictionary(); err != nil {
 		log.Printf("failed to refresh meta data: %v", err)
 	}
 }
 
 //New creates new mly client
 func New(model string, hosts []*Host, options ...Option) (*Service, error) {
+
+	for i := range hosts {
+		hosts[i].Init()
+	}
 	aClient := &Service{
 		Config: Config{
 			Model: model,
 			Hosts: hosts,
 		},
 	}
+
 	return aClient, aClient.init(options)
 }
 

@@ -7,9 +7,18 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 )
+
+const (
+	dialTCPFragment         = "dial tcp"
+	connRefusedError        = "refused"
+
+)
+
+var requestTimeout = time.Second
 
 type connection struct {
 	url string
@@ -21,6 +30,7 @@ type connection struct {
 	lastUsed time.Time
 	ctx      context.Context
 	closed   int32
+	host *Host
 }
 
 func (c *connection) Write(data []byte) (int, error) {
@@ -53,10 +63,11 @@ func (c *connection) Close() error {
 	return nil
 }
 
-func newConnection(URL string) (*connection, error) {
+func newConnection(host *Host, URL string) (*connection, error) {
 	result := &connection{
-		buf: make([]byte, 32*1024),
-		ctx: context.Background(),
+		buf:  make([]byte, 32*1024),
+		host: host,
+		ctx:  context.Background(),
 	}
 	return result, result.init(URL)
 }
@@ -73,9 +84,14 @@ func (c *connection) init(URL string) error {
 	pr, c.PipeWriter = io.Pipe()
 	req, err := http.NewRequestWithContext(c.ctx, http.MethodPut, URL, pr)
 	if err != nil {
+		if strings.Contains(err.Error(), dialTCPFragment) ||strings.Contains(err.Error(), connRefusedError) {
+			c.host.FlagDown()
+		}
 		return err
 	}
+
 	c.req = req
 	c.resp, err = c.Client.Do(req)
 	return err
 }
+
