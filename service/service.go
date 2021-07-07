@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
 	"github.com/viant/gmetric"
@@ -19,6 +20,7 @@ import (
 	sstat "github.com/viant/mly/shared/stat"
 	tlog "github.com/viant/tapper/log"
 	"github.com/viant/tapper/msg"
+	"os"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -276,8 +278,8 @@ func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[st
 	}
 
 	if s.config.Stream != nil {
-		host, _ := common.GetHostIPv4("localhost")
-		logger, err := tlog.New(s.config.Stream, host, afs.New())
+		ID := s.getStreamID()
+		logger, err := tlog.New(s.config.Stream, ID, afs.New())
 		if err != nil {
 			return err
 		}
@@ -287,6 +289,20 @@ func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[st
 
 	go s.scheduleModelReload()
 	return nil
+}
+
+
+func (s *Service) getStreamID() string {
+	ID := ""
+	if UUID, err := uuid.NewUUID(); err == nil {
+		ID = UUID.String()
+	}
+	if hostname, err := os.Hostname(); err == nil {
+		if host, err := common.GetHostIPv4(hostname); err == nil {
+			ID = host
+		}
+	}
+	return ID
 }
 
 func (s *Service) scheduleModelReload() {
