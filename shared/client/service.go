@@ -51,13 +51,6 @@ func (s *Service) conn() (*connection, error) {
 		return nil, s.poolErr
 	}
 	conn := result.(*connection)
-	if conn.lastUsed.IsZero() {
-		return conn, nil
-	}
-	if time.Now().Sub(conn.lastUsed) > requestTimeout {
-		_ = conn.Close()
-		return s.conn()
-	}
 	return conn, nil
 }
 

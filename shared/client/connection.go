@@ -15,21 +15,19 @@ const (
 	connRefusedError = "refused"
 )
 
-
 var requestTimeout = 5 * time.Second
 
 type connection struct {
 	url string
 	*io.PipeWriter
 	*io.PipeReader
-	req      *http.Request
-	resp     *http.Response
-	buf      []byte
-	lastUsed time.Time
-	ctx      context.Context
+	req    *http.Request
+	resp   *http.Response
+	buf    []byte
+	ctx    context.Context
 	cancel context.CancelFunc
-	closed   int32
-	host     *Host
+	closed int32
+	host   *Host
 }
 
 func (c *connection) Write(data []byte) (int, error) {
@@ -65,7 +63,7 @@ func (c *connection) Close() error {
 		if c.PipeReader != nil {
 			c.PipeReader.Close()
 		}
-		if c.resp != nil  && c.resp.Body != nil {
+		if c.resp != nil && c.resp.Body != nil {
 			c.resp.Body.Close()
 		}
 		if c.cancel != nil {
@@ -78,9 +76,9 @@ func (c *connection) Close() error {
 func newConnection(host *Host, httpClient *http.Client, URL string) (*connection, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	result := &connection{
-		buf:  make([]byte, 16*1024),
-		host: host,
-		ctx:  ctx,
+		buf:    make([]byte, 16*1024),
+		host:   host,
+		ctx:    ctx,
 		cancel: cancel,
 	}
 	return result, result.init(httpClient, URL)
