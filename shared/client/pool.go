@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"golang.org/x/net/http2"
 	"io"
 	"net"
@@ -26,6 +27,7 @@ func (p *connPool) GetClientConn(req *http.Request, addr string) (*http2.ClientC
 		size += len(item)
 	}
 	if size >  10 * 1024 * 1024 {
+		fmt.Println("resetting free buffer %v\n", size)
 		*buffer = emptyBuffer
 	}
 	return conn, err
