@@ -19,15 +19,17 @@ type connPool struct {
 	native http2.ClientConnPool
 }
 
+
 func (p *connPool) GetClientConn(req *http.Request, addr string) (*http2.ClientConn, error) {
 	conn, err := p.native.GetClientConn(req, addr)
+
+	streams := getStreams(conn)
+	fmt.Printf("streams: %v\n", reflect.ValueOf(streams).Len())
 	buffer := getFreeBuffer(conn)
 	size := 0
 	for _, item := range *buffer {
 		size += len(item)
 	}
-	fmt.Printf("resetting free buffer %p %v\n", conn, size)
-
 	if size >  10 * 1024 * 1024 {
 		*buffer = emptyBuffer
 	}
@@ -44,7 +46,6 @@ func (p *connPool) MarkDead(conn *http2.ClientConn) {
 		size += len(item)
 	}
 	*buffer = emptyBuffer
-	fmt.Printf("mark dead, clrea buffer: %v\n", size)
 }
 
 func getFreeBuffer(conn *http2.ClientConn) *[][]byte {
@@ -55,6 +56,12 @@ func getFreeBuffer(conn *http2.ClientConn) *[][]byte {
 	return bs
 }
 
+
+func getStreams(conn *http2.ClientConn) interface{} {
+	connValue := reflect.ValueOf(conn).Elem()
+	freeBufField := connValue.FieldByName("streams")
+	return reflect.NewAt(freeBufField.Type(), unsafe.Pointer(freeBufField.UnsafeAddr())).Elem().Interface()
+}
 
 
 func newPool(host *Host, model string) *connPool {
