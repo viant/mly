@@ -93,6 +93,7 @@ func (c *connection) init(httpClient *http.Client, URL string) error {
 		if strings.Contains(err.Error(), dialTCPFragment) || strings.Contains(err.Error(), connRefusedError) {
 			c.host.FlagDown()
 		}
+		_ = c.Close()
 		return err
 	}
 	c.req = req
