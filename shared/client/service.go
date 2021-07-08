@@ -202,6 +202,7 @@ func (s *Service) init(options []Option) error {
 		},
 		Timeout: requestTimeout,
 	}
+
 	s.connections.New = func() interface{} {
 		host, err := s.getHost()
 		if err != nil {

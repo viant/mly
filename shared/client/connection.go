@@ -25,6 +25,7 @@ type connection struct {
 	buf      []byte
 	lastUsed time.Time
 	ctx      context.Context
+	cancel context.CancelFunc
 	closed   int32
 	host     *Host
 }
@@ -64,21 +65,25 @@ func (c *connection) Close() error {
 		if c.resp != nil  && c.resp.Body != nil {
 			c.resp.Body.Close()
 		}
+		if c.cancel != nil {
+			c.cancel()
+		}
 	}
 	return nil
 }
 
 func newConnection(host *Host, httpClient *http.Client, URL string) (*connection, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	result := &connection{
 		buf:  make([]byte, 16*1024),
 		host: host,
-		ctx:  context.Background(),
+		ctx:  ctx,
+		cancel: cancel,
 	}
 	return result, result.init(httpClient, URL)
 }
 
 func (c *connection) init(httpClient *http.Client, URL string) error {
-
 	c.PipeReader, c.PipeWriter = io.Pipe()
 	req, err := http.NewRequestWithContext(c.ctx, http.MethodPut, URL, c.PipeReader)
 	if err != nil {
@@ -87,7 +92,6 @@ func (c *connection) init(httpClient *http.Client, URL string) error {
 		}
 		return err
 	}
-
 	c.req = req
 	c.resp, err = httpClient.Do(req)
 	return err
