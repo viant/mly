@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 //Service represent mly client
@@ -138,7 +137,6 @@ func (s *Service) postRequest(data []byte) ([]byte, error) {
 	}
 	if atomic.LoadInt32(&conn.closed) == 0 {
 		s.connections.Put(conn)
-		conn.lastUsed = time.Now()
 	}
 	return body, nil
 }
