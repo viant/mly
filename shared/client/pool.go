@@ -44,7 +44,7 @@ func (p *connPool) MarkDead(conn *http2.ClientConn) {
 func getFreeBuffer(conn *http2.ClientConn) *[][]byte {
 	connValue := reflect.ValueOf(conn).Elem()
 	freeBufField := connValue.FieldByName("freeBuf")
-	freeBufValue := reflect.NewAt(freeBufField.Type(), unsafe.Pointer(freeBufField.UnsafeAddr())).Elem().Interface()
+	freeBufValue := reflect.NewAt(freeBufField.Type(), unsafe.Pointer(freeBufField.UnsafeAddr())).Interface()
 	bs := freeBufValue.(*[][]byte)
 	return bs
 }
