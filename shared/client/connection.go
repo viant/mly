@@ -97,5 +97,8 @@ func (c *connection) init(httpClient *http.Client, URL string) error {
 	}
 	c.req = req
 	c.resp, err = httpClient.Do(req)
+	if err != nil {
+		_ = c.Close()
+	}
 	return err
 }
