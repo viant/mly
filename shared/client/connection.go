@@ -19,6 +19,7 @@ var requestTimeout = 5 * time.Second
 type connection struct {
 	url string
 	*io.PipeWriter
+	*io.PipeReader
 	req      *http.Request
 	resp     *http.Response
 	buf      []byte
@@ -52,7 +53,16 @@ func (c *connection) Read() ([]byte, error) {
 func (c *connection) Close() error {
 	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
 		if c.req != nil && c.req.Body != nil {
-			return c.req.Body.Close()
+			c.req.Body.Close()
+		}
+		if c.PipeWriter != nil {
+			c.PipeWriter.Close()
+		}
+		if c.PipeReader != nil {
+			c.PipeReader.Close()
+		}
+		if c.resp.Body != nil {
+			c.resp.Body.Close()
 		}
 	}
 	return nil
@@ -69,9 +79,8 @@ func newConnection(host *Host, httpClient *http.Client, URL string) (*connection
 
 func (c *connection) init(httpClient *http.Client, URL string) error {
 
-	var pr *io.PipeReader
-	pr, c.PipeWriter = io.Pipe()
-	req, err := http.NewRequestWithContext(c.ctx, http.MethodPut, URL, pr)
+	c.PipeReader, c.PipeWriter = io.Pipe()
+	req, err := http.NewRequestWithContext(c.ctx, http.MethodPut, URL, c.PipeReader)
 	if err != nil {
 		if strings.Contains(err.Error(), dialTCPFragment) || strings.Contains(err.Error(), connRefusedError) {
 			c.host.FlagDown()
