@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"github.com/francoispqt/gojay"
@@ -11,8 +12,10 @@ import (
 	"github.com/viant/mly/shared/common/storable"
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
+	"golang.org/x/net/http2"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -51,7 +54,7 @@ func (s *Service) conn() (*connection, error) {
 	if conn.lastUsed.IsZero() {
 		return conn, nil
 	}
-	if time.Now().Sub(conn.lastUsed) > conn.Timeout {
+	if time.Now().Sub(conn.lastUsed) > requestTimeout {
 		_ = conn.Close()
 		return s.conn()
 	}
@@ -190,13 +193,22 @@ func (s *Service) init(options []Option) error {
 		return err
 	}
 
+	httpClient := http.Client{
+		Transport:  &http2.Transport{
+			AllowHTTP: true,
+			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+				return net.Dial(network, addr)
+			},
+		},
+		Timeout: requestTimeout,
+	}
 	s.connections.New = func() interface{} {
 		host, err := s.getHost()
 		if err != nil {
 			s.poolErr = err
 			return nil
 		}
-		conn, err := newConnection(host, host.evalURL(s.Model))
+		conn, err := newConnection(host, &httpClient ,host.evalURL(s.Model))
 		if err != nil {
 			s.poolErr = err
 		}

@@ -2,10 +2,7 @@ package client
 
 import (
 	"context"
-	"crypto/tls"
-	"golang.org/x/net/http2"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -13,16 +10,14 @@ import (
 )
 
 const (
-	dialTCPFragment         = "dial tcp"
-	connRefusedError        = "refused"
-
+	dialTCPFragment  = "dial tcp"
+	connRefusedError = "refused"
 )
 
-var requestTimeout = time.Second
+var requestTimeout = 5 * time.Second
 
 type connection struct {
 	url string
-	http.Client
 	*io.PipeWriter
 	req      *http.Request
 	resp     *http.Response
@@ -30,7 +25,7 @@ type connection struct {
 	lastUsed time.Time
 	ctx      context.Context
 	closed   int32
-	host *Host
+	host     *Host
 }
 
 func (c *connection) Write(data []byte) (int, error) {
@@ -63,35 +58,28 @@ func (c *connection) Close() error {
 	return nil
 }
 
-func newConnection(host *Host, URL string) (*connection, error) {
+func newConnection(host *Host, httpClient *http.Client, URL string) (*connection, error) {
 	result := &connection{
-		buf:  make([]byte, 32*1024),
+		buf:  make([]byte, 16*1024),
 		host: host,
 		ctx:  context.Background(),
 	}
-	return result, result.init(URL)
+	return result, result.init(httpClient, URL)
 }
 
-func (c *connection) init(URL string) error {
-	c.Transport = &http2.Transport{
-		AllowHTTP: true,
-		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-			return net.Dial(network, addr)
-		},
-	}
-	c.Timeout = time.Second
+func (c *connection) init(httpClient *http.Client, URL string) error {
+
 	var pr *io.PipeReader
 	pr, c.PipeWriter = io.Pipe()
 	req, err := http.NewRequestWithContext(c.ctx, http.MethodPut, URL, pr)
 	if err != nil {
-		if strings.Contains(err.Error(), dialTCPFragment) ||strings.Contains(err.Error(), connRefusedError) {
+		if strings.Contains(err.Error(), dialTCPFragment) || strings.Contains(err.Error(), connRefusedError) {
 			c.host.FlagDown()
 		}
 		return err
 	}
 
 	c.req = req
-	c.resp, err = c.Client.Do(req)
+	c.resp, err = httpClient.Do(req)
 	return err
 }
-
