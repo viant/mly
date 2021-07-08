@@ -143,8 +143,10 @@ func (s *Service) postRequest(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.connections.Put(conn)
-	conn.lastUsed = time.Now()
+	if atomic.LoadInt32(&conn.closed) == 0 {
+		s.connections.Put(conn)
+		conn.lastUsed = time.Now()
+	}
 	return body, nil
 }
 

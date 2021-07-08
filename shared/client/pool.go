@@ -26,8 +26,9 @@ func (p *connPool) GetClientConn(req *http.Request, addr string) (*http2.ClientC
 	for _, item := range *buffer {
 		size += len(item)
 	}
+	fmt.Printf("resetting free buffer %p %v\n", conn, size)
+
 	if size >  10 * 1024 * 1024 {
-		fmt.Println("resetting free buffer %v\n", size)
 		*buffer = emptyBuffer
 	}
 	return conn, err
@@ -37,8 +38,13 @@ func (p *connPool) GetClientConn(req *http.Request, addr string) (*http2.ClientC
 func (p *connPool) MarkDead(conn *http2.ClientConn) {
 	p.native.MarkDead(conn)
 	//release free buf values
-	bs := getFreeBuffer(conn)
-	*bs = emptyBuffer
+	buffer := getFreeBuffer(conn)
+	size := 0
+	for _, item := range *buffer {
+		size += len(item)
+	}
+	*buffer = emptyBuffer
+	fmt.Printf("mark dead, clrea buffer: %v\n", size)
 }
 
 func getFreeBuffer(conn *http2.ClientConn) *[][]byte {
