@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -14,10 +15,10 @@ const (
 	connRefusedError = "refused"
 )
 
+
 var requestTimeout = 5 * time.Second
 
 type connection struct {
-	httpClient *http.Client
 	url string
 	*io.PipeWriter
 	*io.PipeReader
@@ -53,6 +54,7 @@ func (c *connection) Read() ([]byte, error) {
 }
 
 func (c *connection) Close() error {
+	fmt.Println("closing conn")
 	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
 		if c.req != nil && c.req.Body != nil {
 			c.req.Body.Close()
@@ -69,7 +71,6 @@ func (c *connection) Close() error {
 		if c.cancel != nil {
 			c.cancel()
 		}
-		c.httpClient.CloseIdleConnections()
 	}
 	return nil
 }
@@ -80,7 +81,6 @@ func newConnection(host *Host, httpClient *http.Client, URL string) (*connection
 		buf:  make([]byte, 16*1024),
 		host: host,
 		ctx:  ctx,
-		httpClient: httpClient,
 		cancel: cancel,
 	}
 	return result, result.init(httpClient, URL)

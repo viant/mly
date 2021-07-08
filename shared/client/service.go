@@ -192,14 +192,18 @@ func (s *Service) init(options []Option) error {
 	if err := s.initDatastore(); err != nil {
 		return err
 	}
+	s.messages = newMessages(s.dictionary)
 
-	httpClient := http.Client{
-		Transport:  &http2.Transport{
-			AllowHTTP: true,
-			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-				return net.Dial(network, addr)
-			},
+	host, _ := s.getHost()
+	transport := &http2.Transport{
+		AllowHTTP: true,
+		ConnPool: newPool(host, s.Model),
+		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+			return net.Dial(network, addr)
 		},
+	}
+	httpClient := http.Client{
+		Transport: transport,
 		Timeout: requestTimeout,
 	}
 
@@ -209,7 +213,7 @@ func (s *Service) init(options []Option) error {
 			s.poolErr = err
 			return nil
 		}
-		conn, err := newConnection(host, &httpClient ,host.evalURL(s.Model))
+		conn, err := newConnection(host, &httpClient, host.evalURL(s.Model))
 		if err != nil {
 			s.poolErr = err
 		}
@@ -217,6 +221,9 @@ func (s *Service) init(options []Option) error {
 	}
 	return nil
 }
+
+
+
 
 func (s *Service) loadModelConfig() error {
 	if s.Datastore == nil {
