@@ -17,6 +17,7 @@ const (
 var requestTimeout = 5 * time.Second
 
 type connection struct {
+	httpClient *http.Client
 	url string
 	*io.PipeWriter
 	*io.PipeReader
@@ -68,6 +69,7 @@ func (c *connection) Close() error {
 		if c.cancel != nil {
 			c.cancel()
 		}
+		c.httpClient.CloseIdleConnections()
 	}
 	return nil
 }
@@ -78,6 +80,7 @@ func newConnection(host *Host, httpClient *http.Client, URL string) (*connection
 		buf:  make([]byte, 16*1024),
 		host: host,
 		ctx:  ctx,
+		httpClient: httpClient,
 		cancel: cancel,
 	}
 	return result, result.init(httpClient, URL)
