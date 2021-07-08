@@ -20,17 +20,31 @@ type connPool struct {
 
 func (p *connPool) GetClientConn(req *http.Request, addr string) (*http2.ClientConn, error) {
 	conn, err := p.native.GetClientConn(req, addr)
+	buffer := getFreeBuffer(conn)
+	size := 0
+	for _, item := range *buffer {
+		size += len(item)
+	}
+	if size >  10 * 1024 * 1024 {
+		*buffer = emptyBuffer
+	}
 	return conn, err
 }
+
 
 func (p *connPool) MarkDead(conn *http2.ClientConn) {
 	p.native.MarkDead(conn)
 	//release free buf values
+	bs := getFreeBuffer(conn)
+	*bs = emptyBuffer
+}
+
+func getFreeBuffer(conn *http2.ClientConn) *[][]byte {
 	connValue := reflect.ValueOf(conn).Elem()
 	freeBufField := connValue.FieldByName("freeBuf")
 	freeBufValue := reflect.NewAt(freeBufField.Type(), unsafe.Pointer(freeBufField.UnsafeAddr())).Elem().Interface()
 	bs := freeBufValue.(*[][]byte)
-	*bs = emptyBuffer
+	return bs
 }
 
 
