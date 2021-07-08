@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
 	"golang.org/x/net/http2"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -89,7 +91,14 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 			}
 		}
 	}
-	body, err := s.postRequest(data)
+
+	var body []byte
+	if s.Config.UseHTTP1 {
+		body, err = s.postRequest(data)
+
+	} else {
+		body, err = s.postRequestWithHttp2(data)
+	}
 	if err != nil {
 		return err
 	}
@@ -114,9 +123,42 @@ func (s *Service) assertDictHash(response *Response) {
 }
 
 func (s *Service) postRequest(data []byte) ([]byte, error) {
+	host, err := s.getHost()
+	if err != nil {
+		return nil, err
+	}
+
+	var postErr error
+	for i := 0; i < s.MaxRetry; i++ {
+		postErr = nil
+		request, err := http.NewRequest(http.MethodPost, host.evalURL(s.Model), io.NopCloser(bytes.NewReader(data)))
+		if err != nil {
+			return nil, err
+		}
+		respone, err := http.DefaultClient.Do(request)
+		if err != nil {
+			postErr = err
+			continue
+		}
+		if respone.Body != nil {
+			data, err := io.ReadAll(respone.Body)
+			if err != nil {
+				postErr = err
+				continue
+			}
+			_ = respone.Body.Close()
+			return data, err
+		}
+
+	}
+	return nil, postErr
+}
+
+func (s *Service) postRequestWithHttp2(data []byte) ([]byte, error) {
 	var conn *connection
 	var err error
 	var body []byte
+
 	for i := 0; i < s.MaxRetry; i++ {
 		conn, err = s.conn()
 		if err != nil {
@@ -186,18 +228,15 @@ func (s *Service) init(options []Option) error {
 		return err
 	}
 	s.messages = newMessages(s.dictionary)
-
-	host, _ := s.getHost()
 	transport := &http2.Transport{
 		AllowHTTP: true,
-		ConnPool: newPool(host, s.Model),
 		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 			return net.Dial(network, addr)
 		},
 	}
 	httpClient := http.Client{
 		Transport: transport,
-		Timeout: requestTimeout,
+		Timeout:   requestTimeout,
 	}
 
 	s.connections.New = func() interface{} {
@@ -214,9 +253,6 @@ func (s *Service) init(options []Option) error {
 	}
 	return nil
 }
-
-
-
 
 func (s *Service) loadModelConfig() error {
 	if s.Datastore == nil {
