@@ -61,7 +61,7 @@ func (c *connection) Close() error {
 		if c.PipeReader != nil {
 			c.PipeReader.Close()
 		}
-		if c.resp.Body != nil {
+		if c.resp != nil  && c.resp.Body != nil {
 			c.resp.Body.Close()
 		}
 	}
