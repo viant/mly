@@ -43,10 +43,11 @@ func (c *Host) Probe() {
 
 
 func (c *Host) isConnectionUp() bool {
-	_, err := net.DialTimeout("tcp", fmt.Sprintf("%v:%v", c.Name, c.Port), requestTimeout)
+	connection, err := net.DialTimeout("tcp", fmt.Sprintf("%v:%v", c.Name, c.Port), requestTimeout)
 	if err != nil {
 		return false
 	}
+	defer connection.Close()
 	return true
 }
 
