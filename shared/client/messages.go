@@ -11,8 +11,10 @@ type Messages interface {
 	Borrow() *Message
 }
 
+
 type messages struct {
 	pool sync.Pool
+	nweDict func() *dictionary
 }
 
 func (p *messages) Borrow() *Message {
@@ -28,8 +30,8 @@ func (p *messages) Borrow() *Message {
 	msg.mux.Lock()
 	msg.pool = p
 	msg.key = ""
+	msg.dictionary = p.nweDict()
 	msg.mux.Unlock()
-
 	return msg
 }
 
@@ -48,6 +50,7 @@ func newMessages(newDict func() *dictionary) Messages {
 		keysLen = len(dict.keys)
 	}
 	return &messages{
+		nweDict: newDict,
 		pool: sync.Pool{
 			New: func() interface{} {
 				return &Message{
