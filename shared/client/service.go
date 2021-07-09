@@ -9,6 +9,7 @@ import (
 	"github.com/francoispqt/gojay"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/shared/client/config"
+	"github.com/viant/mly/shared/log"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
 	sconfig "github.com/viant/mly/shared/config"
@@ -16,8 +17,7 @@ import (
 	"golang.org/x/net/http2"
 	"io"
 	"io/ioutil"
-	"log"
-	"net"
+		"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -95,10 +95,10 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	var body []byte
 	if s.Config.UseHTTP1 {
 		body, err = s.postRequest(data)
-
 	} else {
 		body, err = s.postRequestWithHttp2(data)
 	}
+	log.Debug("request: %s, resp: %s, %v\n", data, body, err)
 	if err != nil {
 		return err
 	}
@@ -339,7 +339,7 @@ func (s *Service) Close() error {
 func (s *Service) refreshMetadata() {
 	defer atomic.StoreInt32(&s.dictRefresh, 0)
 	if err := s.loadModelDictionary(); err != nil {
-		log.Printf("failed to refresh meta data: %v", err)
+		log.Debug("failed to refresh meta data: %v", err)
 	}
 }
 
