@@ -335,7 +335,9 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	msg.Put(data[begin+1 : end]) //include original json from request body
 	msg.PutByte(',')
 	msg.PutInt("eval_duration", int(timeTaken.Microseconds()))
-	msg.PutString("timestamp", time.Now().In(time.UTC).Format("2006-01-02 15:04:05.000-07"))
+	if bytes.Index(data, []byte("timestamp")) == -1 {
+		msg.PutString("timestamp", time.Now().In(time.UTC).Format("2006-01-02 15:04:05.000-07"))
+	}
 	switch actual := output.(type) {
 	case [][]float32:
 		if len(actual) > 0 {
