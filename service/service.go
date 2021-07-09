@@ -296,7 +296,6 @@ func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[st
 	return nil
 }
 
-
 func (s *Service) getStreamID() string {
 	ID := ""
 	if UUID, err := uuid.NewUUID(); err == nil {
@@ -333,10 +332,10 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	if end == -1 {
 		return
 	}
-	msg.Put(data[begin+1:end]) //include original json from request body
+	msg.Put(data[begin+1 : end]) //include original json from request body
 	msg.PutByte(',')
 	msg.PutInt("eval_duration", int(timeTaken.Microseconds()))
-
+	msg.PutString("timestamp", time.Now().In(time.UTC).Format("2006-01-02 15:04:05.000-07"))
 	switch actual := output.(type) {
 	case [][]float32:
 		if len(actual) > 0 {

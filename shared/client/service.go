@@ -13,10 +13,10 @@ import (
 	"github.com/viant/mly/shared/common/storable"
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
-	"github.com/viant/mly/shared/log"
 	"golang.org/x/net/http2"
 	"io"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -98,7 +98,6 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	} else {
 		body, err = s.postRequestWithHttp2(data)
 	}
-	log.Debug("request: %s, resp: %s, %v\n", data, body, err)
 	if err != nil {
 		return err
 	}
@@ -339,13 +338,12 @@ func (s *Service) Close() error {
 func (s *Service) refreshMetadata() {
 	defer atomic.StoreInt32(&s.dictRefresh, 0)
 	if err := s.loadModelDictionary(); err != nil {
-		log.Debug("failed to refresh meta data: %v", err)
+		log.Printf("failed to refresh meta data: %v", err)
 	}
 }
 
 //New creates new mly client
 func New(model string, hosts []*Host, options ...Option) (*Service, error) {
-
 	for i := range hosts {
 		hosts[i].Init()
 	}
@@ -355,7 +353,6 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 			Hosts: hosts,
 		},
 	}
-
 	return aClient, aClient.init(options)
 }
 
