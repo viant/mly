@@ -74,9 +74,10 @@ func (h *handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	defer cancel()
 	request := h.service.NewRequest()
 	response := &Response{Status: "ok", started: time.Now()}
-	var err error
 	if httpRequest.Body == nil {
-		err = h.buildRequestFromQuery(httpRequest, request)
+		if err := h.buildRequestFromQuery(httpRequest, request);err != nil  {
+			return err
+		}
 	} else {
 		data, size, err := buffer.Read(h.pool, httpRequest.Body)
 		defer h.pool.Put(data)
@@ -87,13 +88,6 @@ func (h *handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		if err := gojay.Unmarshal(data[:size], request); err != nil {
 			return err
 		}
-	}
-	if err == nil {
-		err = request.Validate()
-	}
-	if err != nil {
-		response.setError(err)
-		return h.writeResponse(writer, response)
 	}
 	return h.handleAppRequest(ctx, writer, request, response)
 }
@@ -113,18 +107,10 @@ func (h *handler) buildRequestFromQuery(httpRequest *http.Request, request *Requ
 }
 
 func (h *handler) handleAppRequest(ctx context.Context, writer io.Writer, request *Request, response *Response) error {
-	err := request.Validate()
-	if err != nil {
-		response.setError(err)
-		if err = h.writeResponse(writer, response); err != nil {
-			return err
-		}
-		return nil
-	}
-	if err = h.service.Do(ctx, request, response); err != nil {
+	if err := h.service.Do(ctx, request, response); err != nil {
 		response.setError(err)
 	}
-	if err = h.writeResponse(writer, response); err != nil {
+	if err := h.writeResponse(writer, response); err != nil {
 		return err
 	}
 	return nil

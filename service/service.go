@@ -88,6 +88,11 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 		onDone(time.Now(), stats.Values()...)
 		onDoneDecrement()
 	}()
+	err := request.Validate()
+	if err != nil {
+		stats.Append(err)
+		return err
+	}
 	useDatastore := s.useDatastore && request.Key != ""
 	var key *datastore.Key
 	if useDatastore {
