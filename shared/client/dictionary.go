@@ -2,6 +2,7 @@ package client
 
 import (
 	"github.com/viant/mly/shared/common"
+	"log"
 )
 
 const (
@@ -27,12 +28,17 @@ func (d *dictionary) lookupString(key string, value string) (string, int) {
 		return "", unknownKeyField
 	}
 	elem, ok := d.registry[key]
-	if !ok {
+	if !ok  {
 		if index, ok := d.keys[key]; ok {
 			return value, index
 		}
 		return "", unknownKeyField
 	}
+	if elem == nil {
+		log.Printf("dict element was nil for %v: %v\n", key, value)
+		return defaultStringValue, unknownKeyField
+	}
+
 	if elem.hasString(value) {
 		return value, elem.index
 	}
