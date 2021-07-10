@@ -178,6 +178,11 @@ func (s *Service) init(options []Option) error {
 	for _, option := range options {
 		option.Apply(s)
 	}
+	if s.gmetrics == nil {
+		s.gmetrics = gmetric.New()
+	}
+	location := reflect.TypeOf(Service{}).PkgPath()
+	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewStore())
 	if s.Config.MaxRetry == 0 {
 		s.Config.MaxRetry = 3
 	}
@@ -188,14 +193,6 @@ func (s *Service) init(options []Option) error {
 	if err := s.loadModelDictionary(); err != nil {
 		return err
 	}
-	if s.gmetrics == nil {
-		s.gmetrics = gmetric.New()
-	}
-
-
-	location := reflect.TypeOf(Service{}).PkgPath()
-	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewStore())
-
 	if err := s.initDatastore(); err != nil {
 		return err
 	}
