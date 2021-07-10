@@ -13,14 +13,17 @@ import (
 	"github.com/viant/mly/shared/common/storable"
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
+	"github.com/viant/mly/shared/stat"
 	"golang.org/x/net/http2"
 	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
+	"reflect"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 //Service represent mly client
@@ -29,6 +32,7 @@ type Service struct {
 	sync.RWMutex
 	dict        *dictionary
 	gmetrics    *gmetric.Service
+	counter     *gmetric.Operation
 	datastore   *datastore.Service
 	mux         sync.RWMutex
 	messages    Messages
@@ -36,7 +40,7 @@ type Service struct {
 	hostIndex   int64
 	newStorable func() common.Storable
 	dictRefresh int32
-	httpClient http.Client
+	httpClient  http.Client
 }
 
 //NewMessage returns a new message
@@ -45,7 +49,6 @@ func (s *Service) NewMessage() *Message {
 	message.start()
 	return message
 }
-
 
 func (s *Service) releaseMessage(input interface{}) {
 	releaser, ok := input.(Releaser)
@@ -63,6 +66,11 @@ func (s *Service) dictionary() *dictionary {
 
 //Run run model prediction
 func (s *Service) Run(ctx context.Context, input interface{}, response *Response) error {
+	onDone:= s.counter.Begin(time.Now())
+	stats := stat.NewValues()
+	defer func() {
+		onDone(time.Now(), *stats...)
+	}()
 	data, err := NewReader(input)
 	defer s.releaseMessage(input)
 	if err != nil {
@@ -84,8 +92,10 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		}
 	}
 
+	stats.Append(stat.NoSuchKey)
 	body, err := s.postRequest(data)
 	if err != nil {
+		stats.Append(err)
 		return err
 	}
 	err = gojay.Unmarshal(body, response)
@@ -181,6 +191,11 @@ func (s *Service) init(options []Option) error {
 	if s.gmetrics == nil {
 		s.gmetrics = gmetric.New()
 	}
+
+
+	location := reflect.TypeOf(Service{}).PkgPath()
+	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewStore())
+
 	if err := s.initDatastore(); err != nil {
 		return err
 	}
@@ -273,7 +288,6 @@ func (s *Service) Close() error {
 	return nil
 }
 
-
 func (s *Service) refreshMetadata() {
 	defer atomic.StoreInt32(&s.dictRefresh, 0)
 	if err := s.loadModelDictionary(); err != nil {
@@ -286,6 +300,7 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 	for i := range hosts {
 		hosts[i].Init()
 	}
+
 	aClient := &Service{
 		Config: Config{
 			Model: model,
