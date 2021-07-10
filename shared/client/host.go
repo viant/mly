@@ -6,7 +6,10 @@ import (
 	"github.com/viant/mly/shared/common"
 	"net"
 	"strconv"
+	"time"
 )
+
+var requestTimeout = 5 *time.Second
 
 //Host represents endpoint host
 type Host struct {

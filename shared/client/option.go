@@ -52,17 +52,3 @@ func NewGmetric(gmetrics *gmetric.Service) Option {
 	return &gmetricsOpt{gmetrics: gmetrics}
 }
 
-
-type http1Option struct {
-	enabled bool
-}
-
-//Apply metrics
-func (o *http1Option) Apply(c *Service) {
-	c.Config.UseHTTP1 = true
-}
-
-//NewHttp1Option return option
-func NewHttp1Option(enabled bool) *http1Option{
-	return &http1Option{enabled: enabled}
-}

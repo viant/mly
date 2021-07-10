@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 	"github.com/francoispqt/gojay"
-	"github.com/posener/h2conn"
 	"github.com/viant/mly/service/buffer"
-	"github.com/viant/mly/shared/common"
 	"io"
 	"net/http"
 	"time"
 )
+
 
 type handler struct {
 	maxDuration time.Duration
@@ -26,48 +25,11 @@ func (h *handler) NewContext() (context.Context, context.CancelFunc) {
 
 //ServeHTTP serve HTTP
 func (h *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	if request.Method == "PUT" {
-		if err := h.serveHTTP2(writer, request); err != nil {
-			http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		}
-		return
-	}
 	if err := h.serveHTTP(writer, request); err != nil {
 		http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
 }
 
-func (h *handler) serveHTTP2(writer http.ResponseWriter, httpRequest *http.Request) error {
-	conn, err := h2conn.Accept(writer, httpRequest)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	data := h.pool.Get()
-	defer h.pool.Put(data)
-	for {
-		if err = h.handleHTTP2(conn, data); err != nil {
-			break
-		}
-	}
-	return err
-}
-
-func (h *handler) handleHTTP2(conn io.ReadWriter, data []byte) error {
-	response := &Response{Status: common.StatusOK, started: time.Now()} //this is bit
-	size, err := conn.Read(data)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := h.NewContext()
-	defer cancel()
-	request := h.service.NewRequest()
-	request.Body = data[:size]
-	if err = gojay.Unmarshal(data[:size], request); err != nil {
-		return err
-	}
-	return h.handleAppRequest(ctx, conn, request, response)
-}
 
 func (h *handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Request) error {
 	ctx, cancel := h.NewContext()
@@ -75,10 +37,11 @@ func (h *handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	request := h.service.NewRequest()
 	response := &Response{Status: "ok", started: time.Now()}
 	if httpRequest.Body == nil {
-		if err := h.buildRequestFromQuery(httpRequest, request);err != nil  {
+		if err := h.buildRequestFromQuery(httpRequest, request); err != nil {
 			return err
 		}
 	} else {
+		defer httpRequest.Body.Close()
 		data, size, err := buffer.Read(h.pool, httpRequest.Body)
 		defer h.pool.Put(data)
 		if err != nil {

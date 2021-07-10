@@ -30,13 +30,13 @@ type Service struct {
 	dict        *dictionary
 	gmetrics    *gmetric.Service
 	datastore   *datastore.Service
-	connections sync.Pool
 	mux         sync.RWMutex
 	messages    Messages
 	poolErr     error
 	hostIndex   int64
 	newStorable func() common.Storable
 	dictRefresh int32
+	httpClient http.Client
 }
 
 //NewMessage returns a new message
@@ -46,14 +46,6 @@ func (s *Service) NewMessage() *Message {
 	return message
 }
 
-func (s *Service) conn() (*connection, error) {
-	result := s.connections.Get()
-	if result == nil {
-		return nil, s.poolErr
-	}
-	conn := result.(*connection)
-	return conn, nil
-}
 
 func (s *Service) releaseMessage(input interface{}) {
 	releaser, ok := input.(Releaser)
@@ -92,12 +84,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		}
 	}
 
-	var body []byte
-	if s.Config.UseHTTP1 {
-		body, err = s.postRequest(data)
-	} else {
-		body, err = s.postRequestWithHttp2(data)
-	}
+	body, err := s.postRequest(data)
 	if err != nil {
 		return err
 	}
@@ -134,52 +121,23 @@ func (s *Service) postRequest(data []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		respone, err := http.DefaultClient.Do(request)
+		respone, err := s.httpClient.Do(request)
 		if err != nil {
 			postErr = err
 			continue
 		}
 		if respone.Body != nil {
 			data, err := io.ReadAll(respone.Body)
+			_ = respone.Body.Close()
 			if err != nil {
 				postErr = err
 				continue
 			}
-			_ = respone.Body.Close()
 			return data, err
 		}
 
 	}
 	return nil, postErr
-}
-
-func (s *Service) postRequestWithHttp2(data []byte) ([]byte, error) {
-	var conn *connection
-	var err error
-	var body []byte
-
-	for i := 0; i < s.MaxRetry; i++ {
-		conn, err = s.conn()
-		if err != nil {
-			continue
-		}
-		_, err = conn.Write(data)
-		if err != nil {
-			continue
-		}
-		body, err = conn.Read()
-		if err != nil {
-			continue
-		}
-		break
-	}
-	if err != nil {
-		return nil, err
-	}
-	if atomic.LoadInt32(&conn.closed) == 0 {
-		s.connections.Put(conn)
-	}
-	return body, nil
 }
 
 func (s *Service) getHost() (*Host, error) {
@@ -227,28 +185,11 @@ func (s *Service) init(options []Option) error {
 		return err
 	}
 	s.messages = newMessages(s.dictionary)
-	transport := &http2.Transport{
+	s.httpClient.Transport = &http2.Transport{
 		AllowHTTP: true,
 		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 			return net.Dial(network, addr)
 		},
-	}
-	httpClient := http.Client{
-		Transport: transport,
-		Timeout:   requestTimeout,
-	}
-
-	s.connections.New = func() interface{} {
-		host, err := s.getHost()
-		if err != nil {
-			s.poolErr = err
-			return nil
-		}
-		conn, err := newConnection(host, &httpClient, host.evalURL(s.Model))
-		if err != nil {
-			s.poolErr = err
-		}
-		return conn
 	}
 	return nil
 }
@@ -328,12 +269,10 @@ func (s *Service) initDatastore() error {
 
 //Close closes the service
 func (s *Service) Close() error {
-	conn, err := s.conn()
-	if err != nil {
-		return err
-	}
-	return conn.Close()
+	s.httpClient.CloseIdleConnections()
+	return nil
 }
+
 
 func (s *Service) refreshMetadata() {
 	defer atomic.StoreInt32(&s.dictRefresh, 0)

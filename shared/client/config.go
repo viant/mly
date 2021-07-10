@@ -9,7 +9,6 @@ type Config struct {
 	Hosts       []*Host
 	Model       string
 	CacheSizeMb int
-	UseHTTP1    bool
 	CacheScope  *CacheScope
 	Datastore   *config.Datastore
 	MaxRetry    int
