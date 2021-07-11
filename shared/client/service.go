@@ -268,7 +268,7 @@ func (s *Service) initDatastore() error {
 			return err
 		}
 		s.datastore = aMap[ds.ID]
-		s.datastore.ClientMode = true
+		s.datastore.Mode = true
 		if err := ds.FieldsDescriptor(ds.Fields); err != nil {
 			return err
 		}

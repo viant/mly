@@ -28,15 +28,26 @@ const (
 	CacheStatusFound
 )
 
+//StoreMode represents service mode
+type StoreMode int
+
+const (
+	//ModeServer server mode
+	ModeServer = StoreMode(0)
+	//ModeClient client mode
+	ModeClient = StoreMode(1)
+)
+
+
 //Service datastore service
 type Service struct {
-	counter    *gmetric.Operation
-	l1Client   client.Service
-	l2Client   client.Service
-	useCache   bool
-	cache      *scache.Cache
-	Config     *config.Datastore
-	ClientMode bool
+	counter  *gmetric.Operation
+	l1Client client.Service
+	l2Client client.Service
+	useCache bool
+	cache    *scache.Cache
+	Config   *config.Datastore
+	Mode     StoreMode
 }
 
 //Put puts entry to the datastore
@@ -45,7 +56,7 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 	if err := s.updateCache(key, value, dictHash); err != nil {
 		return err
 	}
-	if s.l1Client == nil || s.ClientMode {
+	if s.l1Client == nil || s.Mode == ModeClient {
 		return nil
 	}
 	storable := getStorable(value)
@@ -72,6 +83,7 @@ func (s *Service) GetInto(ctx context.Context, key *Key, storable Value) (dictHa
 	return s.getInto(ctx, key, storable)
 }
 
+
 func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, error) {
 	onDone := s.counter.Begin(time.Now())
 	stats := stat.NewValues()
@@ -90,6 +102,9 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 			stats.Append(stat.HasValue)
 			return dictHash, nil
 		}
+	}
+	if s.Mode == ModeServer {//in server mode, cache hit rate would be low and expensive, thus skipping it
+		return 0, types.ErrKeyNotFound
 	}
 	if s.l1Client == nil {
 		return 0, types.ErrKeyNotFound
