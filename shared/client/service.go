@@ -66,7 +66,7 @@ func (s *Service) dictionary() *dictionary {
 
 //Run run model prediction
 func (s *Service) Run(ctx context.Context, input interface{}, response *Response) error {
-	onDone:= s.counter.Begin(time.Now())
+	onDone := s.counter.Begin(time.Now())
 	stats := stat.NewValues()
 	defer func() {
 		onDone(time.Now(), *stats...)
@@ -268,7 +268,7 @@ func (s *Service) initDatastore() error {
 			return err
 		}
 		s.datastore = aMap[ds.ID]
-		s.datastore.Mode = true
+		s.datastore.Mode = datastore.ModeClient
 		if err := ds.FieldsDescriptor(ds.Fields); err != nil {
 			return err
 		}
