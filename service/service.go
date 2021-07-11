@@ -74,7 +74,7 @@ func (s *Service) Do(ctx context.Context, request *Request, response *Response) 
 	err := s.do(ctx, request, response)
 	if err != nil {
 		response.Error = err.Error()
-		response.Status = "error"
+		response.Status = common.StatusError
 	}
 	return nil
 }
@@ -91,7 +91,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	err := request.Validate()
 	if err != nil {
 		stats.Append(err)
-		return err
+		return fmt.Errorf("%w, body: %s",err, request.Body)
 	}
 	useDatastore := s.useDatastore && request.Key != ""
 	var key *datastore.Key
