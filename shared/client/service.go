@@ -197,8 +197,9 @@ func (s *Service) init(options []Option) error {
 		return err
 	}
 	s.messages = newMessages(s.dictionary)
+	host, _ := s.getHost()
 	s.httpClient.Transport = &http2.Transport{
-		AllowHTTP: true,
+		AllowHTTP: host.Port != 443,
 		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 			return net.Dial(network, addr)
 		},
