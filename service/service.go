@@ -122,7 +122,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	response.Data = transformed
 	if useDatastore {
 		dictHash := s.Dictionary().Hash
-		_ = s.datastore.Put(ctx, key, transformed, dictHash)
+		go s.datastore.Put(ctx, key, transformed, dictHash)
 	}
 	return nil
 }
