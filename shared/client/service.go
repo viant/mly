@@ -93,7 +93,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}
 
 	stats.Append(stat.NoSuchKey)
-	body, err := s.postRequest(data)
+	body, err := s.postRequest(ctx, data)
 	if err != nil {
 		stats.Append(err)
 		return err
@@ -118,7 +118,7 @@ func (s *Service) assertDictHash(response *Response) {
 	}
 }
 
-func (s *Service) postRequest(data []byte) ([]byte, error) {
+func (s *Service) postRequest(ctx context.Context, data []byte) ([]byte, error) {
 	host, err := s.getHost()
 	if err != nil {
 		return nil, err
@@ -127,7 +127,7 @@ func (s *Service) postRequest(data []byte) ([]byte, error) {
 	var postErr error
 	for i := 0; i < s.MaxRetry; i++ {
 		postErr = nil
-		request, err := http.NewRequest(http.MethodPost, host.evalURL(s.Model), io.NopCloser(bytes.NewReader(data)))
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, host.evalURL(s.Model), io.NopCloser(bytes.NewReader(data)))
 		if err != nil {
 			return nil, err
 		}
