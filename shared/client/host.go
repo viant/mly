@@ -100,10 +100,10 @@ func NewHost(name string, port, GRPCPort int) *Host {
 
 
 //NewHosts creates hosts
-func NewHosts(port int, names []string) []*Host {
+func NewHosts(port, grpcPort int, names []string) []*Host {
 	var result = make([]*Host, 0)
 	for _, name := range names {
-		result = append(result, &Host{Name: name, Port: port})
+		result = append(result, &Host{Name: name, Port: port, GRPCPort: grpcPort})
 	}
 	return result
 }
