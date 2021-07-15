@@ -97,7 +97,6 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	body, err := s.postRequest(ctx, data)
 	if err != nil {
 
-
 		stats.Append(err)
 		return err
 	}
@@ -128,9 +127,9 @@ func (s *Service) postRequest(ctx context.Context, data []byte) ([]byte, error) 
 	}
 	var output []byte
 	if host.GRPCPort > 0 {
-		output, err =  s.grpcPost(ctx, data, host)
+		output, err = s.grpcPost(ctx, data, host)
 	} else {
-		output, err =  s.httpPost(ctx, data, host)
+		output, err = s.httpPost(ctx, data, host)
 	}
 	if common.IsConnectionError(err) {
 		host.FlagDown()
@@ -138,7 +137,6 @@ func (s *Service) postRequest(ctx context.Context, data []byte) ([]byte, error) 
 	}
 	return output, err
 }
-
 
 func (s *Service) grpcPost(ctx context.Context, data []byte, host *Host) ([]byte, error) {
 	client, err := host.gRPCPool().Conn()
@@ -164,8 +162,6 @@ func (s *Service) grpcPost(ctx context.Context, data []byte, host *Host) ([]byte
 	client.Release()
 	return response.Output, nil
 }
-
-
 
 func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte, error) {
 	var postErr error
@@ -242,8 +238,20 @@ func (s *Service) init(options []Option) error {
 	}
 	s.messages = newMessages(s.dictionary)
 	host, _ := s.getHost()
+	var tslConfig *tls.Config
+	if host.Port == 443 {
+		cert, err := getCertPool()
+		if err != nil {
+			return fmt.Errorf("failed to create certificate: %v", err)
+		}
+		tslConfig = &tls.Config{
+			RootCAs: cert,
+		}
+	}
+
 	s.httpClient.Transport = &http2.Transport{
-		AllowHTTP: host.Port != 443,
+		AllowHTTP:       host.Port != 443,
+		TLSClientConfig: tslConfig,
 		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 			return net.Dial(network, addr)
 		},
