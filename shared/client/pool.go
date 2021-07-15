@@ -32,12 +32,17 @@ func (c *grpcClient) Release() {
 	pool.Put(c)
 }
 
+var certPool *x509.CertPool
+
 func newConn(addr string) (*grpcClient, error) {
 	var options = make([]grpc.DialOption, 0)
+	var err error
 	if strings.HasSuffix(addr, ":443") {
-		certPool, err := x509.SystemCertPool()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create certificate")
+		if certPool == nil {
+			certPool, err = x509.SystemCertPool()
+			if err != nil {
+				return nil, fmt.Errorf("failed to create certificate")
+			}
 		}
 		config := &tls.Config{
 			RootCAs: certPool,
