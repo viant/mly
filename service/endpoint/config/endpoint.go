@@ -7,6 +7,7 @@ import (
 //Endpoint represents an endpoint
 type Endpoint struct {
 	Port           int
+	GRPCPort       int
 	ReadTimeoutMs  int
 	WriteTimeoutMs int
 	WriteTimeout   time.Duration

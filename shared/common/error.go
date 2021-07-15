@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+const (
+	dialTCPFragment  = "dial tcp"
+	connRefusedError = "refused"
+)
+
 //ErrNodeDown node down error
 var ErrNodeDown = errors.New("node is down")
 
@@ -67,4 +72,12 @@ func IsInvalidNode(err error) bool {
 
 	}
 	return aeroError.ResultCode() == types.INVALID_NODE_ERROR
+}
+
+//IsConnectionError returns true if error is connection errpr
+func IsConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), dialTCPFragment) || strings.Contains(err.Error(), connRefusedError)
 }

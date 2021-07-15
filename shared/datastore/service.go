@@ -38,7 +38,6 @@ const (
 	ModeClient = StoreMode(1)
 )
 
-
 //Service datastore service
 type Service struct {
 	counter  *gmetric.Operation
@@ -70,19 +69,22 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 	writeKey, _ := key.Key()
 	wp := key.WritePolicy(0)
 	wp.SendKey = true
-	if err = s.l1Client.Put(ctx, wp, writeKey, bins); err == nil && s.l2Client != nil {
+	if s.l1Client != nil && !s.Config.ReadOnly {
+		if err = s.l1Client.Put(ctx, wp, writeKey, bins); err != nil {
+			return err
+		}
+	}
+	if s.l2Client != nil && !s.Config.L2.ReadOnly {
 		k2Key, _ := key.L2.Key()
 		err = s.l2Client.Put(ctx, wp, k2Key, bins)
 	}
 	return err
 }
 
-
 //GetInto gets data into storable or error
 func (s *Service) GetInto(ctx context.Context, key *Key, storable Value) (dictHash int, err error) {
 	return s.getInto(ctx, key, storable)
 }
-
 
 func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, error) {
 	onDone := s.counter.Begin(time.Now())
@@ -103,7 +105,7 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 			return dictHash, nil
 		}
 	}
-	if s.Mode == ModeServer {//in server mode, cache hit rate would be low and expensive, thus skipping it
+	if s.Mode == ModeServer { //in server mode, cache hit rate would be low and expensive, thus skipping it
 		return 0, types.ErrKeyNotFound
 	}
 	if s.l1Client == nil {

@@ -2,8 +2,12 @@ package endpoint
 
 import (
 	"context"
+	"fmt"
 	"github.com/jessevdk/go-flags"
+	"github.com/viant/mly/shared/pb"
+	"google.golang.org/grpc"
 	"log"
+	"net"
 	"sync"
 )
 
@@ -57,15 +61,35 @@ func runApp(config *Config, wg *sync.WaitGroup) {
 	if err := config.Validate();err != nil {
 		log.Fatal(err)
 	}
-	app, err := New(config)
+	srv, err := New(config)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if wg != nil {
 		wg.Done()
 	}
-	app.ListenAndServe()
+	if config.Endpoint.GRPCPort > 0 {
+		go startGrpc(srv, config)
+	}
+
+	srv.ListenAndServe()
 }
+
+func startGrpc(srv *Service, config *Config) {
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", config.Endpoint.GRPCPort))
+	if err != nil {
+		log.Fatalf("failed to GRPC listen: %v", err)
+	}
+	grpcServer := grpc.NewServer(grpc.MaxRecvMsgSize(64 *1024), grpc.MaxSendMsgSize(64 *1024))
+	pb.RegisterEvaluatorServer(grpcServer, srv)
+	fmt.Printf("starting mly GRCP endpoint: %v\n", config.Endpoint.GRPCPort)
+	err = grpcServer.Serve(lis)
+	if err != nil {
+		log.Fatalf("failed to start GRPC: %v", err)
+	}
+}
+
+
 
 //IsHelpOption returns true if helper
 func IsHelpOption(args []string) bool {

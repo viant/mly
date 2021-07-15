@@ -16,10 +16,10 @@ type Reference struct {
 	timeToLive   time.Duration
 	RetryTimeMs  int
 	retryTime    time.Duration
+	ReadOnly     bool
 }
 
 func (d *Reference) TimeToLive() time.Duration {
-
 	if d.timeToLive > 0 {
 		return d.timeToLive
 	}

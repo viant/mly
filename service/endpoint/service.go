@@ -3,12 +3,14 @@ package endpoint
 import (
 	"context"
 	"fmt"
+	"github.com/francoispqt/gojay"
 	"github.com/viant/afs"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service"
 	"github.com/viant/mly/service/buffer"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
+	"github.com/viant/mly/shared/pb"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
@@ -22,16 +24,37 @@ import (
 
 //Service represents http bridge
 type Service struct {
-	metrics *gmetric.Service
-	config  *Config
-	server  *http.Server
-	fs      afs.Service
+	metrics  *gmetric.Service
+	config   *Config
+	server   *http.Server
+	fs       afs.Service
+	handlers map[string]*service.Handler
 }
+
 
 //Metric returns operation metrics
 func (s *Service) Metric() *gmetric.Service {
 	return s.metrics
 }
+
+func (s *Service) Evaluate(ctx context.Context, request *pb.EvaluateRequest) (*pb.EvaluateResponse, error) {
+	handler, ok := s.handlers[request.Model]
+	if ! ok {
+		response := &service.Response{}
+		response.SetError(fmt.Errorf("unknown model: %v", request.Model))
+		data, _ := gojay.Marshal(response)
+		return &pb.EvaluateResponse{
+			Output: data,
+		},nil
+	}
+	return handler.Evaluate(ctx, request)
+}
+
+
+func (s *Service) mustEmbedUnimplementedEvaluatorServer() {
+	panic("implement me")
+}
+
 
 //ListenAndServe start http endpoint
 func (s *Service) ListenAndServe() error {
@@ -50,8 +73,6 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
-
-
 func (s *Service) initModelHandler(datastores map[string]*datastore.Service, pool *buffer.Pool, mux *http.ServeMux) error {
 	for i, model := range s.config.ModelList.Models {
 		srv, err := service.New(context.TODO(), s.fs, s.config.ModelList.Models[i], s.metrics, datastores)
@@ -59,13 +80,13 @@ func (s *Service) initModelHandler(datastores map[string]*datastore.Service, poo
 			return fmt.Errorf("failed to create service for modelService: %v, due to %w", model.ID, err)
 		}
 		handler := service.NewHandler(srv, pool, s.config.Endpoint.WriteTimeout-time.Millisecond)
+		s.handlers[model.ID] = handler
 		mux.Handle(fmt.Sprintf(common.ModelURI, model.ID), handler)
 		metaHandler := newMetaHandler(srv, &s.config.DatastoreList)
 		mux.Handle(fmt.Sprintf(common.MetaURI, model.ID), metaHandler)
 	}
 	return nil
 }
-
 
 //ShutdownOnInterrupt
 func (s *Service) shutdownOnInterrupt() {
@@ -83,8 +104,6 @@ func (s *Service) shutdownOnInterrupt() {
 	}()
 }
 
-
-
 //New creates a bridge Service
 func New(config *Config) (*Service, error) {
 	metrics := gmetric.New()
@@ -92,20 +111,22 @@ func New(config *Config) (*Service, error) {
 	mux.Handle(configURI, NewConfigHandler(config))
 	metricHandler := gmetric.NewHandler(common.MetricURI, metrics)
 	mux.Handle(common.MetricURI, metricHandler)
-
-	result := &Service{config: config, metrics: metrics, fs: afs.New()}
+	result := &Service{
+		config:   config,
+		metrics:  metrics,
+		fs:       afs.New(),
+		handlers: make(map[string]*service.Handler),
+	}
 	pool := buffer.New(config.Endpoint.PoolMaxSize, config.Endpoint.BufferSize)
 
 	datastores, err := datastore.NewStores(&config.DatastoreList, metrics)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create datastores: %w", err)
 	}
-
 	err = result.initModelHandler(datastores, pool, mux)
 	if err != nil {
 		return nil, err
 	}
-
 
 	result.server = &http.Server{
 		Addr:           ":" + strconv.Itoa(config.Endpoint.Port),

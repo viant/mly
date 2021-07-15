@@ -6,17 +6,21 @@ import (
 	"github.com/viant/mly/shared/common"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 )
 
-var requestTimeout = 5 *time.Second
+var requestTimeout = 5 * time.Second
 
 //Host represents endpoint host
 type Host struct {
-	Name string
-	Port int
+	Name    string
+	Port    int
+	GRPCPort int
+	GRPCPoolSize int
+	mux sync.RWMutex
 	*circut.Breaker
-
+	pool *grpcPool
 }
 
 
@@ -45,17 +49,15 @@ func (h *Host) metaDictionaryURL(model string) string {
 	return "http://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.MetaDictionaryURI, model)
 }
 
-
-func (c *Host) Probe() {
-	if c.isConnectionUp() {
-		c.FlagUp()
+func (h *Host) Probe() {
+	if h.isConnectionUp() {
+		h.FlagUp()
 		return
 	}
 }
 
-
-func (c *Host) isConnectionUp() bool {
-	connection, err := net.DialTimeout("tcp", fmt.Sprintf("%v:%v", c.Name, c.Port), requestTimeout)
+func (h *Host) isConnectionUp() bool {
+	connection, err := net.DialTimeout("tcp", fmt.Sprintf("%v:%v", h.Name, h.Port), requestTimeout)
 	if err != nil {
 		return false
 	}
@@ -67,16 +69,33 @@ func (h *Host) Init() {
 	if h.Breaker == nil {
 		h.Breaker = circut.New(requestTimeout, h)
 	}
+	if h.GRPCPoolSize == 0 {
+		h.GRPCPoolSize = 30
+	}
 }
 
 
 
+func (h *Host) gRPCPool() *grpcPool {
+	h.mux.RLock()
+	pool := h.pool
+	h.mux.RUnlock()
+	if pool == nil {
+		h.mux.Lock()
+		if h.pool == nil {
+			h.pool = newGrpcPool(h.GRPCPoolSize, fmt.Sprintf("%v:%v", h.Name, h.GRPCPort))
+		}
+		h.mux.Unlock()
+	}
+	return h.pool
+}
+
 //NewHost returns new host
-func NewHost(name string, port int) *Host {
+func NewHost(name string, port, GRPCPort int) *Host {
 	if port == 0 {
 		port = 80
 	}
-	return &Host{Name: name, Port: port}
+	return &Host{Name: name, Port: port, GRPCPort: GRPCPort}
 }
 
 
@@ -84,7 +103,7 @@ func NewHost(name string, port int) *Host {
 func NewHosts(port int, names []string) []*Host {
 	var result = make([]*Host, 0)
 	for _, name := range names {
-		result = append(result, &Host{Name: name ,Port: port})
+		result = append(result, &Host{Name: name, Port: port})
 	}
 	return result
 }

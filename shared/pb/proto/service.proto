@@ -1,0 +1,17 @@
+  syntax = "proto3";
+// The greeter service definition.
+service Evaluator {
+  // Sends a greeting
+  rpc Evaluate (EvaluateRequest) returns (EvaluateResponse) {}
+}
+
+// The request message
+message EvaluateRequest {
+  string model = 1;
+  bytes input = 2;
+}
+
+// The response message
+message EvaluateResponse {
+  bytes output   = 1;
+}
