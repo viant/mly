@@ -254,7 +254,6 @@ func (s *Service) initHTTPClient() error {
 	}
 
 	http2Transport := &http2.Transport{
-		AllowHTTP:       !host.IsSecurePort(),
 		TLSClientConfig: tslConfig,
 	}
 	if ! host.IsSecurePort() {
@@ -275,7 +274,7 @@ func (s *Service) loadModelConfig() error {
 		if err != nil {
 			return err
 		}
-		if s.Datastore, err = s.discoverConfig(host.metaConfigURL(s.Model)); err != nil {
+		if s.Datastore, err = s.discoverConfig(host, host.metaConfigURL(s.Model)); err != nil {
 			return err
 		}
 	}
@@ -296,7 +295,9 @@ func (s *Service) loadModelDictionary() error {
 		return err
 	}
 	URL := host.metaDictionaryURL(s.Model)
-	response, err := s.httpClient.Get(URL)
+
+	httpClient := s.getHTTPClient(host)
+	response, err := httpClient.Get(URL)
 	if err != nil {
 		return fmt.Errorf("failed to load dictionary: %w", err)
 	}
@@ -317,6 +318,14 @@ func (s *Service) loadModelDictionary() error {
 	s.RWMutex.Unlock()
 	s.messages = newMessages(s.dictionary)
 	return nil
+}
+
+func (s *Service) getHTTPClient(host *Host) *http.Client {
+	httpClient := http.DefaultClient
+	if host.IsSecurePort() {
+		httpClient = &s.httpClient
+	}
+	return httpClient
 }
 
 func (s *Service) initDatastore() error {
@@ -369,8 +378,11 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 	return aClient, aClient.init(options)
 }
 
-func (s *Service) discoverConfig(URL string) (*config.Datastore, error) {
-	response, err := s.httpClient.Get(URL)
+func (s *Service) discoverConfig(host *Host, URL string) (*config.Datastore, error) {
+
+	httpClient := s.getHTTPClient(host)
+
+	response, err := httpClient.Get(URL)
 	if err != nil {
 		return nil, err
 	}
