@@ -151,14 +151,10 @@ func (s *Service) grpcPost(ctx context.Context, data []byte, host *Host) ([]byte
 		Model: s.Model,
 		Input: data,
 	})
-	fmt.Printf("err: %v\n", err)
-
 	if err != nil {
 		client.Close()
 		return nil, err
 	}
-	fmt.Printf("data: %s\n", response.Output)
-
 	client.Release()
 	return response.Output, nil
 }
@@ -226,7 +222,10 @@ func (s *Service) init(options []Option) error {
 	if s.Config.MaxRetry == 0 {
 		s.Config.MaxRetry = 3
 	}
-
+	err := s.initHTTPClient()
+	if err != nil {
+		return err
+	}
 	if err := s.loadModelConfig(); err != nil {
 		return err
 	}
@@ -237,9 +236,14 @@ func (s *Service) init(options []Option) error {
 		return err
 	}
 	s.messages = newMessages(s.dictionary)
+
+	return nil
+}
+
+func (s *Service) initHTTPClient() error {
 	host, _ := s.getHost()
 	var tslConfig *tls.Config
-	if host.Port == 443 {
+	if host.IsSecurePort() {
 		cert, err := getCertPool()
 		if err != nil {
 			return fmt.Errorf("failed to create certificate: %v", err)
@@ -249,15 +253,20 @@ func (s *Service) init(options []Option) error {
 		}
 	}
 
-	s.httpClient.Transport = &http2.Transport{
-		AllowHTTP:       host.Port != 443,
+	http2Transport := &http2.Transport{
+		AllowHTTP:       !host.IsSecurePort(),
 		TLSClientConfig: tslConfig,
-		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-			return net.Dial(network, addr)
-		},
 	}
+	if ! host.IsSecurePort() {
+		http2Transport.AllowHTTP = true
+		http2Transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+			return net.Dial(network, addr)
+		}
+	}
+	s.httpClient.Transport = http2Transport
 	return nil
 }
+
 
 func (s *Service) loadModelConfig() error {
 	if s.Datastore == nil {
@@ -266,7 +275,7 @@ func (s *Service) loadModelConfig() error {
 		if err != nil {
 			return err
 		}
-		if s.Datastore, err = discoverConfig(host.metaConfigURL(s.Model)); err != nil {
+		if s.Datastore, err = s.discoverConfig(host.metaConfigURL(s.Model)); err != nil {
 			return err
 		}
 	}
@@ -287,7 +296,7 @@ func (s *Service) loadModelDictionary() error {
 		return err
 	}
 	URL := host.metaDictionaryURL(s.Model)
-	response, err := http.DefaultClient.Get(URL)
+	response, err := s.httpClient.Get(URL)
 	if err != nil {
 		return fmt.Errorf("failed to load dictionary: %w", err)
 	}
@@ -360,8 +369,8 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 	return aClient, aClient.init(options)
 }
 
-func discoverConfig(URL string) (*config.Datastore, error) {
-	response, err := http.DefaultClient.Get(URL)
+func (s *Service) discoverConfig(URL string) (*config.Datastore, error) {
+	response, err := s.httpClient.Get(URL)
 	if err != nil {
 		return nil, err
 	}

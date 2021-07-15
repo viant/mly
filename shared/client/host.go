@@ -14,20 +14,24 @@ var requestTimeout = 5 * time.Second
 
 //Host represents endpoint host
 type Host struct {
-	Name    string
-	Port    int
-	GRPCPort int
+	Name         string
+	Port         int
+	SecurePort   int
+	GRPCPort     int
 	GRPCPoolSize int
-	mux sync.RWMutex
+	mux          sync.RWMutex
 	*circut.Breaker
 	pool *grpcPool
 }
 
-
+//IsSecurePort() returns true if secure port
+func (h *Host) IsSecurePort() bool {
+	return h.Port%1000 == 443
+}
 
 //URL returns model eval URL
 func (h *Host) evalURL(model string) string {
-	if h.Port == 443 {
+	if h.IsSecurePort() {
 		return "https://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.ModelURI, model)
 	}
 	return "http://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.ModelURI, model)
@@ -35,7 +39,7 @@ func (h *Host) evalURL(model string) string {
 
 //URL returns meta config model eval URL
 func (h *Host) metaConfigURL(model string) string {
-	if h.Port == 443 {
+	if h.IsSecurePort() {
 		return "https://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.MetaConfigURI, model)
 	}
 	return "http://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.MetaConfigURI, model)
@@ -43,7 +47,7 @@ func (h *Host) metaConfigURL(model string) string {
 
 //URL returns meta config model eval URL
 func (h *Host) metaDictionaryURL(model string) string {
-	if h.Port == 443 {
+	if h.IsSecurePort() {
 		return "https://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.MetaDictionaryURI, model)
 	}
 	return "http://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.MetaDictionaryURI, model)
@@ -74,8 +78,6 @@ func (h *Host) Init() {
 	}
 }
 
-
-
 func (h *Host) gRPCPool() *grpcPool {
 	h.mux.RLock()
 	pool := h.pool
@@ -98,9 +100,8 @@ func NewHost(name string, port, GRPCPort int) *Host {
 	return &Host{Name: name, Port: port, GRPCPort: GRPCPort}
 }
 
-
 //NewHosts creates hosts
-func NewHosts(port, grpcPort int, names []string) []*Host {
+func NewHosts(port, securePort, grpcPort int, names []string) []*Host {
 	var result = make([]*Host, 0)
 	for _, name := range names {
 		result = append(result, &Host{Name: name, Port: port, GRPCPort: grpcPort})
