@@ -14,11 +14,9 @@ type grpcClient struct {
 	pending int32
 }
 
-
 func (c *grpcClient) Close() {
 	c.ClientConn.Close()
 }
-
 
 func (c *grpcClient) Release() {
 	pool := c.pool
@@ -54,7 +52,6 @@ func (p *grpcPool) Put(client *grpcClient) {
 	atomic.AddInt32(&p.current, -1)
 }
 
-
 func (p *grpcPool) Conn() (*grpcClient, error) {
 	result := p.Pool.Get()
 	if result == nil {
@@ -66,6 +63,16 @@ func (p *grpcPool) Conn() (*grpcClient, error) {
 	return result.(*grpcClient), nil
 }
 
+
+//Reset reset pooled connection
+func (p *grpcPool) Reset() {
+	for atomic.AddInt32(&p.current, -1) >= 0 {
+		if result := p.Pool.Get(); result != nil {
+			conn := result.(*grpc.ClientConn)
+			_ = conn.Close()
+		}
+	}
+}
 
 func newGrpcPool(maxSize int, addr string) *grpcPool {
 	result := &grpcPool{max: int32(maxSize)}

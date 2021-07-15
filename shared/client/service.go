@@ -134,6 +134,7 @@ func (s *Service) postRequest(ctx context.Context, data []byte) ([]byte, error) 
 	}
 	if common.IsConnectionError(err) {
 		host.FlagDown()
+		host.pool.Reset()
 	}
 	return output, err
 }
