@@ -1,9 +1,13 @@
 package client
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"github.com/viant/mly/shared/pb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -29,7 +33,20 @@ func (c *grpcClient) Release() {
 }
 
 func newConn(addr string) (*grpcClient, error) {
-	conn, err := grpc.Dial(addr, grpc.WithInsecure())
+	var options = make([]grpc.DialOption, 0)
+	if strings.HasSuffix(addr, ":443") {
+		certPool, err := x509.SystemCertPool()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create certificate")
+		}
+		config := &tls.Config{
+			RootCAs: certPool,
+		}
+		options = append(options, grpc.WithTransportCredentials(credentials.NewTLS(config)))
+	} else {
+		options = append(options, grpc.WithInsecure())
+	}
+	conn, err := grpc.Dial(addr,options...)
 	if err != nil {
 		return nil, err
 	}

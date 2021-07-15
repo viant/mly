@@ -153,10 +153,14 @@ func (s *Service) grpcPost(ctx context.Context, data []byte, host *Host) ([]byte
 		Model: s.Model,
 		Input: data,
 	})
+	fmt.Printf("err: %v\n", err)
+
 	if err != nil {
 		client.Close()
 		return nil, err
 	}
+	fmt.Printf("data: %s\n", response.Output)
+
 	client.Release()
 	return response.Output, nil
 }
