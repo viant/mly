@@ -148,6 +148,7 @@ func (s *Service) grpcPost(ctx context.Context, data []byte, host *Host) ([]byte
 		}
 		return nil, err
 	}
+
 	response, err := client.Evaluate(ctx, &pb.EvaluateRequest{
 		Model: s.Model,
 		Input: data,

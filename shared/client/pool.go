@@ -1,9 +1,9 @@
 package client
 
 import (
+	"fmt"
 	"github.com/viant/mly/shared/pb"
 	"google.golang.org/grpc"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -29,12 +29,7 @@ func (c *grpcClient) Release() {
 }
 
 func newConn(addr string) (*grpcClient, error) {
-	isSecure := strings.HasSuffix(addr,":443")
-	var options = make([]grpc.DialOption, 0)
-	if ! isSecure {
-		options = append(options, grpc.WithInsecure())
-	}
-	conn, err := grpc.Dial(addr, options...)
+	conn, err := grpc.Dial(addr, grpc.WithInsecure())
 	if err != nil {
 		return nil, err
 	}
@@ -61,6 +56,9 @@ func (p *grpcPool) Put(client *grpcClient) {
 func (p *grpcPool) Conn() (*grpcClient, error) {
 	result := p.Pool.Get()
 	if result == nil {
+		if p.err == nil {
+			p.err = fmt.Errorf("failed to create client")
+		}
 		return nil, p.err
 	}
 	if atomic.AddInt32(&p.current, -1) < 0 {
@@ -68,7 +66,6 @@ func (p *grpcPool) Conn() (*grpcClient, error) {
 	}
 	return result.(*grpcClient), nil
 }
-
 
 //Reset reset pooled connection
 func (p *grpcPool) Reset() {
@@ -83,8 +80,11 @@ func (p *grpcPool) Reset() {
 func newGrpcPool(maxSize int, addr string) *grpcPool {
 	result := &grpcPool{max: int32(maxSize)}
 	result.Pool.New = func() interface{} {
-		var cl *grpcClient
-		cl, result.err = newConn(addr)
+		cl, err := newConn(addr)
+		if err != nil {
+			result.err = err
+			return nil
+		}
 		if cl != nil {
 			cl.pool = result
 		}
