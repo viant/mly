@@ -3,6 +3,7 @@ package client
 import (
 	"github.com/viant/mly/shared/pb"
 	"google.golang.org/grpc"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -28,7 +29,12 @@ func (c *grpcClient) Release() {
 }
 
 func newConn(addr string) (*grpcClient, error) {
-	conn, err := grpc.Dial(addr, grpc.WithInsecure())
+	isSecure := strings.HasSuffix(addr,":443")
+	var options = make([]grpc.DialOption, 0)
+	if ! isSecure {
+		options = append(options, grpc.WithInsecure())
+	}
+	conn, err := grpc.Dial(addr, options...)
 	if err != nil {
 		return nil, err
 	}
