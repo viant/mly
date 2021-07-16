@@ -4,7 +4,6 @@ import (
 	"github.com/viant/gmetric"
 )
 
-
 //Option client option
 type Option interface {
 	Apply(c *Service)
@@ -52,3 +51,16 @@ func NewGmetric(gmetrics *gmetric.Service) Option {
 	return &gmetricsOpt{gmetrics: gmetrics}
 }
 
+type dictHashValidationOpt struct {
+	enable bool
+}
+
+//Apply metrics
+func (o *dictHashValidationOpt) Apply(c *Service) {
+	c.Config.DictHashValidation = o.enable
+}
+
+//NewDictHashValidation creates a new dict has validation
+func NewDictHashValidation(enable bool) Option {
+	return &dictHashValidationOpt{enable: enable}
+}

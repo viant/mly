@@ -87,7 +87,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		if dictHash, err := s.datastore.GetInto(ctx, key, response.Data); err == nil {
 			response.Status = common.StatusCached
 			response.DictHash = dictHash
-			if response.DictHash == 0 || response.DictHash == s.dictionary().hash {
+			if (!s.Config.DictHashValidation) || response.DictHash == 0 || response.DictHash == s.dictionary().hash {
 				return nil
 			}
 		}
@@ -256,7 +256,7 @@ func (s *Service) initHTTPClient() error {
 	http2Transport := &http2.Transport{
 		TLSClientConfig: tslConfig,
 	}
-	if ! host.IsSecurePort() {
+	if !host.IsSecurePort() {
 		http2Transport.AllowHTTP = true
 		http2Transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 			return net.Dial(network, addr)
@@ -265,7 +265,6 @@ func (s *Service) initHTTPClient() error {
 	s.httpClient.Transport = http2Transport
 	return nil
 }
-
 
 func (s *Service) loadModelConfig() error {
 	if s.Datastore == nil {

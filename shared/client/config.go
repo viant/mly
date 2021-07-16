@@ -12,6 +12,7 @@ type Config struct {
 	CacheScope  *CacheScope
 	Datastore   *config.Datastore
 	MaxRetry    int
+	DictHashValidation bool
 }
 
 //CacheSize returns cache size
