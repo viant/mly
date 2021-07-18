@@ -16,7 +16,6 @@ var requestTimeout = 5 * time.Second
 type Host struct {
 	Name         string
 	Port         int
-	SecurePort   int
 	GRPCPort     int
 	GRPCPoolSize int
 	mux          sync.RWMutex
@@ -61,7 +60,11 @@ func (h *Host) Probe() {
 }
 
 func (h *Host) isConnectionUp() bool {
-	connection, err := net.DialTimeout("tcp", fmt.Sprintf("%v:%v", h.Name, h.Port), requestTimeout)
+	port := h.Port
+	if h.GRPCPort > 0 {
+		port = h.GRPCPort
+	}
+	connection, err := net.DialTimeout("tcp", fmt.Sprintf("%v:%v", h.Name, port), requestTimeout)
 	if err != nil {
 		return false
 	}
