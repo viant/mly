@@ -128,13 +128,15 @@ func (s *Service) postRequest(ctx context.Context, data []byte) ([]byte, error) 
 	var output []byte
 	if host.GRPCPort > 0 {
 		output, err = s.grpcPost(ctx, data, host)
+		if common.IsConnectionError(err) {
+			host.FlagDown()
+			host.grpcPool.Reset()
+		}
 	} else {
 		output, err = s.httpPost(ctx, data, host)
-	}
-	if common.IsConnectionError(err) {
 		host.FlagDown()
-		host.pool.Reset()
 	}
+
 	return output, err
 }
 

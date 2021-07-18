@@ -89,8 +89,9 @@ func (p *grpcPool) Conn() (*grpcClient, error) {
 func (p *grpcPool) Reset() {
 	for atomic.AddInt32(&p.current, -1) >= 0 {
 		if result := p.Pool.Get(); result != nil {
-			conn := result.(*grpc.ClientConn)
-			_ = conn.Close()
+			if conn := result.(*grpc.ClientConn);conn != nil {
+				_ = conn.Close()
+			}
 		}
 	}
 }

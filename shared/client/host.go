@@ -21,7 +21,7 @@ type Host struct {
 	GRPCPoolSize int
 	mux          sync.RWMutex
 	*circut.Breaker
-	pool *grpcPool
+	*grpcPool
 }
 
 //IsSecurePort() returns true if secure port
@@ -80,16 +80,16 @@ func (h *Host) Init() {
 
 func (h *Host) gRPCPool() *grpcPool {
 	h.mux.RLock()
-	pool := h.pool
+	pool := h.grpcPool
 	h.mux.RUnlock()
 	if pool == nil {
 		h.mux.Lock()
-		if h.pool == nil {
-			h.pool = newGrpcPool(h.GRPCPoolSize, fmt.Sprintf("%v:%v", h.Name, h.GRPCPort))
+		if h.grpcPool == nil {
+			h.grpcPool = newGrpcPool(h.GRPCPoolSize, fmt.Sprintf("%v:%v", h.Name, h.GRPCPort))
 		}
 		h.mux.Unlock()
 	}
-	return h.pool
+	return h.grpcPool
 }
 
 //NewHost returns new host

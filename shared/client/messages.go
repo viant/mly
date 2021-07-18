@@ -42,7 +42,7 @@ func (p *messages) put(bs *Message) {
 	p.pool.Put(bs)
 }
 
-//newMessages creates a new message pool
+//newMessages creates a new message grpcPool
 func newMessages(newDict func() *dictionary) Messages {
 	keysLen := 0
 	dict := newDict()

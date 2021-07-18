@@ -221,7 +221,7 @@ func (m *Message) isValid() bool {
 	return pool != nil
 }
 
-//Release releases message to the pool
+//Release releases message to the grpcPool
 func (m *Message) Release() {
 	m.mux.Lock()
 	defer m.mux.Unlock()
