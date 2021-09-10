@@ -8,5 +8,6 @@ import (
 type Output struct {
 	Name     string
 	DataType string
+	Index    int
 	*tf.Operation
 }

@@ -51,8 +51,8 @@ func (e *Evaluator) Close() error {
 //NewEvaluator creates new evaluator
 func NewEvaluator(signature *domain.Signature, session *tf.Session) *Evaluator {
 	fetches := []tf.Output{}
-	for i, output := range signature.Outputs {
-		fetches = append(fetches, output.Output(i))
+	for _, output := range signature.Outputs {
+		fetches = append(fetches, output.Output(output.Index))
 	}
 	return &Evaluator{
 		Signature: *signature,

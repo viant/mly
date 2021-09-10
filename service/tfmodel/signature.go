@@ -5,6 +5,7 @@ import (
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/domain"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -22,7 +23,9 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 		output.Name = k
 		operationName := v.Name
 		if index := strings.Index(operationName, ":"); index != -1 {
+			indexValue := operationName[index+1:]
 			operationName = operationName[:index]
+			output.Index, _ = strconv.Atoi(indexValue)
 		}
 		if output.Operation = model.Graph.Operation(operationName); output.Operation == nil {
 			return nil, fmt.Errorf("failed to lookup operation '%v' for output: %v", operationName, k)
@@ -58,12 +61,10 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 	return result, nil
 }
 
-
 func tryAssignDataType(v tf.TensorInfo, output domain.Output) {
-	defer  func() {
+	defer func() {
 		_ = recover()
 	}()
 	oType := tf.TypeOf(v.DType, []int64{})
 	output.DataType = oType.Name()
 }
-
