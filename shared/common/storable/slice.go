@@ -34,6 +34,9 @@ func (s *Slice) Set(iter common.Iterator) error {
 		for i, field := range s.Fields {
 			valueType := reflect.ValueOf(value)
 			if field.Name == key {
+				if field.dataType == nil {
+					field.dataType = valueType.Type()
+				}
 				if field.Type().Kind() == valueType.Kind() {
 					s.Values[i] = value
 				} else {

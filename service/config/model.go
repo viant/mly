@@ -49,8 +49,5 @@ func (m *Model) Validate() error {
 	if m.URL == "" {
 		return fmt.Errorf("model.URL was empty")
 	}
-	if m.OutputType == "" {
-		return fmt.Errorf("model.OutputType was empty")
-	}
 	return nil
 }

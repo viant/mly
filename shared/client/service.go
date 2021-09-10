@@ -82,7 +82,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		response.Data = s.newStorable()
 	}
 	var key *datastore.Key
-	if ok && s.datastore != nil {
+	if ok && s.datastore != nil && s.datastore.Config != nil {
 		key = datastore.NewKey(s.datastore.Config, cachableKey.CacheKey())
 		if dictHash, err := s.datastore.GetInto(ctx, key, response.Data); err == nil {
 			response.Status = common.StatusCached

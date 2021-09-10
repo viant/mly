@@ -47,6 +47,9 @@ func NewStores(cfg *config.DatastoreList, gmetrics *gmetric.Service) (map[string
 func getClient(db *config.Datastore, connections map[string]client.Service) (client.Service, client.Service, error) {
 	var l1Client, l2Client client.Service
 	var ok bool
+	if db == nil || db.Reference == nil {
+		return nil, nil, nil
+	}
 	if db.Reference.Connection != "" {
 		if l1Client, ok = connections[db.Reference.Connection]; !ok {
 			return nil, nil, fmt.Errorf("faild to lookup datastore connection %v, for %v", db.Reference.Connection, db.ID)

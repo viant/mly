@@ -185,7 +185,9 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		inputs[input.Name] = &signature.Inputs[i]
 	}
 	evaluator := tfmodel.NewEvaluator(signature, model.Session)
-	signature.Output.DataType = s.config.OutputType
+	if s.config.OutputType != "" {
+		signature.Output.DataType = s.config.OutputType
+	}
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	s.evaluator = evaluator

@@ -22,7 +22,7 @@ type Processor struct {
 
 //Pre runs preprocessing logic
 func (p *Processor) Pre(ctx context.Context, reporter processor.Reporter) (context.Context, error) {
-	aClient, err := client.New(p.Model, []*client.Host{client.NewHost(p.Hostname, p.Port)}, client.NewCacheSize(p.CacheSize))
+	aClient, err := client.New(p.Model, []*client.Host{client.NewHost(p.Hostname, p.Port, 0)}, client.NewCacheSize(p.CacheSize))
 	if err != nil {
 		return nil, err
 	}
