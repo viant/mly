@@ -61,10 +61,7 @@ func Transform(ctx context.Context, signature *Signature, input *gtly.Object, ou
 			default:
 				return nil, fmt.Errorf("unsupported type: %T", t)
 			}
-			fmt.Printf(":: %T %v\n", val[i])
-
 			pairs = append(pairs, &kvPair{
-
 				k: signature.Outputs[i].Name,
 				v: outputValue,
 			})
