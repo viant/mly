@@ -13,7 +13,7 @@ import (
 	"github.com/viant/mly/shared/common/storable"
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
-	"github.com/viant/mly/shared/pb"
+
 	"github.com/viant/mly/shared/stat"
 	"golang.org/x/net/http2"
 	"io"
@@ -126,41 +126,11 @@ func (s *Service) postRequest(ctx context.Context, data []byte) ([]byte, error) 
 		return nil, err
 	}
 	var output []byte
-	if host.GRPCPort > 0 {
-		output, err = s.grpcPost(ctx, data, host)
-		if common.IsConnectionError(err) {
-			host.FlagDown()
-			host.grpcPool.Reset()
-		}
-	} else {
-		output, err = s.httpPost(ctx, data, host)
-		if common.IsConnectionError(err) {
-			host.FlagDown()
-		}
+	output, err = s.httpPost(ctx, data, host)
+	if common.IsConnectionError(err) {
+		host.FlagDown()
 	}
-
 	return output, err
-}
-
-func (s *Service) grpcPost(ctx context.Context, data []byte, host *Host) ([]byte, error) {
-	client, err := host.gRPCPool().Conn()
-	if err != nil {
-		if client != nil {
-			client.Close()
-		}
-		return nil, err
-	}
-
-	response, err := client.Evaluate(ctx, &pb.EvaluateRequest{
-		Model: s.Model,
-		Input: data,
-	})
-	if err != nil {
-		client.Close()
-		return nil, err
-	}
-	client.Release()
-	return response.Output, nil
 }
 
 func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte, error) {
@@ -317,7 +287,7 @@ func (s *Service) loadModelDictionary() error {
 	}
 
 	s.RWMutex.Lock()
-	s.dict = newDictionary(dict, s.Datastore.KeyFields)
+	s.dict = newDictionary(dict, s.Datastore.KeyFields, s.Datastore.WildcardKeys)
 	s.RWMutex.Unlock()
 	s.messages = newMessages(s.dictionary)
 	return nil

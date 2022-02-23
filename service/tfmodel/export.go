@@ -16,7 +16,6 @@ func Export(session *tf.Session, graph *tf.Graph, name string) (interface{}, err
 	if !strings.HasSuffix(name, "/LookupTableExportV2") {
 		operationName = fmt.Sprintf(operationExportTemplate, name)
 	}
-
 	expOperation := graph.Operation(operationName)
 	if expOperation == nil {
 		return nil, fmt.Errorf("failed to lookup RunExport operation: %v", operationName)

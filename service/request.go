@@ -14,7 +14,7 @@ import (
 type Request struct {
 	Key       string
 	BatchSize int
-	Body   []byte
+	Body      []byte
 	Feeds     []interface{}
 	inputs    map[string]*domain.Input
 	supplied  int
@@ -81,6 +81,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 		}
 	default:
 		if input, ok := r.inputs[key]; ok {
+			mutator := r.input.Proto().Mutator(key)
 			r.supplied++
 			switch input.Type.Kind() {
 			case reflect.String:
@@ -88,7 +89,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 				if err := dec.String(&value); err != nil {
 					return err
 				}
-				r.input.SetString(key, value)
+				mutator.String(r.input, value)
 				r.Feeds[input.Index] = [][]string{{value}}
 			case reflect.Bool:
 				value := false
@@ -96,45 +97,39 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					return err
 				}
 				r.Feeds[input.Index] = [][]bool{{value}}
-				r.input.SetBool(key, value)
+				mutator.Bool(r.input, value)
 			case reflect.Int:
 				value := 0
 				if err := dec.Int(&value); err != nil {
 					return err
 				}
 				r.Feeds[input.Index] = [][]int{{value}}
-				r.input.SetInt(key, value)
+				mutator.Int(r.input, value)
 			case reflect.Int64:
 				value := 0
 				if err := dec.Int(&value); err != nil {
 					return err
 				}
 				r.Feeds[input.Index] = [][]int64{{int64(value)}}
-				r.input.SetInt(key, value)
+				mutator.Int(r.input, value)
 			case reflect.Float64:
 				value := float64(0)
 				if err := dec.Float64(&value); err != nil {
 					return err
 				}
 				r.Feeds[input.Index] = [][]float64{{value}}
-				r.input.SetFloat(key, value)
+				mutator.SetValue(r.input, float32(value))
 			case reflect.Float32:
 				value := float64(0)
 				if err := dec.Float64(&value); err != nil {
 					return err
 				}
 				r.Feeds[input.Index] = [][]float64{{value}}
-				r.input.SetFloat(key, value)
+				mutator.SetValue(r.input, float32(value))
 			default:
 				//TODO add more type support
 				return fmt.Errorf("unsupported input type: %T", reflect.New(input.Type).Interface())
 			}
-		} else {
-			value := ""
-			if err := dec.String(&value); err != nil {
-				return err
-			}
-			r.input.SetString(key, value)
 		}
 	}
 	return nil

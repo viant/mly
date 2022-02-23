@@ -10,19 +10,19 @@ import (
 
 //Model represents model config
 type Model struct {
-	ID          string
-	URL         string
-	Location    string
-	Tags        []string
-	OutputType  string
-	UseDict     *bool
-	Transformer string
-	DataStore   string
-	KeyFields   []string
-	Modified    *Modified
-	Stream      *config.Stream
+	ID             string
+	URL            string
+	Location       string
+	Tags           []string
+	OutputType     string
+	UseDict        *bool
+	Transformer    string
+	DataStore      string
+	KeyFields      []string
+	WildcardFields []string
+	Modified       *Modified
+	Stream         *config.Stream
 }
-
 
 //UseDictionary returns true if dictionary can be used
 func (m Model) UseDictionary() bool {

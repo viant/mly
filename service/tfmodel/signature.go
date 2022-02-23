@@ -18,6 +18,7 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 	result := &domain.Signature{
 		Method: signature.MethodName,
 	}
+
 	for k, v := range signature.Outputs {
 		output := domain.Output{}
 		output.Name = k
@@ -30,11 +31,8 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 		if output.Operation = model.Graph.Operation(operationName); output.Operation == nil {
 			return nil, fmt.Errorf("failed to lookup operation '%v' for output: %v", operationName, k)
 		}
-
 		tryAssignDataType(v, output)
-
 		result.Outputs = append(result.Outputs, output)
-
 	}
 	result.Output = result.Outputs[0]
 

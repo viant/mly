@@ -72,6 +72,7 @@ func newMetaHandler(srv *service.Service, datastoreList *sconfig.DatastoreList) 
 		datastore:    assembleConfig(datastoreList, modelConfig.DataStore),
 	}
 	handler.datastore.KeyFields = modelConfig.KeyFields
+	handler.datastore.WildcardKeys = modelConfig.WildcardFields
 	return handler
 
 }

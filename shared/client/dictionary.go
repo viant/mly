@@ -16,7 +16,8 @@ type dictionary struct {
 	hash     int
 	registry map[string]*entry
 	//keys to position mapping
-	keys map[string]int
+	keys         map[string]int
+	wildcardKeys map[string]bool
 }
 
 func (d *dictionary) size() int {
@@ -28,7 +29,7 @@ func (d *dictionary) lookupString(key string, value string) (string, int) {
 		return "", unknownKeyField
 	}
 	elem, ok := d.registry[key]
-	if !ok  {
+	if !ok {
 		if index, ok := d.keys[key]; ok {
 			return value, index
 		}
@@ -80,11 +81,12 @@ func (d *dictionary) lookupFloat(key string, value float32) (float32, int) {
 }
 
 //NewDictionary creates new dictionary
-func newDictionary(dict *common.Dictionary, keyFields []string) *dictionary {
+func newDictionary(dict *common.Dictionary, keyFields []string, wildcardKeys []string) *dictionary {
 	var result = &dictionary{
-		hash:     dict.Hash,
-		keys:     map[string]int{},
-		registry: make(map[string]*entry),
+		hash:         dict.Hash,
+		keys:         map[string]int{},
+		wildcardKeys: map[string]bool{},
+		registry:     make(map[string]*entry),
 	}
 
 	if len(dict.Layers) > 0 {
@@ -119,6 +121,11 @@ func newDictionary(dict *common.Dictionary, keyFields []string) *dictionary {
 				if item, ok := result.registry[field]; ok {
 					item.index = i
 				}
+			}
+		}
+		if len(wildcardKeys) > 0 {
+			for i := range wildcardKeys {
+				result.wildcardKeys[wildcardKeys[i]] = true
 			}
 		}
 	}

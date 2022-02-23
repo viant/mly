@@ -1,12 +1,10 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/mly/service/buffer"
-	"github.com/viant/mly/shared/pb"
 	"io"
 	"net/http"
 	"time"
@@ -29,22 +27,6 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if err := h.serveHTTP(writer, request); err != nil {
 		http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
-}
-
-func (h *Handler) Evaluate(ctx context.Context, grpcRequest *pb.EvaluateRequest) (*pb.EvaluateResponse, error) {
-	request := h.service.NewRequest()
-	response := &Response{Status: "ok", started: time.Now()}
-	err := gojay.Unmarshal(grpcRequest.Input, request)
-	if err == nil {
-		writer := new(bytes.Buffer)
-		if err = h.handleAppRequest(ctx, writer, request, response); err != nil {
-			response.SetError(err)
-		}
-	}
-	output, _ := gojay.Marshal(response)
-	return &pb.EvaluateResponse{
-		Output: output,
-	}, nil
 }
 
 func (h *Handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Request) error {

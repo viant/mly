@@ -14,13 +14,10 @@ var requestTimeout = 5 * time.Second
 
 //Host represents endpoint host
 type Host struct {
-	Name         string
-	Port         int
-	GRPCPort     int
-	GRPCPoolSize int
-	mux          sync.RWMutex
+	Name string
+	Port int
+	mux  sync.RWMutex
 	*circut.Breaker
-	*grpcPool
 }
 
 //IsSecurePort() returns true if secure port
@@ -61,9 +58,6 @@ func (h *Host) Probe() {
 
 func (h *Host) isConnectionUp() bool {
 	port := h.Port
-	if h.GRPCPort > 0 {
-		port = h.GRPCPort
-	}
 	connection, err := net.DialTimeout("tcp", fmt.Sprintf("%v:%v", h.Name, port), requestTimeout)
 	if err != nil {
 		return false
@@ -76,38 +70,21 @@ func (h *Host) Init() {
 	if h.Breaker == nil {
 		h.Breaker = circut.New(requestTimeout, h)
 	}
-	if h.GRPCPoolSize == 0 {
-		h.GRPCPoolSize = 30
-	}
-}
-
-func (h *Host) gRPCPool() *grpcPool {
-	h.mux.RLock()
-	pool := h.grpcPool
-	h.mux.RUnlock()
-	if pool == nil {
-		h.mux.Lock()
-		if h.grpcPool == nil {
-			h.grpcPool = newGrpcPool(h.GRPCPoolSize, fmt.Sprintf("%v:%v", h.Name, h.GRPCPort))
-		}
-		h.mux.Unlock()
-	}
-	return h.grpcPool
 }
 
 //NewHost returns new host
-func NewHost(name string, port, GRPCPort int) *Host {
+func NewHost(name string, port int) *Host {
 	if port == 0 {
 		port = 80
 	}
-	return &Host{Name: name, Port: port, GRPCPort: GRPCPort}
+	return &Host{Name: name, Port: port}
 }
 
 //NewHosts creates hosts
-func NewHosts(port, grpcPort int, names []string) []*Host {
+func NewHosts(port int, names []string) []*Host {
 	var result = make([]*Host, 0)
 	for _, name := range names {
-		result = append(result, &Host{Name: name, Port: port, GRPCPort: grpcPort})
+		result = append(result, &Host{Name: name, Port: port})
 	}
 	return result
 }

@@ -2,7 +2,7 @@ package buffer
 
 import (
 	"bytes"
-	"github.com/pkg/errors"
+	"fmt"
 	"io"
 	"net/http/httputil"
 )
@@ -15,7 +15,7 @@ func Read(pool httputil.BufferPool, reader io.Reader) ([]byte, int, error) {
 	for i := 0; i < len(data); i++ {
 		if offset >= len(data) {
 			pool.Put(data)
-			return nil, 0, errors.Errorf("buffer too small: %v", len(data))
+			return nil, 0, fmt.Errorf("buffer too small: %v", len(data))
 		}
 		read, err := reader.Read(data[offset:])
 		offset += read

@@ -9,5 +9,6 @@ import (
 type Datastore struct {
 	Connections []*datastore.Connection
 	config.Datastore
-	KeyFields []string
+	KeyFields    []string
+	WildcardKeys []string
 }

@@ -91,7 +91,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	err := request.Validate()
 	if err != nil {
 		stats.Append(err)
-		return fmt.Errorf("%w, body: %s",err, request.Body)
+		return fmt.Errorf("%w, body: %s", err, request.Body)
 	}
 	useDatastore := s.useDatastore && request.Key != ""
 	var key *datastore.Key
@@ -176,10 +176,12 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	}
 	var dictionary *common.Dictionary
 	if s.config.UseDictionary() {
+		s.updateWildcardInput(signature)
 		if dictionary, err = layers.Dictionary(model.Session, model.Graph, signature); err != nil {
 			return err
 		}
 	}
+
 	var inputs = make(map[string]*domain.Input)
 	for i, input := range signature.Inputs {
 		inputs[input.Name] = &signature.Inputs[i]
@@ -196,6 +198,20 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	s.inputs = inputs
 	s.config.Modified = snapshot
 	return nil
+}
+
+func (s *Service) updateWildcardInput(signature *domain.Signature) {
+	if len(s.config.WildcardFields) == 0 {
+		return
+	}
+	var index = map[string]bool{}
+	for i := range s.config.WildcardFields {
+		index[s.config.WildcardFields[i]] = true
+	}
+	for i := range signature.Inputs {
+		input := &signature.Inputs[i]
+		input.WildCard = index[input.Name]
+	}
 }
 
 //modifiedSnapshot return last modified time of object from the URL
@@ -328,6 +344,7 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	}
 	msg := s.msgProvider.NewMessage()
 	defer msg.Free()
+
 	data := request.Body
 	begin := bytes.IndexByte(data, '{')
 	end := bytes.LastIndexByte(data, '}')
@@ -339,6 +356,9 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	msg.PutInt("eval_duration", int(timeTaken.Microseconds()))
 	if bytes.Index(data, []byte("timestamp")) == -1 {
 		msg.PutString("timestamp", time.Now().In(time.UTC).Format("2006-01-02 15:04:05.000-07"))
+	}
+	if s.dictionary != nil {
+		msg.PutInt("dict_hash", int(s.dictionary.Hash))
 	}
 	switch actual := output.(type) {
 	case [][]float32:
@@ -362,16 +382,35 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 //New creates a service
 func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, datastores map[string]*datastore.Service) (*Service, error) {
 	location := reflect.TypeOf(&Service{}).PkgPath()
-
-	result := &Service{
+	srv := &Service{
 		fs:              fs,
 		config:          cfg,
 		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewService()),
 		evaluatorMetric: metrics.MultiOperationCounter(location, cfg.ID+"Eval", cfg.ID+" evaluator performance", time.Microsecond, time.Minute, 2, sstat.NewService()),
 		useDatastore:    cfg.UseDictionary() && cfg.DataStore != "",
 		inputs:          make(map[string]*domain.Input),
-		inputProvider:   gtly.NewProvider("input"),
 	}
-	err := result.init(ctx, cfg, datastores)
-	return result, err
+	err := srv.init(ctx, cfg, datastores)
+	if err != nil {
+		return nil, err
+	}
+	var fields = make([]*gtly.Field, len(srv.signature.Inputs))
+
+	for i := range srv.signature.Inputs {
+		input := &srv.signature.Inputs[i]
+		inputType := input.Type
+		if input.WildCard {
+			inputType = reflect.TypeOf("")
+		}
+		fields[input.Index] = &gtly.Field{
+			Name: input.Name,
+			Type: inputType,
+		}
+	}
+	provider, err := gtly.NewProvider("input", fields...)
+	if err != nil {
+		return nil, err
+	}
+	srv.inputProvider = provider
+	return srv, err
 }

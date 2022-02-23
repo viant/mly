@@ -11,4 +11,5 @@ type Input struct {
 	Index int
 	reflect.Type
 	Placeholder tf.Output
+	WildCard    bool
 }

@@ -3,14 +3,12 @@ package endpoint
 import (
 	"context"
 	"fmt"
-	"github.com/francoispqt/gojay"
 	"github.com/viant/afs"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service"
 	"github.com/viant/mly/service/buffer"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
-	"github.com/viant/mly/shared/pb"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
@@ -31,30 +29,14 @@ type Service struct {
 	handlers map[string]*service.Handler
 }
 
-
 //Metric returns operation metrics
 func (s *Service) Metric() *gmetric.Service {
 	return s.metrics
 }
 
-func (s *Service) Evaluate(ctx context.Context, request *pb.EvaluateRequest) (*pb.EvaluateResponse, error) {
-	handler, ok := s.handlers[request.Model]
-	if ! ok {
-		response := &service.Response{}
-		response.SetError(fmt.Errorf("unknown model: %v", request.Model))
-		data, _ := gojay.Marshal(response)
-		return &pb.EvaluateResponse{
-			Output: data,
-		},nil
-	}
-	return handler.Evaluate(ctx, request)
-}
-
-
 func (s *Service) mustEmbedUnimplementedEvaluatorServer() {
 	panic("implement me")
 }
-
 
 //ListenAndServe start http endpoint
 func (s *Service) ListenAndServe() error {
