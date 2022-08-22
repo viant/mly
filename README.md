@@ -1,4 +1,4 @@
-# Mly - machine learning executor on steroid for golang
+# Mly - machine learning executor on steroids for golang
 
 [![GoReportCard](https://goreportcard.com/badge/github.com/viant/mly)](https://goreportcard.com/report/github.com/viant/mly)
 [![GoDoc](https://godoc.org/github.com/viant/mly?status.svg)](https://godoc.org/github.com/viant/mly)
@@ -16,30 +16,28 @@ Please refer to [`CHANGELOG.md`](CHANGELOG.md) if you encounter breaking changes
 
 ## Motivation
 
-The goal of this library to provide generic tensorflow ML wrapper web service which can speed up end to end execution by leveraging a caching. 
-Caching has to be seamless, meaning client behind the scene should take care of dictionary based key generation and any model changes automatically. 
+The goal of this library to provide a generic TensorFlow wrapper web service which can speed up end to end execution by leveraging a caching system. 
+Caching has to be seamless, meaning the client, behind the scenes, should take care of any dictionary-based key generation and model changes automatically. 
 
-In order to get benefit of cache the model dictionary has to use enumerated layers, with keyspace providing  reasonable cache hit rate.
-In practise this library can provide substantial (100x) e2e execution improvement from client side perspective, with
-keyspace ranging from  millions of billions distinct keys. 
+In order to get te benefit of cache, the model dictionary has to use enumerated layers, with the keyspace providing a reasonable cache hit rate.
+In practice this library can provide substantial (100x) e2e execution improvement from the client side perspective, with the keyspace ranging from millions of billions distinct keys. 
 
-Performance transparency: each model provide both tensorflow and cache level performance metrics exposed vi REST API.
+Performance transparency: each model provides both TensorFlow and cache-level performance metrics exposed via REST API.
 
 ## Introduction
 
-This project provides library for both client and ML web service.
-Service support multiple tensorflow models integration on URI level, with GET/POST method support, 
-and PUT with HTTP 2.0 in full duplex mode. Service automatically detects and reloads any model changes.
-Technically any HTTP client can work with the service, but to get seamless caching benefit,
-it's recommended to use provided client.
+This project provides libraries for both the client and the ML web service.
+The service supports multiple TensorFlow model integrations on the URI level, with GET/POST method support, as well as PUT with HTTP 2.0 in full duplex mode. 
+The service automatically detects and reloads any model changes.
+Technically, any HTTP client can work with the service, but to get the seamless caching benefit, it's recommended to use provided client.
 
+To start HTTP service with 2 models, create a service `config.yaml` file, so you can run GET/POST prediction using the following URL: 
 
-To start HTTP service with 2 models, create service config.yaml file, so you can 
-run GET/POST prediction using the following URL:
+```
+http://mlyHost:8086/v1/api/model/$MODEL_ID/eval?modelInput1=val1&modelInputX=valueX
+```
 
-- Get URL ```http://mlyHost:8086/v1/api/model/$MODEL_ID/eval?modelInput1=val1&modelInputX=valueX```
-
-@config.yaml
+`config.yaml`
 ```yaml
 Endpoint:
 Port: 8086
@@ -56,24 +54,27 @@ Models:
 #### Caching
 
 The main performance benefit comes from trading CPU with I/O.
-In order to use cache, a client has to generate the caching key.
-Native mly client handles key generation and passing automatically.
+In order to use the cache, a client has to generate the caching key.
+The native `mly` client handles key generation and passing automatically.
 
-Depending on keyspace size the library supports 3 level of caching.
+Depending on keyspace size, the library supports 3 levels of caching.
 
-- in process memory
-- external aerospike cache
+- in-(process) memory
+- external Aerospike cache
 - hybrid
 
-By default client inherit web service cache settings.
+By default, the client inherits the web service cache settings.
 
-* When in memory cache is used, both client and web service manage they cache independently, meaning if data is missing in 
-local client cache, client send request to ml endpoint.
+* When the in-memory cache is used, both the client and web service manage their cache independently; meaning if data is missing in 
+the client cache, the client will send a request to server endpoint.
 
-* When external cache is used, client first check external cache that is shared with web service, if data is found, 
-it's copied to local in memory cache. Memory cache uses [scache](https://github.com/viant/scache) most recently used implementation.
+* When an external cache is used, the client will first check the external cache that is shared with web service; if data is found, 
+it's copied to local in-memory cache. 
 
-Example of service with in memory cache
+The in-memory cache uses [scache](https://github.com/viant/scache)'s most-recently-used implementation.
+
+**Example of service with in-memory cache**
+
 ```yaml
 Endpoint:
   Port: 8086
@@ -89,13 +90,12 @@ Datastores:
       SizeMB: 100
 ```
 
+To deal with large keyspaces, the external cache can be further configured using a L1 and L2 cache. 
+In this scenario, the L2 can be very large SSD-backed Aerospike instance and L1 could be a small in-memory based instance. 
+In this case, data is first checked in-memory, followed by L1, then L2, and then respectively synchronized from L2 to L1 and L1 to local memory. 
 
-To deal with large key-spaces, external cache can be further configured as L1 and L2. 
-In this scenario L2 can be very large SSD backed aerospike instance and L1 could be small all 
-memory based instance. In this case data is first check in memory, followed by L1 and L2, and then respectively
-synchronized from L2 to L1 and L1 to local memory. 
+**Example of service with both in-memory and Aerospike cache**
 
-Example of service with both in memory and aerospike cache
 ```yaml
 Endpoint:
   Port: 8080
@@ -119,57 +119,57 @@ Connections:
 
 ```
 
-#### Dictionary hash code.
+#### Dictionary hash code
 
-In caching mode, in order to manage cache and client/server consistency every time model/dictionary gets re/loaded, 
-mly computes global dictionary hash code. This hash code got stored in the cache alongside model prediction, 
-as well its being passed to client in every response. Once client detect dict hash code difference it automatically
-initiate dictionary reload and invalidates cache entries.
+In caching mode, in order to manage cache and client/server consistency every time a model/dictionary gets re/loaded, `mly` computes a global dictionary hash code.
+This hash code gets stored in the cache along with model prediction and is passed to the client in every response. 
+Once a client detects a dictionary hash code difference, it automatically initiates a dictionary reload and invalidates cache entries.
 
 ## Configuration
 
 #### Server
 
-The server accept configuration with the following options
-* _Models_ : list of models
-  - ID: required model ID
-  - URL: required model location  
-    * to use s3, export AWS_SDK_LOAD_CONFIG=true
-    * to use gs, export GOOGLE_APPLICATION_CREDENTIALS=true
-  - Tags: optional model tags (default "serve")
-  - OutputType required output type (int64, float32, etc..)
-  - UseDict optional flag to use dictionary/caching (true by default)
-  - KeyFields optional list of field used to generate caching key(by default all model input sorted alphabetically)
-  - DataStore optional name of datastore cache
-  - Transformer optional name of model output transformer
+The server accepts configuration with the following options:
+
+* `Models` : list of models
+  - `ID`: required model ID
+  - `URL`: required model location  
+    * to use S3, set environment variable `AWS_SDK_LOAD_CONFIG=true`
+    * to use GCS, set environment variable `GOOGLE_APPLICATION_CREDENTIALS=true`
+  - `Tags`: optional model tags (default "serve")
+  - `OutputType`: required output type (`int64`, `float32`, etc..)
+  - `UseDict`: optional flag to use dictionary/caching (`true` by default)
+  - `KeyFields`: optional list of fields used to generate caching key (by default, all model inputs sorted alphabetically)
+  - `DataStore`: optional name of datastore cache
+  - `Transformer`: optional name of model output transformer
     
-* _Connection_ : optional list of external aerospike connections
-  - ID: required connection ID
-  -  Hostnames: required aerospike hostnames
+* `Connection` : optional list of external Aerospike connections
+  - `ID`: required connection ID
+  - `Hostnames`: required Aerospike hostnames
 
 
-* _Datastores_ : list of datastore caches
-  - ID: required datastore ID (to be matched with Model.DataStore)
-  - Connection: optional connection ID
-  - Namespace: optional aerospike namespace
-  - Dataset: optional aerospike dataset 
-  - Storable: name of register storable provider
-  - Cache: optional in memory cache setting
-      * SizeMB: cache size in BM
+* `Datastores` : list of datastore caches
+  - `ID`: required datastore ID (to be matched with `Model.DataStore`)
+  - `Connection`: optional connection ID
+  - `Namespace`: optional Aerospike namespace
+  - `Dataset`: optional Aerospike dataset 
+  - `Storable`: name of register storable provider
+  - `Cache`: optional in-memory cache setting
+      * `SizeMB`: optional cache size in MB
 
 #### Client
  
-Mly client does not come with external config file
+`mly` client does not come with external config file.
 
-To create file use the following snippet
+To create a client, use the following snippet:
 ```go
 mly := client.New("$modelID", []*client.Host{client.NewHost("mlServiceHost", mlServicePort)}, options ...)
-
 ```
-where optional options can be one of the following:
-  * NewCacheSize(sizeOption)
-  * NewCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)
-  * NewGmetric() - custom instance of gemetric service
+
+Where optional `options` can be one of the following:
+  * `NewCacheSize(sizeOption)`
+  * `NewCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)`
+  * `NewGmetric()` - custom instance of `gmetric` service
 
 
 ## Usage
@@ -189,6 +189,7 @@ import (
 const (
 	Version = "1.0"
 )
+
 func main() {
 	endpoint.RunApp(Version, os.Args)
 }
@@ -231,12 +232,10 @@ func main() {
 }
 ```
 
+#### Output post-processing
 
-#### Output Customization
-
-By default, model signature output name alongside with model prediction gets used to produce cachable output.
+By default, the model signature output name alongside the model prediction gets used to produce cachable output.
 This process can be customized for specific needs.
-
 
 The custom transformer has to use the following function signature
 ```go
@@ -249,33 +248,32 @@ func init() {
 }
 ```
 
-Optionally you can implements storable provider.
+Optionally you can implement a `storable` provider.
 
 ```go
-  func init() {
-    transformer.Register("myType", func() interface{} {
+func init() {
+  transformer.Register("myType", func() interface{} {
       return &MyOutputType{}
   })
 }
 ```
 
-Where **MyOutputType** could implements the following interfaces to avoid reflection:
-- [Storable](shared/common/storable.go) (aerospike storage)
-- [Bintly](https://github.com/viant/bintly) (in memory serialization)
+Where `MyOutputType` could implement the following interfaces to avoid reflection:
+- [Storable](shared/common/storable.go) (Aerospike storage)
+- [Bintly](https://github.com/viant/bintly) (in-memory serialization)
 - [Gojay JSON](https://github.com/francoispqt/gojay/) (HTTP response)
 
 
 #### Metrics
 
-The following URI expose webservice 
- -  /v1/api/metric/operations - all metrics register in the web service
- -  /v1/api/metric/operation/$MetricID - individual metric
+The following URIs expose metrics 
+ -  `/v1/api/metric/operations` - all metrics registered in the web service
+ -  `/v1/api/metric/operation/$MetricID` - individual metric `$MetricID`
 
 #### Deployment
 
-
-
 <a name="License"></a>
+
 ## License
 
 The source code is made available under the terms of the Apache License, Version 2, as stated in the file `LICENSE`.
@@ -285,11 +283,11 @@ all compatible with Apache License, Version 2. Please see individual files for d
 
 <a name="Credits-and-Acknowledgements"></a>
 
-## Contributing to mly
+## Contributing to `mly`
 
-mly is an open source project and contributors are welcome!
+`mly` is an open source project and contributors are welcome!
 
-See [TODO](TODO.md) list
+See [TODO](TODO.md) list.
 
 ## Credits and Acknowledgements
 
