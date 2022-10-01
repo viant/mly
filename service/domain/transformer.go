@@ -40,6 +40,18 @@ func Transform(ctx context.Context, signature *Signature, input *gtly.Object, ou
 			k: signature.Outputs[0].Name,
 			v: outputValue,
 		})
+	case []int64:
+		outputValue = val[0]
+		pairs = append(pairs, &kvPair{
+			k: signature.Outputs[0].Name,
+			v: outputValue,
+		})
+	case []float32:
+		outputValue = val[0]
+		pairs = append(pairs, &kvPair{
+			k: signature.Outputs[0].Name,
+			v: outputValue,
+		})
 	case [][]int64:
 		outputValue = val[0][0]
 		pairs = append(pairs, &kvPair{
@@ -67,6 +79,8 @@ func Transform(ctx context.Context, signature *Signature, input *gtly.Object, ou
 			})
 
 		}
+	default:
+		fmt.Printf("unsuppoprted: %T\n", output)
 	}
 
 	err := result.Set(func(pair common.Pair) error {

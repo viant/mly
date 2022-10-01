@@ -1,0 +1,21 @@
+
+pipeline:
+
+  deploy:
+    set_sdk:
+      action: sdk.set
+      target: $target
+      sdk: go:1.17
+
+    package:
+      action: exec:run
+      target: $target
+      checkError: true
+      commands:
+        - mkdir -p /tmp/e2e
+        - cd ${appPath}/example/server/mly
+        - go build
+        - mv mly /tmp/e2e/
+        - cd ${appPath}/example/client/mlyc
+        - go build
+        - mv mlyc /tmp/e2e/

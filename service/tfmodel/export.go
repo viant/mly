@@ -14,13 +14,27 @@ const (
 func Export(session *tf.Session, graph *tf.Graph, name string) (interface{}, error) {
 	operationName := name
 	if !strings.HasSuffix(name, "/LookupTableExportV2") {
-		operationName = fmt.Sprintf(operationExportTemplate, name)
+		operationName = MatchOperation(graph, name)
+		if operationName == "" {
+			return nil, fmt.Errorf("failed to match operation for %v", name)
+		}
 	}
 	expOperation := graph.Operation(operationName)
 	if expOperation == nil {
-		return nil, fmt.Errorf("failed to lookup RunExport operation: %v", operationName)
+		if expOperation == nil {
+			return nil, fmt.Errorf("failed to lookup RunExport operation: %v", operationName)
+		}
 	}
 	return RunExport(session, expOperation)
+}
+
+func MatchOperation(graph *tf.Graph, name string) string {
+	for _, candidate := range graph.Operations() {
+		if strings.HasPrefix(candidate.Name(), name+"_") && strings.HasSuffix(candidate.Name(), "LookupTableExportV2") {
+			return candidate.Name()
+		}
+	}
+	return ""
 }
 
 //RunExport runs export

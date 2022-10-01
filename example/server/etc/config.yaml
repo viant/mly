@@ -1,0 +1,54 @@
+Endpoint:
+  Port: 8086
+
+models:
+  - id: sls
+    url: ${appPath}/example/model/sls_model
+    useDict: true
+    transformer: sls
+    datastore: sls
+    inputs:
+      - name: sa
+        index: 0
+      - name: sl
+        index: 1
+      - name: x
+        index: 2
+        auxiliary: true
+
+  - id: vec
+    url: ${appPath}/example/model/vec_model
+    useDict: true
+    transformer: vec
+    datastore: vec
+    inputs:
+      - name: sl
+        index: 0
+      - name: tv
+        index: 1
+        wildcard: true
+
+connections:
+  - id: localL1
+    hostnames: localhost
+    port: 3000
+    timeout: null
+
+datastores:
+  - id: sls
+    cache:
+      sizeMb: 128
+    connection: localL1
+    namespace: test
+    dataset: sls
+    storable: sls
+    timeToLiveMs: 3600000
+
+  - id: vec
+    cache:
+      sizeMb: 128
+    connection: localL1
+    namespace: test
+    dataset: vec
+    storable: vec
+    timeToLiveMs: 3600000

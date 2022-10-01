@@ -9,12 +9,13 @@ import (
 
 //Datastore represents datastore
 type Datastore struct {
-	ID    string
-	Cache *scache.Config
-	*datastore.Reference
-	L2       *datastore.Reference
-	Storable string
-	Fields   []*storable.Field
+	ID                   string
+	Cache                *scache.Config
+	*datastore.Reference `json:",omitempty" yaml:",inline"`
+	L2                   *datastore.Reference `json:",omitempty" yaml:",omitempty"`
+	Storable             string
+	Fields               []*storable.Field
+	Disabled             bool `json:",omitempty" yaml:",omitempty"`
 }
 
 //Init initialises datastore

@@ -6,12 +6,12 @@ import (
 
 //Config represents a client config
 type Config struct {
-	Hosts       []*Host
-	Model       string
-	CacheSizeMb int
-	CacheScope  *CacheScope
-	Datastore   *config.Datastore
-	MaxRetry    int
+	Hosts              []*Host
+	Model              string
+	CacheSizeMb        int
+	CacheScope         *CacheScope
+	Datastore          *config.Remote
+	MaxRetry           int
 	DictHashValidation bool
 }
 
@@ -24,6 +24,9 @@ func (c *Config) CacheSize() int {
 }
 
 func (c *Config) updateCache() {
+	if c.Datastore == nil {
+		return
+	}
 	if c.CacheSizeMb > 0 {
 		if c.Datastore != nil && c.Datastore.Cache != nil {
 			c.Datastore.Cache.SizeMb = c.CacheSizeMb
@@ -34,14 +37,15 @@ func (c *Config) updateCache() {
 	if scope == nil {
 		return
 	}
-	if !scope.IsL2() && c.Datastore != nil {
+	if !scope.IsLocal() {
+		c.Datastore = nil
+		return
+	}
+	if !scope.IsL2() {
 		c.Datastore.Datastore.L2 = nil
 	}
-	if !scope.IsL1() && c.Datastore != nil {
+	if !scope.IsL1() {
 		c.Datastore.Datastore.Connection = ""
 		c.Datastore.Connections = nil
-	}
-	if !scope.IsLocal() && c.Datastore != nil {
-		c.Datastore = nil
 	}
 }

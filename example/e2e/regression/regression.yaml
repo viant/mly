@@ -1,0 +1,30 @@
+init:
+
+pipeline:
+
+  datastore:
+    description: start datly app with rule generted from SQLs
+    action: run
+    request: '@datastore'
+
+  app:
+    description: start datly app with rule generted from SQLs
+    action: run
+    request: '@app'
+
+  test:
+    tag: $pathMatch
+    description: '@info'
+
+    subPath: 'cases/${index}_*'
+
+    range: 1..002
+    template:
+      checkSkip:
+        action: nop
+        comments: use case init
+        skip: $HasResource(${path}/skip.txt)
+      test:
+        action: run
+        request: '@test'
+

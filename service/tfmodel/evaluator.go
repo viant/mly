@@ -27,7 +27,7 @@ func (e *Evaluator) feeds(feeds []interface{}) (map[tf.Output]*tf.Tensor, error)
 }
 
 //Evaluate evaluates model
-func (e *Evaluator) Evaluate(params []interface{}) (interface{}, error) {
+func (e *Evaluator) Evaluate(params []interface{}) ([]interface{}, error) {
 	feeds, err := e.feeds(params)
 	if err != nil {
 		return nil, err
@@ -36,11 +36,11 @@ func (e *Evaluator) Evaluate(params []interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(output) != 1 {
-		return output, nil
+	var tensorValues = make([]interface{}, len(output))
+	for i := range tensorValues {
+		tensorValues[i] = output[i].Value()
 	}
-	value := output[0].Value()
-	return value, nil
+	return tensorValues, nil
 }
 
 //Close closes evaluator

@@ -11,10 +11,9 @@ type Messages interface {
 	Borrow() *Message
 }
 
-
 type messages struct {
-	pool sync.Pool
-	nweDict func() *dictionary
+	pool    sync.Pool
+	nweDict func() *Dictionary
 }
 
 func (p *messages) Borrow() *Message {
@@ -23,13 +22,17 @@ func (p *messages) Borrow() *Message {
 	if len(msg.buf) > bufferSize {
 		msg.buf = msg.buf[:bufferSize]
 	}
-
 	for i := range msg.keys {
 		msg.keys[i] = ""
 	}
 	msg.mux.Lock()
 	msg.pool = p
 	msg.key = ""
+	msg.buffer.Reset()
+	msg.multiKey = nil
+	msg.multiKeys = nil
+	msg.transient = nil
+	msg.cacheHits = nil
 	msg.dictionary = p.nweDict()
 	msg.mux.Unlock()
 	return msg
@@ -42,12 +45,12 @@ func (p *messages) put(bs *Message) {
 	p.pool.Put(bs)
 }
 
-//newMessages creates a new message grpcPool
-func newMessages(newDict func() *dictionary) Messages {
+//NewMessages creates a new message grpcPool
+func NewMessages(newDict func() *Dictionary) Messages {
 	keysLen := 0
 	dict := newDict()
 	if dict != nil {
-		keysLen = len(dict.keys)
+		keysLen = dict.KeysLen()
 	}
 	return &messages{
 		nweDict: newDict,
@@ -56,7 +59,6 @@ func newMessages(newDict func() *dictionary) Messages {
 				return &Message{
 					buf:        make([]byte, bufferSize),
 					keys:       make([]string, keysLen),
-					rawKey:     make([]byte, 1024),
 					dictionary: newDict(),
 				}
 			},

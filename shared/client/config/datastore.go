@@ -1,14 +1,18 @@
 package config
 
 import (
+	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/config/datastore"
 )
 
-//Datastore represents client datastore
-type Datastore struct {
+//Remote represents client datastore
+type Remote struct {
 	Connections []*datastore.Connection
 	config.Datastore
-	KeyFields    []string
-	WildcardKeys []string
+	shared.MetaInput
+}
+
+func (d *Remote) Init() {
+	d.MetaInput.Init()
 }

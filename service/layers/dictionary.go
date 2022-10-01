@@ -22,14 +22,14 @@ func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signatur
 		}
 		layers = append(layers, input.Name)
 	}
-	dictionary, err := discoverDictionary(session, graph, layers)
+	dictionary, err := DiscoverDictionary(session, graph, layers)
 	if err != nil {
 		return dictionary, err
 	}
 	return dictionary, nil
 }
 
-func discoverDictionary(session *tf.Session, graph *tf.Graph, layers []string) (*common.Dictionary, error) {
+func DiscoverDictionary(session *tf.Session, graph *tf.Graph, layers []string) (*common.Dictionary, error) {
 	var result = &common.Dictionary{}
 	for _, name := range layers {
 		aHash := fnv.New64()

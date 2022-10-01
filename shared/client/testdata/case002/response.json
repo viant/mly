@@ -1,0 +1,17 @@
+{
+  "status": "ok",
+  "dictHash": 123,
+  "data": [
+    {
+      "Prediction": 3.2
+    },
+    {
+      "Prediction": 4.2
+    },
+    {
+      "Prediction": 7.6
+    }
+
+  ],
+  "serviceTime": 123.1
+}

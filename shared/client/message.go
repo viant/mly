@@ -1,21 +1,101 @@
 package client
 
 import (
+	"bytes"
+	"fmt"
 	"github.com/viant/mly/shared/common"
+	"reflect"
 	"strconv"
 	"sync"
 )
 
 //Message represents a message
-type Message struct {
-	buf        []byte
-	index      int
-	mux        sync.RWMutex
-	pool       *messages
-	keys       []string
-	key        string
-	rawKey     []byte
-	dictionary *dictionary
+type (
+	Message struct {
+		keyIndex int
+		buf      []byte
+		index    int
+		mux      sync.RWMutex
+		pool     *messages
+		keys     []string
+		key      string
+		buffer   bytes.Buffer
+
+		//used to represent vector
+		multiKeys [][]string
+		multiKey  []string
+		transient []*transient
+		cacheHits []bool
+
+		dictionary *Dictionary
+	}
+	transient struct {
+		name   string
+		values interface{}
+		kind   reflect.Kind
+	}
+)
+
+func (m *Message) CacheHit(index int) bool {
+	if index < len(m.cacheHits) {
+		return m.cacheHits[index]
+	}
+	return false
+}
+
+func (m *Message) flushTransient(dim *transient, hasCacheHit bool) error {
+	switch actual := dim.values.(type) {
+	case []string:
+		if hasCacheHit {
+			var result = make([]string, len(actual), len(actual))
+			j := 0
+			for i, item := range actual {
+				if m.CacheHit(i) {
+					continue
+				}
+				result[j] = item
+				j++
+			}
+			actual = result
+		}
+		m.stringsKey(dim.name, actual)
+	case []int:
+		if hasCacheHit {
+			var result = make([]int, len(actual), len(actual))
+			j := 0
+			for i, item := range actual {
+				if m.CacheHit(i) {
+					continue
+				}
+				result[j] = item
+				j++
+			}
+			actual = result
+		}
+		m.intsKey(dim.name, actual)
+	case []float32:
+		if hasCacheHit {
+			var result = make([]float32, len(actual), len(actual))
+			j := 0
+			for i, item := range actual {
+				if m.CacheHit(i) {
+					continue
+				}
+				result[j] = item
+				j++
+			}
+			actual = result
+		}
+		m.floatsKey(dim.name, actual)
+	default:
+		return fmt.Errorf("unsupported type: %T", actual)
+	}
+	return nil
+
+}
+
+func (m *Message) BatchSize() int {
+	return len(m.multiKeys)
 }
 
 //Size returns message size
@@ -27,16 +107,27 @@ func (m *Message) start() {
 	m.appendByte('{')
 }
 
-func (m *Message) end() {
+func (m *Message) end() error {
+	if len(m.multiKeys) > 0 {
+		if err := m.endInMultiKeyMode(); err != nil {
+			return err
+		}
+		m.trim(',')
+		m.appendString("}\n")
+		return nil
+	}
+
 	if len(m.keys) > 0 {
 		m.addCacheKey()
 	}
 	m.trim(',')
 	m.appendString("}\n")
+	return nil
 }
 
 //StringKey sets key/value pair
 func (m *Message) StringKey(key, value string) {
+	m.ensureMode("Strings")
 	if key, index := m.dictionary.lookupString(key, value); index != unknownKeyField {
 		m.keys[index] = key
 	}
@@ -47,8 +138,31 @@ func (m *Message) StringKey(key, value string) {
 	m.appendString(`",`)
 }
 
+//ensureMode ensure that if multi keys are use no single message is allowed
+func (m *Message) ensureMode(typeName string) {
+	if len(m.multiKeys) > 0 {
+		panic(fmt.Sprintf("use %vKey", typeName))
+	}
+}
+
 //StringsKey sets key/values pair
 func (m *Message) StringsKey(key string, values []string) {
+	if len(m.multiKeys) == 0 {
+		m.multiKeys = make([][]string, len(values))
+	}
+	m.transient = append(m.transient, &transient{name: key, values: values, kind: reflect.String})
+	for i, value := range values {
+		if len(m.multiKeys[i]) == 0 {
+			m.multiKeys[i] = make([]string, m.dictionary.inputSize())
+		}
+		if key, index := m.dictionary.lookupString(key, value); index != unknownKeyField {
+			m.multiKeys[i][index] = key
+		}
+	}
+}
+
+// stringsKey sets key/values pair
+func (m *Message) stringsKey(key string, values []string) {
 	m.appendByte('"')
 	m.appendString(key)
 	m.appendString(`":[`)
@@ -65,6 +179,22 @@ func (m *Message) StringsKey(key string, values []string) {
 
 //IntsKey sets key/values pair
 func (m *Message) IntsKey(key string, values []int) {
+	if len(m.multiKeys) == 0 {
+		m.multiKeys = make([][]string, len(values))
+	}
+	m.transient = append(m.transient, &transient{name: key, values: values, kind: reflect.Int64})
+	for i, value := range values {
+		if len(m.multiKeys[i]) == 0 {
+			m.multiKeys[i] = make([]string, m.dictionary.inputSize())
+		}
+		if key, index := m.dictionary.lookupInt(key, value); index != unknownKeyField {
+			m.multiKeys[i][index] = strconv.Itoa(key)
+		}
+	}
+}
+
+//IntsKey sets key/values pair
+func (m *Message) intsKey(key string, values []int) {
 	m.appendByte('"')
 	m.appendString(key)
 	m.appendString(`":[`)
@@ -91,6 +221,7 @@ func (m *Message) IntKey(key string, value int) {
 
 //FloatKey sets key/value pair
 func (m *Message) FloatKey(key string, value float32) {
+	m.ensureMode("Floats")
 	if key, index := m.dictionary.lookupFloat(key, value); index != unknownKeyField {
 		m.keys[index] = strconv.FormatFloat(float64(key), 'f', 10, 32)
 	}
@@ -103,6 +234,22 @@ func (m *Message) FloatKey(key string, value float32) {
 
 //FloatsKey sets key/values pair
 func (m *Message) FloatsKey(key string, values []float32) {
+	if len(m.multiKeys) == 0 {
+		m.multiKeys = make([][]string, len(values))
+	}
+	m.transient = append(m.transient, &transient{name: key, values: values, kind: reflect.Float32})
+	for i, value := range values {
+		if len(m.multiKeys[i]) == 0 {
+			m.multiKeys[i] = make([]string, m.dictionary.inputSize())
+		}
+		if key, index := m.dictionary.lookupFloat(key, value); index != unknownKeyField {
+			m.multiKeys[i][index] = strconv.FormatFloat(float64(key), 'f', 10, 32)
+		}
+	}
+}
+
+//FloatsKey sets key/values pair
+func (m *Message) floatsKey(key string, values []float32) {
 	m.appendByte('"')
 	m.appendString(key)
 	m.appendString(`":`)
@@ -111,20 +258,6 @@ func (m *Message) FloatsKey(key string, values []float32) {
 			m.appendByte(',')
 		}
 		m.appendFloat(item, 32)
-	}
-	m.appendString(`,`)
-}
-
-//BoolKey sets key/value pair
-func (m *Message) BoolKey(key string, value bool) {
-	m.appendByte('"')
-	m.appendString(key)
-	m.appendString(`":`)
-	if value {
-		m.appendString("true")
-	} else {
-		m.appendString("false")
-
 	}
 	m.appendString(`,`)
 }
@@ -207,7 +340,7 @@ func (m *Message) appendFloat(f float32, bitSize int) {
 	m.appendString(s)
 }
 
-// trim trims any final character from the buffer
+// trim removes the last character from the buffer
 func (m *Message) trim(ch byte) {
 	if m.buf[m.index-1] == ch && m.index > 0 {
 		m.index--
@@ -233,21 +366,47 @@ func (m *Message) Release() {
 	pool.put(m)
 }
 
+func (m *Message) FlagCacheHit(index int) {
+	diff := (index - len(m.cacheHits)) + 1
+	if diff > 0 {
+		m.cacheHits = append(m.cacheHits, make([]bool, diff)...)
+	}
+	m.cacheHits[index] = true
+}
+
+//CacheKeyAt returns cache key for supplied index
+func (m *Message) CacheKeyAt(index int) string {
+	if m.BatchSize() <= 1 {
+		return m.CacheKey()
+	}
+	if len(m.multiKey) == 0 {
+		m.multiKey = make([]string, len(m.multiKeys))
+	}
+	if m.multiKey[index] != "" {
+		return m.multiKey[index]
+	}
+	m.multiKey[index] = buildKey(m.multiKeys[index], &m.buffer)
+	m.buffer.Reset()
+	return m.multiKey[index]
+}
+
 //CacheKey returns cache key
 func (m *Message) CacheKey() string {
 	if m.key != "" {
 		return m.key
 	}
-	offset := copy(m.rawKey, m.keys[0])
-	for i := 1; i < len(m.keys); i++ {
-		m.rawKey[offset] = common.KeyDelimiter
-		offset++
-		copied := copy(m.rawKey[offset:], m.keys[i])
-		offset += copied
-	}
-	rawKey := m.rawKey[:offset]
-	m.key = string(rawKey)
+	m.key = buildKey(m.keys, &m.buffer)
 	return m.key
+}
+
+func buildKey(keys []string, buffer *bytes.Buffer) string {
+	buffer.WriteString(keys[0])
+	for i := 1; i < len(keys); i++ {
+		buffer.WriteByte(common.KeyDelimiter)
+		buffer.WriteString(keys[i])
+	}
+	rawKey := buffer.Bytes()
+	return string(rawKey)
 }
 
 func (m *Message) addCacheKey() {
@@ -256,4 +415,49 @@ func (m *Message) addCacheKey() {
 		return
 	}
 	m.StringKey(common.CacheKey, aKey)
+}
+
+func (m *Message) endInMultiKeyMode() error {
+	hasCacheHit := m.hasCacheHit()
+
+	m.IntKey(common.BatchSizeKey, m.requestBatchSize())
+	for _, item := range m.transient {
+		if err := m.flushTransient(item, hasCacheHit); err != nil {
+			return err
+		}
+	}
+
+	var multiKey []string
+	if len(m.multiKeys) > 0 {
+		for i := range m.multiKeys { //
+			if m.CacheHit(i) {
+				continue
+			}
+			multiKey = append(multiKey, m.CacheKeyAt(i))
+		}
+		m.stringsKey(common.CacheKey, multiKey)
+	}
+	return nil
+}
+
+func (m *Message) requestBatchSize() int {
+	cacheHits := 0
+	for _, hit := range m.cacheHits {
+		if hit {
+			cacheHits++
+		}
+	}
+	return len(m.multiKeys) - cacheHits
+}
+
+func (m *Message) hasCacheHit() bool {
+	if len(m.cacheHits) == 0 {
+		return false
+	}
+	for _, hit := range m.cacheHits {
+		if hit {
+			return true
+		}
+	}
+	return false
 }

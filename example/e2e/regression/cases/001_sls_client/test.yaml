@@ -1,0 +1,17 @@
+init:
+  parentPath: $parent.path
+  expect: $LoadJSON('${parentPath}/expect.json')
+pipeline:
+
+  test:
+    action: exec:run
+    target: $target
+    checkError: true
+    commands:
+      - /tmp/e2e/mlyc -m=sls -a=a -s=b -x=x
+  assert:
+    action: validator:assert
+    init:
+      actual: $AsJSON($test.Cmd[0].Stdout)
+    actual: $actual
+    expect: $expect

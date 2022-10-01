@@ -18,9 +18,9 @@ func (c *Connection) Init() {
 	}
 	if c.Timeout == nil {
 		c.Timeout = &Timeout{
-			Total:      45,
-			Socket:     40,
-			Connection: 400,
+			Total:      450,
+			Socket:     400,
+			Connection: 800,
 		}
 	}
 }

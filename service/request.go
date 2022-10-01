@@ -3,22 +3,20 @@ package service
 import (
 	"fmt"
 	"github.com/francoispqt/gojay"
-	"github.com/viant/gtly"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/common"
+	"github.com/viant/mly/shared/transfer"
 	"reflect"
 	"strconv"
 )
 
 //Request represent a request
 type Request struct {
-	Key       string
-	BatchSize int
-	Body      []byte
-	Feeds     []interface{}
-	inputs    map[string]*domain.Input
-	supplied  int
-	input     *gtly.Object
+	Body     []byte
+	Feeds    []interface{}
+	inputs   map[string]*domain.Input
+	supplied int
+	input    *transfer.Input
 }
 
 //Put puts data to request
@@ -41,7 +39,6 @@ func (r *Request) Put(key string, value string) error {
 				return fmt.Errorf("failed to parse int: '%v' for %v, %w", val, key, err)
 			}
 			r.Feeds[input.Index] = int(val)
-
 		case reflect.Int64:
 			val, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
@@ -70,66 +67,102 @@ func (r *Request) Put(key string, value string) error {
 
 //UnmarshalJSONObject umarshal
 func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
+	if r.input == nil {
+		r.input = &transfer.Input{}
+	}
 	switch key {
 	case common.BatchSizeKey:
-		if err := dec.Int(&r.BatchSize); err != nil {
+		return dec.Int(&r.input.BatchSize)
+	case common.CacheKey:
+		if r.input.BatchMode() {
+			return dec.DecodeArray(&r.input.Keys)
+		}
+		var k string
+		if err := dec.String(&k); err != nil {
 			return err
 		}
-	case common.CacheKey:
-		if err := dec.String(&r.Key); err != nil {
+		if err := r.input.Keys.Set(k); err != nil {
 			return err
 		}
 	default:
-		if input, ok := r.inputs[key]; ok {
-			mutator := r.input.Proto().Mutator(key)
+
+		input, ok := r.inputs[key]
+		if ok {
 			r.supplied++
+			inputValue, err := r.input.SetAt(input.Index, input.Name, input.Type.Kind())
+			if err != nil {
+				return err
+			}
+			if r.input.BatchMode() {
+				if err := dec.DecodeArray(inputValue); err != nil {
+					return err
+				}
+				if !input.Auxiliary {
+					r.Feeds[input.Index] = inputValue.Feed()
+				}
+				return nil
+			}
+
 			switch input.Type.Kind() {
 			case reflect.String:
 				value := ""
 				if err := dec.String(&value); err != nil {
 					return err
 				}
-				mutator.String(r.input, value)
-				r.Feeds[input.Index] = [][]string{{value}}
+				_ = inputValue.Set(value)
+				if !input.Auxiliary {
+					r.Feeds[input.Index] = [][]string{{value}}
+				}
 			case reflect.Bool:
 				value := false
 				if err := dec.Bool(&value); err != nil {
 					return err
 				}
-				r.Feeds[input.Index] = [][]bool{{value}}
-				mutator.Bool(r.input, value)
+				if !input.Auxiliary {
+					r.Feeds[input.Index] = [][]bool{{value}}
+				}
+				_ = inputValue.Set(value)
 			case reflect.Int:
 				value := 0
 				if err := dec.Int(&value); err != nil {
 					return err
 				}
-				r.Feeds[input.Index] = [][]int{{value}}
-				mutator.Int(r.input, value)
+				if !input.Auxiliary {
+					r.Feeds[input.Index] = [][]int{{value}}
+				}
+				_ = inputValue.Set(value)
 			case reflect.Int64:
 				value := 0
 				if err := dec.Int(&value); err != nil {
 					return err
 				}
-				r.Feeds[input.Index] = [][]int64{{int64(value)}}
-				mutator.Int(r.input, value)
+				if !input.Auxiliary {
+					r.Feeds[input.Index] = [][]int64{{int64(value)}}
+				}
+				_ = inputValue.Set(value)
 			case reflect.Float64:
 				value := float64(0)
 				if err := dec.Float64(&value); err != nil {
 					return err
 				}
-				r.Feeds[input.Index] = [][]float64{{value}}
-				mutator.SetValue(r.input, float32(value))
+				if !input.Auxiliary {
+					r.Feeds[input.Index] = [][]float64{{value}}
+				}
+				_ = inputValue.Set(value)
 			case reflect.Float32:
 				value := float64(0)
 				if err := dec.Float64(&value); err != nil {
 					return err
 				}
-				r.Feeds[input.Index] = [][]float64{{value}}
-				mutator.SetValue(r.input, float32(value))
+				if !input.Auxiliary {
+					r.Feeds[input.Index] = [][]float64{{value}}
+				}
+				_ = inputValue.Set(value)
 			default:
-				//TODO add more type support
 				return fmt.Errorf("unsupported input type: %T", reflect.New(input.Type).Interface())
 			}
+		} else {
+			return fmt.Errorf("unknwon field %v, avails: %v", key, r.inputs)
 		}
 	}
 	return nil
@@ -144,7 +177,9 @@ func (r *Request) Validate() error {
 				missing = append(missing, input.Name)
 			}
 		}
-		return fmt.Errorf("failed to build request due to missing fields: %v", missing)
+		if len(missing) > 0 {
+			return fmt.Errorf("failed to build request due to missing fields: %v", missing)
+		}
 	}
 	return nil
 }

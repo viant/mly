@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"github.com/viant/afs/file"
+	"github.com/viant/mly/shared"
 	"github.com/viant/tapper/config"
 	"os"
 	"path"
@@ -10,18 +11,18 @@ import (
 
 //Model represents model config
 type Model struct {
-	ID             string
-	URL            string
-	Location       string
-	Tags           []string
-	OutputType     string
-	UseDict        *bool
-	Transformer    string
-	DataStore      string
-	KeyFields      []string
-	WildcardFields []string
-	Modified       *Modified
-	Stream         *config.Stream
+	ID               string
+	URL              string
+	Location         string `json:",omitempty" yaml:",omitempty"`
+	Tags             []string
+	OutputType       string `json:",omitempty" yaml:",omitempty"`
+	UseDict          *bool  `json:",omitempty" yaml:",omitempty"`
+	DictURL          string
+	Transformer      string         `json:",omitempty" yaml:",omitempty"`
+	DataStore        string         `json:",omitempty" yaml:",omitempty"`
+	Modified         *Modified      `json:",omitempty" yaml:",omitempty"`
+	Stream           *config.Stream `json:",omitempty" yaml:",omitempty"`
+	shared.MetaInput `json:",omitempty" yaml:",inline"`
 }
 
 //UseDictionary returns true if dictionary can be used
@@ -39,6 +40,7 @@ func (m *Model) Init() {
 	}
 	_ = os.MkdirAll(m.Location, file.DefaultDirOsMode)
 	m.Modified = &Modified{}
+	m.MetaInput.Init()
 }
 
 //Validate validates model config

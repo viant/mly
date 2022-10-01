@@ -3,6 +3,7 @@ package client
 import (
 	"encoding/json"
 	"github.com/francoispqt/gojay"
+	"reflect"
 	"time"
 )
 
@@ -44,6 +45,9 @@ func (r *Response) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 			if unmarshaler, ok := r.Data.(gojay.UnmarshalerJSONObject); ok {
 				return dec.Object(unmarshaler)
 			}
+			if unmarshaler, ok := r.Data.(gojay.UnmarshalerJSONArray); ok {
+				return dec.Array(unmarshaler)
+			}
 		}
 
 		if err := dec.EmbeddedJSON(&embedded); err != nil {
@@ -68,6 +72,17 @@ func (r *Response) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 		}
 	}
 	return nil
+}
+
+func (r *Response) DataItemType() reflect.Type {
+	if r.Data == nil {
+		return reflect.TypeOf(&struct{}{})
+	}
+	dataType := reflect.TypeOf(r.Data).Elem()
+	if dataType.Kind() == reflect.Slice {
+		return dataType.Elem()
+	}
+	return dataType
 }
 
 //NKeys returns object keys JSON (gojay API)

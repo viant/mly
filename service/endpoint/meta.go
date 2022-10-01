@@ -14,7 +14,7 @@ import (
 )
 
 type metaHandler struct {
-	datastore    *config.Datastore
+	datastore    *config.Remote
 	modelService *service.Service
 }
 
@@ -71,13 +71,12 @@ func newMetaHandler(srv *service.Service, datastoreList *sconfig.DatastoreList) 
 		modelService: srv,
 		datastore:    assembleConfig(datastoreList, modelConfig.DataStore),
 	}
-	handler.datastore.KeyFields = modelConfig.KeyFields
-	handler.datastore.WildcardKeys = modelConfig.WildcardFields
+	handler.datastore.MetaInput = modelConfig.MetaInput
 	return handler
 
 }
 
-func assembleConfig(datastoreList *sconfig.DatastoreList, name string) *config.Datastore {
+func assembleConfig(datastoreList *sconfig.DatastoreList, name string) *config.Remote {
 	connections := map[string]*datastore.Connection{}
 	datastores := map[string]*sconfig.Datastore{}
 	if len(datastoreList.Connections) > 0 {
@@ -90,7 +89,7 @@ func assembleConfig(datastoreList *sconfig.DatastoreList, name string) *config.D
 			datastores[item.ID] = datastoreList.Datastores[i]
 		}
 	}
-	result := &config.Datastore{}
+	result := &config.Remote{}
 	ds, ok := datastores[name]
 	if ok {
 		result.Datastore = *ds

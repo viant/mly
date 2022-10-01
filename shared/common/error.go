@@ -52,6 +52,11 @@ func IsTimeout(err error) bool {
 	return aeroError.ResultCode() == types.TIMEOUT
 }
 
+//IsTransientError returns if transient error
+func IsTransientError(err error) bool {
+	return IsKeyNotFound(err) || IsInvalidNode(err) || IsTimeout(err) || IsInvalidNode(err) || IsConnectionError(err)
+}
+
 //IsInvalidNode returns true is node/cluster is down
 func IsInvalidNode(err error) bool {
 	if err == nil {

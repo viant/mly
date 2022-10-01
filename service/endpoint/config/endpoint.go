@@ -7,12 +7,12 @@ import (
 //Endpoint represents an endpoint
 type Endpoint struct {
 	Port           int
-	ReadTimeoutMs  int
-	WriteTimeoutMs int
-	WriteTimeout   time.Duration
-	MaxHeaderBytes int
-	PoolMaxSize    int
-	BufferSize     int
+	ReadTimeoutMs  int           `json:",omitempty" yaml:",omitempty"`
+	WriteTimeoutMs int           `json:",omitempty" yaml:",omitempty"`
+	WriteTimeout   time.Duration `json:",omitempty" yaml:",omitempty"`
+	MaxHeaderBytes int           `json:",omitempty" yaml:",omitempty"`
+	PoolMaxSize    int           `json:",omitempty" yaml:",omitempty"`
+	BufferSize     int           `json:",omitempty" yaml:",omitempty"`
 }
 
 //Init init applied default settings

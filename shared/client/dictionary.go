@@ -1,6 +1,7 @@
 package client
 
 import (
+	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 	"log"
 )
@@ -11,123 +12,160 @@ const (
 	unknownKeyField    = -1
 )
 
-//dictionary represents dictionary
-type dictionary struct {
+//Dictionary represents Dictionary
+type Dictionary struct {
 	hash     int
 	registry map[string]*entry
-	//keys to position mapping
-	keys         map[string]int
-	wildcardKeys map[string]bool
+	inputs   map[string]*shared.Field
 }
 
-func (d *dictionary) size() int {
+func (d *Dictionary) KeysLen() int {
+	count := 0
+	for _, item := range d.inputs {
+		if item.Auxiliary {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func (d *Dictionary) inputSize() int {
+	return len(d.inputs)
+}
+
+func (d *Dictionary) size() int {
 	return len(d.registry)
 }
 
-func (d *dictionary) lookupString(key string, value string) (string, int) {
-	if d == nil || len(d.registry) == 0 {
+func (d *Dictionary) lookupString(key string, value string) (string, int) {
+	if d == nil {
+		return "", unknownKeyField
+	}
+	input, ok := d.inputs[key]
+	if !ok {
+		return "", unknownKeyField
+	}
+	if input.Wildcard {
+		return value, input.Index
+	}
+	if len(d.registry) == 0 {
 		return "", unknownKeyField
 	}
 	elem, ok := d.registry[key]
 	if !ok {
-		if index, ok := d.keys[key]; ok {
-			return value, index
-		}
 		return "", unknownKeyField
 	}
 	if elem == nil {
 		log.Printf("dict element was nil for %v: %v\n", key, value)
 		return defaultStringValue, unknownKeyField
 	}
-
 	if elem.hasString(value) {
-		return value, elem.index
+		return value, input.Index
 	}
-	return defaultStringValue, elem.index
+	return defaultStringValue, input.Index
 }
 
-func (d *dictionary) lookupInt(key string, value int) (int, int) {
-	if d == nil || len(d.registry) == 0 {
+func (d *Dictionary) lookupInt(key string, value int) (int, int) {
+	if d == nil {
+		return 0, unknownKeyField
+	}
+	input, ok := d.inputs[key]
+	if !ok {
+		return 0, unknownKeyField
+	}
+	if input.Wildcard {
+		return value, input.Index
+	}
+
+	if len(d.registry) == 0 {
 		return 0, unknownKeyField
 	}
 	elem, ok := d.registry[key]
 	if !ok {
-		if index, ok := d.keys[key]; ok {
-			return value, index
-		}
 		return 0, unknownKeyField
+	}
+
+	if elem == nil {
+		log.Printf("dict element was nil for %v: %v\n", key, value)
+		return defaultIntValue, unknownKeyField
 	}
 	if elem.hasInt(value) {
-		return value, elem.index
+		return value, input.Index
 	}
-	return defaultIntValue, elem.index
+	return defaultIntValue, input.Index
 }
 
-func (d *dictionary) lookupFloat(key string, value float32) (float32, int) {
-	if d == nil || len(d.registry) == 0 {
+func (d *Dictionary) lookupFloat(key string, value float32) (float32, int) {
+	if d == nil {
+		return 0, unknownKeyField
+	}
+	input, ok := d.inputs[key]
+	if !ok {
+		return 0, unknownKeyField
+	}
+	if input.Wildcard {
+		return value, input.Index
+	}
+
+	if len(d.registry) == 0 {
 		return 0, unknownKeyField
 	}
 	elem, ok := d.registry[key]
 	if !ok {
-		if index, ok := d.keys[key]; ok {
-			return value, index
-		}
+		return 0, unknownKeyField
+	}
+
+	if elem == nil {
+		log.Printf("dict element was nil for %v: %v\n", key, value)
 		return 0, unknownKeyField
 	}
 	if elem.hasFloat32(value) {
-		return value, elem.index
+		return value, input.Index
 	}
-	return defaultIntValue, elem.index
+	return 0, input.Index
 }
 
-//NewDictionary creates new dictionary
-func newDictionary(dict *common.Dictionary, keyFields []string, wildcardKeys []string) *dictionary {
-	var result = &dictionary{
-		hash:         dict.Hash,
-		keys:         map[string]int{},
-		wildcardKeys: map[string]bool{},
-		registry:     make(map[string]*entry),
+//NewDictionary creates new Dictionary
+func NewDictionary(dict *common.Dictionary, inputs []*shared.Field) *Dictionary {
+	var result = &Dictionary{
+		inputs:   map[string]*shared.Field{},
+		hash:     dict.Hash,
+		registry: make(map[string]*entry),
 	}
-
-	if len(dict.Layers) > 0 {
-		for _, layer := range dict.Layers {
-			result.registry[layer.Name] = &entry{}
-
-			if len(layer.Ints) > 0 {
-				values := make(map[int]bool)
-				for _, item := range layer.Ints {
-					values[item] = true
-				}
-				result.registry[layer.Name].ints = values
-
-			} else if len(layer.Floats) > 0 {
-				values := make(map[float32]bool)
-				for _, item := range layer.Floats {
-					values[item] = true
-				}
-				result.registry[layer.Name].float32s = values
-
-			} else if len(layer.Strings) > 0 {
-				values := make(map[string]bool)
-				for _, item := range layer.Strings {
-					values[item] = true
-				}
-				result.registry[layer.Name].strings = values
-			}
-		}
-		if len(keyFields) > 0 {
-			for i, field := range keyFields {
-				result.keys[field] = i
-				if item, ok := result.registry[field]; ok {
-					item.index = i
-				}
-			}
-		}
-		if len(wildcardKeys) > 0 {
-			for i := range wildcardKeys {
-				result.wildcardKeys[wildcardKeys[i]] = true
-			}
-		}
+	for i, input := range inputs {
+		result.inputs[input.Name] = inputs[i]
 	}
+	result.init(dict)
 	return result
+}
+
+func (d *Dictionary) init(dict *common.Dictionary) {
+	if dict == nil || len(dict.Layers) == 0 {
+		return
+	}
+	for _, layer := range dict.Layers {
+		d.registry[layer.Name] = &entry{}
+		if len(layer.Ints) > 0 {
+			values := make(map[int]bool)
+			for _, item := range layer.Ints {
+				values[item] = true
+			}
+			d.registry[layer.Name].ints = values
+
+		} else if len(layer.Floats) > 0 {
+			values := make(map[float32]bool)
+			for _, item := range layer.Floats {
+				values[item] = true
+			}
+			d.registry[layer.Name].float32s = values
+
+		} else if len(layer.Strings) > 0 {
+			values := make(map[string]bool)
+			for _, item := range layer.Strings {
+				values[item] = true
+			}
+			d.registry[layer.Name].strings = values
+		}
+	}
 }

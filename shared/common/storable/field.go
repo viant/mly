@@ -26,7 +26,7 @@ func (f *Field) Init() (err error) {
 	return err
 }
 
-//NewFields create new Fields
+//NewFields create new Inputs
 func NewFields(name string, dataType string) []*Field {
 	field := &Field{Name: name, DataType: dataType}
 	_ = field.Init()

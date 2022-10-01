@@ -1,2 +1,3 @@
 examples/
 .idea
+local_test.go

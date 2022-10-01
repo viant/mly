@@ -1,7 +1,6 @@
 package client
 
 type entry struct {
-	index    int
 	ints     map[int]bool
 	float32s map[float32]bool
 	strings  map[string]bool

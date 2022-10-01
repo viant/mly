@@ -109,7 +109,6 @@ func New(config *Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	result.server = &http.Server{
 		Addr:           ":" + strconv.Itoa(config.Endpoint.Port),
 		Handler:        h2c.NewHandler(mux, &http2.Server{}),

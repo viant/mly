@@ -45,8 +45,31 @@ type Service struct {
 	l2Client client.Service
 	useCache bool
 	cache    *scache.Cache
-	Config   *config.Datastore
-	Mode     StoreMode
+	config   *config.Datastore
+	mode     StoreMode
+}
+
+func (s *Service) Config() *config.Datastore {
+	return s.config
+}
+
+func (s *Service) Mode() StoreMode {
+	return s.mode
+}
+
+func (s *Service) SetMode(mode StoreMode) {
+	s.mode = mode
+}
+
+func (s *Service) Enabled() bool {
+	if s.config == nil {
+		return false
+	}
+	return !s.config.Disabled
+}
+
+func (s *Service) Key(key string) *Key {
+	return NewKey(s.config, key)
 }
 
 //Put puts entry to the datastore
@@ -55,7 +78,7 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 	if err := s.updateCache(key, value, dictHash); err != nil {
 		return err
 	}
-	if s.l1Client == nil || s.Mode == ModeClient {
+	if s.l1Client == nil || s.mode == ModeClient {
 		return nil
 	}
 	storable := getStorable(value)
@@ -69,12 +92,12 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 	writeKey, _ := key.Key()
 	wp := key.WritePolicy(0)
 	wp.SendKey = true
-	if s.l1Client != nil && !s.Config.ReadOnly {
+	if s.l1Client != nil && !s.config.ReadOnly {
 		if err = s.l1Client.Put(ctx, wp, writeKey, bins); err != nil {
 			return err
 		}
 	}
-	if s.l2Client != nil && !s.Config.L2.ReadOnly {
+	if s.l2Client != nil && !s.config.L2.ReadOnly {
 		k2Key, _ := key.L2.Key()
 		err = s.l2Client.Put(ctx, wp, k2Key, bins)
 	}
@@ -105,7 +128,7 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 			return dictHash, nil
 		}
 	}
-	if s.Mode == ModeServer { //in server mode, cache hit rate would be low and expensive, thus skipping it
+	if s.mode == ModeServer { //in server mode, cache hit rate would be low and expensive, thus skipping it
 		return 0, types.ErrKeyNotFound
 	}
 	if s.l1Client == nil {
@@ -114,6 +137,8 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 	dictHash, err := s.getFromClient(ctx, key, storable, stats)
 	if common.IsInvalidNode(err) {
 		stats.Append(stat.Down)
+		err = nil
+		return 0, types.ErrKeyNotFound
 	}
 
 	if s.useCache && key != nil {
@@ -121,7 +146,7 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 			err = s.updateCache(key, storable, dictHash)
 		} else if common.IsKeyNotFound(err) {
 			if e := s.updateNotFound(key); e != nil {
-				return 0, fmt.Errorf("failed to updated cache with not found entry: %e")
+				return 0, types.ErrKeyNotFound
 			}
 		}
 	}
@@ -132,7 +157,7 @@ func (s *Service) updateNotFound(key *Key) error {
 	entry := &Entry{
 		Key:      key.AsString(),
 		NotFound: true,
-		Expiry:   time.Now().Add(s.Config.RetryTime()),
+		Expiry:   time.Now().Add(s.config.RetryTime()),
 	}
 	data, err := bintly.Encode(entry)
 	if err != nil {
@@ -151,7 +176,7 @@ func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error
 		Hash:   dictHash,
 		Key:    key.AsString(),
 		Data:   entryData,
-		Expiry: time.Now().Add(s.Config.TimeToLive()),
+		Expiry: time.Now().Add(s.config.TimeToLive()),
 	}
 	data, err := bintly.Encode(entry)
 	if err != nil {
@@ -307,7 +332,7 @@ func NewWithCache(config *config.Datastore, l1Client, l2Client client.Service, c
 		return New(l1Client, l2Client, counter), nil
 	}
 	srv := &Service{
-		Config:   config,
+		config:   config,
 		l1Client: l1Client,
 		l2Client: l2Client,
 		useCache: true,

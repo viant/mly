@@ -22,10 +22,10 @@ const (
 
 //Config represents an endpoint config
 type Config struct {
-	config.ModelList
-	sconfig.DatastoreList
-	Endpoint      econfig.Endpoint
-	AllowedSubnet []string
+	config.ModelList      `json:",omitempty" yaml:",inline"`
+	sconfig.DatastoreList `json:",omitempty" yaml:",inline"`
+	Endpoint              econfig.Endpoint
+	AllowedSubnet         []string `json:",omitempty" yaml:",omitempty"`
 }
 
 //Init initialise config
@@ -45,8 +45,6 @@ func (c *Config) Validate() error {
 	}
 	return nil
 }
-
-
 
 func (c *Config) LoadFromURL(ctx context.Context, URL string, target interface{}) error {
 	fs := afs.New()
@@ -72,8 +70,6 @@ func (c *Config) LoadFromURL(ctx context.Context, URL string, target interface{}
 	return nil
 }
 
-
-
 type configHandler struct {
 	*Config
 }
@@ -93,15 +89,12 @@ func NewConfigHandler(config *Config) http.Handler {
 	return &configHandler{Config: config}
 }
 
-
 //NewConfigFromURL creates a new config from URL
 func NewConfigFromURL(ctx context.Context, URL string) (*Config, error) {
 	cfg := &Config{}
-	if err :=cfg.LoadFromURL(ctx, URL, cfg); err != nil {
+	if err := cfg.LoadFromURL(ctx, URL, cfg); err != nil {
 		return nil, err
 	}
 	cfg.Init()
 	return cfg, cfg.Validate()
 }
-
-

@@ -12,11 +12,11 @@ type Reference struct {
 	Connection   string
 	Namespace    string
 	Dataset      string
-	TimeToLiveMs int
+	TimeToLiveMs int `json:",omitempty" yaml:",omitempty"`
 	timeToLive   time.Duration
-	RetryTimeMs  int
+	RetryTimeMs  int `json:",omitempty" yaml:",omitempty"`
 	retryTime    time.Duration
-	ReadOnly     bool
+	ReadOnly     bool `json:",omitempty" yaml:",omitempty"`
 }
 
 func (d *Reference) TimeToLive() time.Duration {

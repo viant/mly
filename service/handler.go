@@ -25,7 +25,7 @@ func (h *Handler) NewContext() (context.Context, context.CancelFunc) {
 //ServeHTTP serve HTTP
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if err := h.serveHTTP(writer, request); err != nil {
-		http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
 	}
 }
 
@@ -46,7 +46,8 @@ func (h *Handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 			return err
 		}
 		request.Body = data[:size]
-		if err := gojay.Unmarshal(data[:size], request); err != nil {
+		err = gojay.Unmarshal(data[:size], request)
+		if err != nil {
 			return err
 		}
 	}

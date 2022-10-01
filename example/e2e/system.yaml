@@ -1,0 +1,16 @@
+pipeline:
+  stop:
+    services:
+      action: docker:stop
+      images:
+        - aerospike-server
+
+  start:
+    aerospike:
+      action: docker:run
+      image: 'aerospike/aerospike-server'
+      name: aero
+      ports:
+        3000: 3000
+        3001: 3001
+        3002: 3002
