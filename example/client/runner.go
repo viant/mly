@@ -6,7 +6,6 @@ import (
 	"github.com/viant/mly/example/sls"
 	"github.com/viant/mly/example/vec"
 	"github.com/viant/mly/shared/client"
-	"github.com/viant/toolbox"
 )
 
 func RunWithOptions(options *Options) error {
@@ -44,6 +43,5 @@ func RunWithOptions(options *Options) error {
 	if err != nil {
 		return err
 	}
-	toolbox.Dump(response)
 	return err
 }
