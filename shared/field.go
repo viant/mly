@@ -35,6 +35,16 @@ func (f *Field) RawType() reflect.Type {
 }
 
 func (f *Field) SetRawType(t reflect.Type) {
+	switch t.Kind() {
+	case reflect.String:
+		f.DataType = "string"
+	case reflect.Float32:
+		f.DataType = "float"
+	case reflect.Int64:
+		f.DataType = "int64"
+	default:
+		f.DataType = t.Kind().String()
+	}
 	f.rawType = t
 }
 

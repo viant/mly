@@ -17,7 +17,7 @@ import (
 func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signature) (*common.Dictionary, error) {
 	var layers []string
 	for _, input := range signature.Inputs {
-		if input.WildCard {
+		if input.Wildcard {
 			continue
 		}
 		layers = append(layers, input.Name)

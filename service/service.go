@@ -215,8 +215,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		return err
 	}
 	var dictionary *common.Dictionary
-	s.updateWildcardInput(signature)
-
+	s.reconsileSignatureWithInput(signature)
 	if s.config.UseDictionary() {
 		if s.config.DictURL != "" {
 			if dictionary, err = s.loadDictionary(ctx, s.config.DictURL); err != nil {
@@ -260,18 +259,6 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	s.inputs = inputs
 	s.config.Modified = snapshot
 	return nil
-}
-
-func (s *Service) updateWildcardInput(signature *domain.Signature) {
-	var wildcards = map[string]bool{}
-	for _, input := range s.config.MetaInput.Inputs {
-		if input.Wildcard {
-			wildcards[input.Name] = true
-		}
-	}
-	for i, input := range signature.Inputs {
-		signature.Inputs[i].WildCard = wildcards[input.Name]
-	}
 }
 
 //modifiedSnapshot return last modified time of object from the URL
@@ -494,7 +481,7 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 	if metrics == nil {
 		metrics = gmetric.New()
 	}
-
+	cfg.Init()
 	srv := &Service{
 		fs:              fs,
 		config:          cfg,
@@ -506,31 +493,19 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 	for _, opt := range options {
 		opt.Apply(srv)
 	}
-	err := srv.init(ctx, cfg, datastores)
-	byName := srv.config.FieldByName()
-
-	if err != nil {
+	var err error
+	if err = srv.init(ctx, cfg, datastores); err != nil {
 		return nil, err
 	}
-	fieldLen := len(srv.signature.Inputs)
-	if fieldLen < len(srv.config.Inputs) {
-		fieldLen = len(srv.config.Inputs)
+	if srv.inputProvider, err = newObjectProvider(srv.config.Inputs); err != nil {
+		return nil, err
 	}
-	var fields = make([]*gtly.Field, fieldLen)
+	return srv, err
+}
 
-	for i := range srv.signature.Inputs {
-		input := &srv.signature.Inputs[i]
-		inputType := input.Type
-		if input.WildCard {
-			inputType = reflect.TypeOf("")
-		}
-		field, ok := byName[input.Name]
-		if ok {
-			field.SetRawType(inputType)
-		}
-	}
-
-	for i, field := range srv.config.Inputs {
+func newObjectProvider(inputs []*shared.Field) (*gtly.Provider, error) {
+	var fields = make([]*gtly.Field, len(inputs))
+	for i, field := range inputs {
 		fields[i] = &gtly.Field{
 			Name: field.Name,
 			Type: field.RawType(),
@@ -540,6 +515,38 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 	if err != nil {
 		return nil, err
 	}
-	srv.inputProvider = provider
-	return srv, err
+	return provider, nil
+}
+
+func (srv *Service) reconsileSignatureWithInput(signature *domain.Signature) {
+	byName := srv.config.FieldByName()
+	var signatureInputs = signature.Inputs
+	if len(signatureInputs) == 0 {
+		return
+	}
+	for i := range signatureInputs {
+		input := &signatureInputs[i]
+		if input.Type == nil {
+			input.Type = reflect.TypeOf("")
+		}
+		field, ok := byName[input.Name]
+		if !ok {
+			field = &shared.Field{Name: input.Name}
+			srv.config.Inputs = append(srv.config.Inputs, field)
+		}
+		if field.Wildcard {
+			input.Wildcard = field.Wildcard
+		}
+		if field.DataType == "" {
+			field.SetRawType(input.Type)
+		}
+		delete(byName, field.Name)
+	}
+
+	for k, v := range byName {
+		if v.DataType == "" {
+			v.SetRawType(reflect.TypeOf(""))
+		}
+		byName[k].Auxiliary = true
+	}
 }
