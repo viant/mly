@@ -3,7 +3,6 @@ package domain
 import (
 	"context"
 	"fmt"
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/gtly"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
@@ -65,9 +64,9 @@ func Transform(ctx context.Context, signature *Signature, input *gtly.Object, ou
 			k: signature.Outputs[0].Name,
 			v: outputValue,
 		})
-	case []*tf.Tensor:
+	case []interface{}:
 		for i := range val {
-			tensor := val[i].Value()
+			tensor := val[i]
 			switch t := tensor.(type) {
 			case []float32:
 				outputValue = t[0]

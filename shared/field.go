@@ -18,6 +18,7 @@ type (
 		Inputs    []*Field
 		KeyFields []string `json:",omitempty" yaml:",omitempty"`
 		Auxiliary []string `json:",omitempty" yaml:",omitempty"`
+		Outputs   []*Field `json:",omitempty" yaml:",omitempty"`
 	}
 )
 

@@ -140,7 +140,7 @@ func (s *Service) buildResponse(ctx context.Context, request *Request, response 
 	}
 	if !request.input.BatchMode() {
 		var err error
-		response.Data, err = s.transformOutput(ctx, request, tensorValues[0])
+		response.Data, err = s.transformOutput(ctx, request, tensorValues)
 		return err
 	}
 
@@ -217,7 +217,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		return err
 	}
 	var dictionary *common.Dictionary
-	s.reconsileSignatureWithInput(signature)
+	s.reconcileSignatureWithInput(signature)
 	if s.config.UseDictionary() {
 		if s.config.DictURL != "" {
 			if dictionary, err = s.loadDictionary(ctx, s.config.DictURL); err != nil {
@@ -520,7 +520,7 @@ func newObjectProvider(inputs []*shared.Field) (*gtly.Provider, error) {
 	return provider, nil
 }
 
-func (srv *Service) reconsileSignatureWithInput(signature *domain.Signature) {
+func (srv *Service) reconcileSignatureWithInput(signature *domain.Signature) {
 	byName := srv.config.FieldByName()
 	var signatureInputs = signature.Inputs
 	if len(signatureInputs) == 0 {
@@ -543,6 +543,16 @@ func (srv *Service) reconsileSignatureWithInput(signature *domain.Signature) {
 		}
 		delete(byName, field.Name)
 	}
+	if len(signature.Outputs) > 0 {
+		for _, output := range signature.Outputs {
+
+			field := &shared.Field{Name: output.Name, DataType: output.DataType}
+			if field.DataType == "" {
+				field.SetRawType(reflect.TypeOf(""))
+			}
+			srv.config.Outputs = append(srv.config.Outputs, field)
+		}
+	}
 
 	for k, v := range byName {
 		if v.DataType == "" {
@@ -550,4 +560,5 @@ func (srv *Service) reconsileSignatureWithInput(signature *domain.Signature) {
 		}
 		byName[k].Auxiliary = true
 	}
+
 }

@@ -26,13 +26,13 @@ func (r *Request) Put(key string, value string) error {
 		r.supplied++
 		switch input.Type.Kind() {
 		case reflect.String:
-			r.Feeds[input.Index] = value
+			r.Feeds[input.Index] = [][]string{{value}}
 		case reflect.Bool:
 			val, err := strconv.ParseBool(value)
 			if err != nil {
 				return fmt.Errorf("failed to parse bool: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = val
+			r.Feeds[input.Index] = [][]bool{{val}}
 		case reflect.Int:
 			val, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
@@ -44,19 +44,19 @@ func (r *Request) Put(key string, value string) error {
 			if err != nil {
 				return fmt.Errorf("failed to parse int64: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = val
+			r.Feeds[input.Index] = [][]int64{{val}}
 		case reflect.Float64:
 			val, err := strconv.ParseFloat(value, 64)
 			if err != nil {
 				return fmt.Errorf("failed to parse float64: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = val
+			r.Feeds[input.Index] = [][]float64{{val}}
 		case reflect.Float32:
 			val, err := strconv.ParseFloat(value, 32)
 			if err != nil {
 				return fmt.Errorf("failed to parse float32: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = float32(val)
+			r.Feeds[input.Index] = [][]float32{{float32(val)}}
 		default:
 			//TODO add more type support
 			return fmt.Errorf("unsupported input type: %T", reflect.New(input.Type).Interface())
@@ -85,7 +85,6 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 			return err
 		}
 	default:
-
 		input, ok := r.inputs[key]
 		if ok {
 			r.supplied++
@@ -155,7 +154,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					return err
 				}
 				if !input.Auxiliary {
-					r.Feeds[input.Index] = [][]float64{{value}}
+					r.Feeds[input.Index] = [][]float32{{float32(value)}}
 				}
 				_ = inputValue.Set(value)
 			default:
