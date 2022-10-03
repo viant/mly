@@ -34,7 +34,7 @@ func (h *Handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	defer cancel()
 	request := h.service.NewRequest()
 	response := &Response{Status: "ok", started: time.Now()}
-	if httpRequest.Body == nil {
+	if httpRequest.Method == http.MethodGet {
 		if err := h.buildRequestFromQuery(httpRequest, request); err != nil {
 			return err
 		}
