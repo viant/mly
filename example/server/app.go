@@ -19,6 +19,7 @@ func RunApp(Version string, args []string) {
 	storable.Singleton().Register("vec", func() common.Storable {
 		return &vec.Record{}
 	})
+
 	endpoint.RunAppWithConfig(Version, args, func(options *endpoint.Options) (*endpoint.Config, error) {
 		config, err := NewConfigFromURL(ctx, options.ConfigURL)
 		if err != nil {

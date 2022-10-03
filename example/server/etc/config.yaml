@@ -9,11 +9,8 @@ models:
     datastore: sls
     inputs:
       - name: sa
-        index: 0
       - name: sl
-        index: 1
       - name: x
-        index: 2
         auxiliary: true
 
   - id: vec
