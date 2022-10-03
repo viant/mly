@@ -40,6 +40,13 @@ func Transform(ctx context.Context, signature *Signature, input *gtly.Object, ou
 			k: signature.Outputs[0].Name,
 			v: outputValue,
 		})
+	case []string:
+		outputValue = val[0]
+		pairs = append(pairs, &kvPair{
+			k: signature.Outputs[0].Name,
+			v: outputValue,
+		})
+
 	case []int64:
 		outputValue = val[0]
 		pairs = append(pairs, &kvPair{
@@ -71,7 +78,7 @@ func Transform(ctx context.Context, signature *Signature, input *gtly.Object, ou
 			case []int64:
 				outputValue = t[0]
 			default:
-				return nil, fmt.Errorf("unsupported type: %T", t)
+				return nil, fmt.Errorf("unsupported output type: %v %T", signature.Outputs[0].Name, t)
 			}
 			pairs = append(pairs, &kvPair{
 				k: signature.Outputs[i].Name,
@@ -80,7 +87,7 @@ func Transform(ctx context.Context, signature *Signature, input *gtly.Object, ou
 
 		}
 	default:
-		fmt.Printf("unsuppoprted: %T\n", output)
+		return nil, fmt.Errorf("unsupported output type: %v, %T", signature.Outputs[0].Name, output)
 	}
 
 	err := result.Set(func(pair common.Pair) error {
