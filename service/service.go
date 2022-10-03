@@ -135,7 +135,9 @@ func (s *Service) inputIndex(output interface{}) int {
 }
 
 func (s *Service) buildResponse(ctx context.Context, request *Request, response *Response, tensorValues []interface{}) error {
-	response.DictHash = s.dictionary.Hash
+	if s.dictionary != nil {
+		response.DictHash = s.dictionary.Hash
+	}
 	if !request.input.BatchMode() {
 		var err error
 		response.Data, err = s.transformOutput(ctx, request, tensorValues[0])

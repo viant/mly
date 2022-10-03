@@ -17,6 +17,7 @@ type (
 	MetaInput struct {
 		Inputs    []*Field
 		KeyFields []string `json:",omitempty" yaml:",omitempty"`
+		Auxiliary []string `json:",omitempty" yaml:",omitempty"`
 	}
 )
 
@@ -62,6 +63,11 @@ func (m *MetaInput) Init() {
 		if len(m.KeyFields) > 0 {
 			for _, field := range m.KeyFields {
 				m.Inputs = append(m.Inputs, &Field{Name: field})
+			}
+		}
+		if len(m.Auxiliary) > 0 {
+			for _, field := range m.Auxiliary {
+				m.Inputs = append(m.Inputs, &Field{Name: field, Auxiliary: true})
 			}
 		}
 	}
