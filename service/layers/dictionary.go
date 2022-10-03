@@ -20,7 +20,11 @@ func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signatur
 		if input.Wildcard {
 			continue
 		}
-		layers = append(layers, input.Name)
+		layer := input.Name
+		if input.Layer != "" {
+			layer = input.Layer
+		}
+		layers = append(layers, layer)
 	}
 	dictionary, err := DiscoverDictionary(session, graph, layers)
 	if err != nil {

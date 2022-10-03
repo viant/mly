@@ -13,4 +13,5 @@ type Input struct {
 	Placeholder tf.Output
 	Wildcard    bool
 	Auxiliary   bool
+	Layer       string
 }

@@ -534,9 +534,8 @@ func (srv *Service) reconsileSignatureWithInput(signature *domain.Signature) {
 			field = &shared.Field{Name: input.Name}
 			srv.config.Inputs = append(srv.config.Inputs, field)
 		}
-		if field.Wildcard {
-			input.Wildcard = field.Wildcard
-		}
+		input.Wildcard = field.Wildcard
+		input.Layer = field.Layer
 		if field.DataType == "" {
 			field.SetRawType(input.Type)
 		}

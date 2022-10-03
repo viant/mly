@@ -7,6 +7,7 @@ type (
 		Name      string
 		Index     int
 		Wildcard  bool   `json:",omitempty" yaml:",omitempty"`
+		Layer     string `json:",omitempty" yaml:",omitempty"`
 		DataType  string `json:",omitempty" yaml:",omitempty"`
 		rawType   reflect.Type
 		Auxiliary bool `json:",omitempty" yaml:",omitempty"`
