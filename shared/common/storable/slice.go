@@ -12,9 +12,10 @@ import (
 
 //Slice represents slice registry
 type Slice struct {
-	hash   int
-	Values []interface{}
-	Fields []*Field
+	hash      int
+	batchSize int
+	Values    []interface{}
+	Fields    []*Field
 }
 
 //SetHash sets hash
@@ -25,6 +26,16 @@ func (s *Slice) SetHash(hash int) {
 //Hash returns hash
 func (s *Slice) Hash() int {
 	return s.hash
+}
+
+//SetHash sets hash
+func (s *Slice) SetBatchSize(size int) {
+	s.batchSize = size
+}
+
+//Hash returns hash
+func (s *Slice) BatchSize() int {
+	return s.batchSize
 }
 
 //Set sets value
@@ -128,6 +139,7 @@ func (s *Slice) MarshalJSONObject(enc *gojay.Encoder) {
 func (s *Slice) IsNil() bool {
 	return s == nil
 }
+
 //UnmarshalJSONObject unmarshal json with gojay parser
 func (s *Slice) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	s.Values = make([]interface{}, len(s.Fields))

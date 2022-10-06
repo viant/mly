@@ -4,7 +4,7 @@
 
 ```bash
 git clone https://github.com/viant/mly.git
-cd mly/tools/mlytool
+cd mly/tools/mly
 go build
 cp mlytool /usr/local/bin
 ```
@@ -12,7 +12,7 @@ cp mlytool /usr/local/bin
 ### Usage
 
 ```bash
-mlytool -h
+mly -h
 ```
 
 ##### Exporting layers

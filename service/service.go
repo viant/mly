@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
+	"github.com/viant/afs/url"
 	"github.com/viant/gmetric"
 	"github.com/viant/gtly"
 	"github.com/viant/mly/service/config"
@@ -270,6 +271,17 @@ func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *co
 	if err != nil {
 		return resource, err
 	}
+	if extURL := url.SchemeExtensionURL(URL); extURL != "" {
+		object, err := s.fs.Object(ctx, extURL)
+		if err != nil {
+			return nil, err
+		}
+		resource, err = s.modifiedSnapshot(ctx, extURL, resource)
+		resource.Max = object.ModTime()
+		resource.Min = object.ModTime()
+		return resource, nil
+	}
+
 	for i, item := range objects {
 		if item.IsDir() && i == 0 {
 			continue
