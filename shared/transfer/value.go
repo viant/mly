@@ -14,7 +14,7 @@ type (
 		ValueAt(index int) interface{}
 		UnmarshalJSONArray(dec *gojay.Decoder) error
 		Len() int
-		Feed() interface{}
+		Feed(batchSize int) interface{}
 	}
 
 	Values []Value
@@ -49,10 +49,14 @@ func (s *Strings) ValueAt(index int) interface{} {
 	return s.Values[index]
 }
 
-func (s *Strings) Feed() interface{} {
-	var result = make([][]string, len(s.Values))
+func (s *Strings) Feed(batchSize int) interface{} {
+	var result = make([][]string, batchSize)
 	for i, item := range s.Values {
 		result[i] = []string{item}
+	}
+	for i := len(s.Values); i < batchSize; i++ {
+		result[i] = []string{s.Values[0]}
+		s.Values = append(s.Values, s.Values[0])
 	}
 	return result
 }
@@ -95,10 +99,14 @@ func (v Strings) IsNil() bool {
 	return len(v.Values) == 0
 }
 
-func (s *Int32s) Feed() interface{} {
-	var result = make([][]int32, len(s.Values))
+func (s *Int32s) Feed(batchSize int) interface{} {
+	var result = make([][]int32, batchSize)
 	for i, item := range s.Values {
 		result[i] = []int32{item}
+	}
+	for i := len(s.Values); i < batchSize; i++ {
+		result[i] = []int32{s.Values[0]}
+		s.Values = append(s.Values, s.Values[0])
 	}
 	return result
 }
@@ -149,10 +157,14 @@ func (v Int32s) IsNil() bool {
 	return len(v.Values) == 0
 }
 
-func (s *Int64s) Feed() interface{} {
-	var result = make([][]int64, len(s.Values))
+func (s *Int64s) Feed(batchSize int) interface{} {
+	var result = make([][]int64, batchSize)
 	for i, item := range s.Values {
 		result[i] = []int64{item}
+	}
+	for i := len(s.Values); i < batchSize; i++ {
+		result[i] = []int64{s.Values[0]}
+		s.Values = append(s.Values, s.Values[0])
 	}
 	return result
 }
@@ -203,10 +215,14 @@ func (v Int64s) IsNil() bool {
 	return len(v.Values) == 0
 }
 
-func (s *Bools) Feed() interface{} {
-	var result = make([][]bool, len(s.Values))
+func (s *Bools) Feed(batchSize int) interface{} {
+	var result = make([][]bool, batchSize)
 	for i, item := range s.Values {
 		result[i] = []bool{item}
+	}
+	for i := len(s.Values); i < batchSize; i++ {
+		result[i] = []bool{s.Values[0]}
+		s.Values = append(s.Values, s.Values[0])
 	}
 	return result
 }
@@ -257,10 +273,13 @@ func (v Bools) IsNil() bool {
 	return len(v.Values) == 0
 }
 
-func (s *Float32s) Feed() interface{} {
-	var result = make([][]float32, len(s.Values))
+func (s *Float32s) Feed(batchSize int) interface{} {
+	var result = make([][]float32, batchSize)
 	for i, item := range s.Values {
 		result[i] = []float32{item}
+	}
+	for i := len(s.Values); i < batchSize; i++ {
+		result[i] = []float32{s.Values[0]}
 	}
 	return result
 }
@@ -311,10 +330,16 @@ func (v Float32s) IsNil() bool {
 	return len(v.Values) == 0
 }
 
-func (s *Float64s) Feed() interface{} {
-	var result = make([][]float64, len(s.Values))
+func (s *Float64s) Feed(batchSize int) interface{} {
+	var result = make([][]float64, batchSize)
 	for i, item := range s.Values {
 		result[i] = []float64{item}
+	}
+	if len(s.Values) == 1 && batchSize > 1 {
+		for i := 1; i < batchSize; i++ {
+			result[i] = []float64{s.Values[0]}
+			s.Values = append(s.Values, s.Values[0])
+		}
 	}
 	return result
 }

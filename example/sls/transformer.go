@@ -23,10 +23,15 @@ func Transform(ctx context.Context, signature *domain.Signature, input *gtly.Obj
 	result.Sl = slFieldAccessor.String(input)
 	result.X = xFieldAccessor.String(input)
 	switch actual := output.(type) {
-	case []int64:
-		result.Value = actual[0]
+	case []interface{}:
+		switch value := actual[0].(type) {
+		case []int64:
+			result.Value = value[0]
+		default:
+			return nil, fmt.Errorf("unsupproted tensor value type: %T", value)
+		}
 	default:
-		return nil, fmt.Errorf("unsupproted type: %T", actual)
+		return nil, fmt.Errorf("unsupproted output type: %T", actual)
 	}
 	return result, nil
 }

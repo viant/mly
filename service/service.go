@@ -108,6 +108,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	if err != nil {
 		return err
 	}
+
 	return s.buildResponse(ctx, request, response, tensorValues)
 }
 

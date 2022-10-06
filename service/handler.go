@@ -46,6 +46,7 @@ func (h *Handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 			return err
 		}
 		request.Body = data[:size]
+		fmt.Printf("%s\n", request.Body)
 		err = gojay.Unmarshal(data[:size], request)
 		if err != nil {
 			return err
@@ -81,6 +82,7 @@ func (h *Handler) handleAppRequest(ctx context.Context, writer io.Writer, reques
 func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
 	appResponse.ServiceTimeMcs = int(time.Now().Sub(appResponse.started).Microseconds())
 	data, err := gojay.Marshal(appResponse)
+	fmt.Printf("RESP: %s, %v\n", data, err)
 	_, err = writer.Write(data)
 	return err
 }

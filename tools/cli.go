@@ -42,9 +42,26 @@ func Run(args []string) {
 	if err := options.Validate(); err != nil {
 		slog.Fatal(err)
 	}
-	err = Discover(options)
-	if err != nil {
-		slog.Fatal(err)
+
+	switch options.Mode {
+	case "discover":
+		err = Discover(options)
+		if err != nil {
+			slog.Fatal(err)
+		}
+	case "run":
+		cfg, err := endpoint.NewConfigFromURL(context.Background(), options.ConfigURL)
+		if err != nil {
+			slog.Fatal(err)
+			return
+		}
+		srv, err := endpoint.New(cfg)
+		if err != nil {
+			slog.Fatal(err)
+			return
+		}
+
+		srv.ListenAndServe()
 	}
 }
 

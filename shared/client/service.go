@@ -129,7 +129,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}
 
 	if err = s.handleResponse(ctx, response.Data, cached, cachable); err != nil {
-		return err
+		return fmt.Errorf("failed to handle resp: %w", err)
 	}
 	go s.updatedCacheInBackground(ctx, response.Data, cachable, s.dict.hash)
 

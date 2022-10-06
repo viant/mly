@@ -97,7 +97,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					return err
 				}
 				if !input.Auxiliary {
-					r.Feeds[input.Index] = inputValue.Feed()
+					r.Feeds[input.Index] = inputValue.Feed(r.input.BatchSize)
 				}
 				return nil
 			}

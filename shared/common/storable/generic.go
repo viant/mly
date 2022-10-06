@@ -46,7 +46,7 @@ func (s Generic) Iterator() common.Iterator {
 				}
 			}
 		default:
-			return fmt.Errorf("unsupported type: %T", s.Value)
+			return fmt.Errorf("unsupported generic type: %T", s.Value)
 		}
 		return nil
 	}
@@ -88,7 +88,7 @@ func (s *Generic) Set(iter common.Iterator) error {
 				aMap[key] = value
 			}
 		default:
-			return fmt.Errorf("unsupported type: %T", s.Value)
+			return fmt.Errorf("unsupported generic type: %T", s.Value)
 		}
 		return nil
 	})

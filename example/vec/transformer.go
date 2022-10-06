@@ -20,7 +20,7 @@ func Transform(ctx context.Context, signature *domain.Signature, input *gtly.Obj
 			result.Value = val[actual.InputIndex]
 		}
 	default:
-		return nil, fmt.Errorf("unsupproted type: %T", actual)
+		return nil, fmt.Errorf("unsupproted vec type: %T", actual)
 	}
 	return result, nil
 }

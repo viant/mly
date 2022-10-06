@@ -129,6 +129,53 @@ func TestService_Do(t *testing.T) {
 				{Value: 12, Sl: "b"},
 			},
 		},
+		{
+			description: "multi mode - compressed",
+			options: []service.Option{
+				service.WithDataStorer(mock.New()),
+			},
+
+			config: &config.Model{
+				ID:         "1",
+				UseDict:    &trueValue,
+				URL:        filepath.Join(baseURL, "../example/model/vec_model"),
+				OutputType: "int64",
+
+				Transformer: testTransformer002,
+				DataStore:   "local",
+				MetaInput: shared.MetaInput{
+					Inputs: []*shared.Field{
+						{
+							Name:     "sl",
+							DataType: "string",
+							Wildcard: true,
+						},
+						{
+							Name:     "tv",
+							DataType: "string",
+							Wildcard: true,
+						},
+					},
+				},
+			},
+			newResponse: func() *service.Response {
+				data := []*SumOutput{}
+				response := &service.Response{
+					Data: data,
+				}
+				return response
+			},
+			requestData: `{
+  "batch_size":2,
+  "cache_key":["a/z","b/z"],
+  "sl":["a","b"],
+  "tv":["z"]
+}`,
+			expect: []*SumOutput{
+				{Value: 14, Sl: "a"},
+				{Value: 12, Sl: "b"},
+			},
+		},
 	}
 
 	fs := afs.New()
@@ -212,6 +259,11 @@ func case001Transformer(ctx context.Context, signature *domain.Signature, input 
 	switch actual := output.(type) {
 	case []int64:
 		result.Value = actual[0]
+	case []interface{}:
+		switch raw := actual[0].(type) {
+		case []int64:
+			result.Value = raw[0]
+		}
 	case *shared.Output:
 		switch val := actual.Values[0].(type) {
 		case []int64:
