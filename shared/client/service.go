@@ -73,7 +73,8 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		onDone(time.Now(), *stats...)
 	}()
 
-	cachable, ok := input.(Cachable)
+	cachable, isCachable := input.(Cachable)
+
 	batchSize := cachable.BatchSize()
 	if response.Data == nil {
 		return fmt.Errorf("response data was empty - aborting request")
@@ -81,7 +82,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	var err error
 	var cachedCount int
 	var cached []interface{}
-	if ok {
+	if isCachable {
 		cached = make([]interface{}, batchSize)
 		dataType := response.DataItemType()
 		if batchSize >= 1 {
@@ -132,7 +133,6 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		return fmt.Errorf("failed to handle resp: %w", err)
 	}
 	go s.updatedCacheInBackground(ctx, response.Data, cachable, s.dict.hash)
-
 	s.assertDictHash(response)
 	return nil
 }
@@ -210,10 +210,16 @@ func (s *Service) init(options []Option) error {
 			return err
 		}
 	}
-	if s.datastore == nil {
-		if err := s.initDatastore(); err != nil {
+	if ds := s.Config.Datastore; ds != nil {
+		ds.Init()
+		if err = ds.Validate(); err != nil {
 			return err
 		}
+	}
+
+	if s.datastore == nil {
+		err := s.initDatastore()
+		return err
 	}
 	s.messages = NewMessages(s.dictionary)
 	return nil
@@ -300,21 +306,22 @@ func (s *Service) getHTTPClient(host *Host) *http.Client {
 
 func (s *Service) initDatastore() error {
 	ds := s.Config.Datastore
+	if ds.Datastore.ID == "" {
+		return nil
+	}
 	if ds == nil {
 		return nil
 	}
-	if len(ds.Connections) > 0 {
-		datastores := &sconfig.DatastoreList{
-			Connections: ds.Connections,
-			Datastores:  []*sconfig.Datastore{&ds.Datastore},
-		}
-		aMap, err := datastore.NewStores(datastores, s.gmetrics)
-		if err != nil {
-			return err
-		}
-		s.datastore = aMap[ds.ID]
-		s.datastore.SetMode(datastore.ModeClient)
+	var stores = map[string]*datastore.Service{}
+	var err error
+	datastores := &sconfig.DatastoreList{
+		Datastores:  []*sconfig.Datastore{&ds.Datastore},
+		Connections: ds.Connections,
 	}
+	if stores, err = datastore.NewStores(datastores, s.gmetrics); err != nil {
+		return err
+	}
+	s.datastore = stores[ds.ID]
 	if len(ds.Fields) > 0 {
 		if err := ds.FieldsDescriptor(ds.Fields); err != nil {
 			return err
@@ -323,7 +330,6 @@ func (s *Service) initDatastore() error {
 			return storable.New(ds.Fields)
 		}
 	}
-
 	return nil
 }
 
@@ -351,7 +357,8 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 			Hosts: hosts,
 		},
 	}
-	return aClient, aClient.init(options)
+	err := aClient.init(options)
+	return aClient, err
 }
 
 func (s *Service) discoverConfig(host *Host, URL string) (*config.Remote, error) {
@@ -447,6 +454,8 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 func (s *Service) getHost() (*Host, error) {
 	count := len(s.Hosts)
 	switch count {
+	case 0:
+
 	case 1:
 		candidate := s.Hosts[0]
 		if !candidate.IsUp() {
@@ -469,6 +478,9 @@ func (s *Service) getHost() (*Host, error) {
 }
 
 func (s *Service) updatedCacheInBackground(ctx context.Context, target interface{}, cachable Cachable, hash int) {
+	if s.datastore == nil {
+		return
+	}
 	targetType := reflect.TypeOf(target).Elem()
 	switch targetType.Kind() {
 	case reflect.Struct:

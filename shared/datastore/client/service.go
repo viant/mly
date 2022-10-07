@@ -73,7 +73,7 @@ func (s *service) checkConnectionError(err error) {
 func (s *service) connect() error {
 	hosts := s.hosts()
 	if len(hosts) == 0 {
-		return fmt.Errorf("Hostname was empty")
+		return fmt.Errorf("hostname was empty")
 	}
 	client, err := aero.NewClientWithPolicyAndHost(s.clientPolicy, hosts...)
 	if err != nil {
