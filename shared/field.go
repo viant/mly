@@ -23,14 +23,7 @@ type (
 )
 
 func (d *MetaInput) KeysLen() int {
-	count := 0
-	for _, item := range d.Inputs {
-		if item.Auxiliary {
-			continue
-		}
-		count++
-	}
-	return count
+	return len(d.Inputs)
 }
 
 func (f *Field) RawType() reflect.Type {

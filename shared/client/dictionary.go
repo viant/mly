@@ -20,14 +20,7 @@ type Dictionary struct {
 }
 
 func (d *Dictionary) KeysLen() int {
-	count := 0
-	for _, item := range d.inputs {
-		if item.Auxiliary {
-			continue
-		}
-		count++
-	}
-	return count
+	return len(d.inputs)
 }
 
 func (d *Dictionary) inputSize() int {
