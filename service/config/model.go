@@ -13,6 +13,7 @@ import (
 type Model struct {
 	ID               string
 	URL              string
+	Debug            bool
 	Location         string `json:",omitempty" yaml:",omitempty"`
 	Tags             []string
 	OutputType       string `json:",omitempty" yaml:",omitempty"`

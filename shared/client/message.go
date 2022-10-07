@@ -401,7 +401,7 @@ func (m *Message) FlagCacheHit(index int) {
 
 //CacheKeyAt returns cache key for supplied index
 func (m *Message) CacheKeyAt(index int) string {
-	if m.BatchSize() <= 1 {
+	if m.batchSize == 0 {
 		return m.CacheKey()
 	}
 	if len(m.multiKey) == 0 {

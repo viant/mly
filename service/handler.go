@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/mly/service/buffer"
@@ -46,12 +47,20 @@ func (h *Handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 			return err
 		}
 		request.Body = data[:size]
+		if h.service.config.Debug {
+			fmt.Printf("input: %s\n", request.Body)
+		}
 		err = gojay.Unmarshal(data[:size], request)
 		if err != nil {
 			return err
 		}
 	}
-	return h.handleAppRequest(ctx, writer, request, response)
+	err := h.handleAppRequest(ctx, writer, request, response)
+	if h.service.config.Debug {
+		data, _ := json.Marshal(response.Data)
+		fmt.Printf("output: %s %T\n", data, response.Data)
+	}
+	return err
 }
 
 func (h *Handler) buildRequestFromQuery(httpRequest *http.Request, request *Request) error {

@@ -85,7 +85,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	if isCachable {
 		cached = make([]interface{}, batchSize)
 		dataType := response.DataItemType()
-		if batchSize >= 1 {
+		if batchSize > 0 {
 			if cachedCount, err = s.readFromCacheInBatch(ctx, batchSize, dataType, cachable, response, cached); err != nil {
 				if !common.IsTransientError(err) {
 					log.Printf("cache error: %v", err)

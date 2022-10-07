@@ -335,11 +335,9 @@ func (s *Float64s) Feed(batchSize int) interface{} {
 	for i, item := range s.Values {
 		result[i] = []float64{item}
 	}
-	if len(s.Values) == 1 && batchSize > 1 {
-		for i := 1; i < batchSize; i++ {
-			result[i] = []float64{s.Values[0]}
-			s.Values = append(s.Values, s.Values[0])
-		}
+	for i := len(s.Values); i < batchSize; i++ {
+		result[i] = []float64{s.Values[0]}
+		s.Values = append(s.Values, s.Values[0])
 	}
 	return result
 }
