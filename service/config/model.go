@@ -12,6 +12,7 @@ import (
 //Model represents model config
 type Model struct {
 	ID               string
+	Dir              string
 	URL              string
 	Debug            bool
 	Location         string `json:",omitempty" yaml:",omitempty"`
@@ -37,7 +38,7 @@ func (m *Model) Init() {
 		m.Tags = []string{"serve"}
 	}
 	if m.Location == "" {
-		m.Location = path.Join(os.TempDir(), m.ID)
+		m.Location = path.Join(os.TempDir(), m.ID+m.Dir)
 	}
 	_ = os.MkdirAll(m.Location, file.DefaultDirOsMode)
 	m.Modified = &Modified{}
