@@ -276,7 +276,6 @@ func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *co
 		if err != nil {
 			return nil, err
 		}
-		resource, err = s.modifiedSnapshot(ctx, extURL, resource)
 		resource.Max = object.ModTime()
 		resource.Min = object.ModTime()
 		return resource, nil
