@@ -64,9 +64,11 @@ func (s *Service) initModelHandler(datastores map[string]*datastore.Service, poo
 	var lock sync.Mutex
 	for i := range s.config.ModelList.Models {
 		go func(model *config.Model) {
-			waitGroup.Done()
+			defer waitGroup.Done()
 			if e := s.initModel(datastores, pool, mux, model, &lock); e != nil {
+				lock.Lock()
 				err = e
+				lock.Unlock()
 			}
 		}(s.config.ModelList.Models[i])
 	}
