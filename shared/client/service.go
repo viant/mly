@@ -71,8 +71,8 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	stats := stat.NewValues()
 	defer func() {
 		onDone(time.Now(), *stats...)
+		s.releaseMessage(input)
 	}()
-
 	cachable, isCachable := input.(Cachable)
 
 	batchSize := cachable.BatchSize()
@@ -104,7 +104,6 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 			}
 		}
 	}
-
 	if cachedCount == batchSize && batchSize > 0 {
 		response.Status = common.StatusCached
 		return s.handleResponse(ctx, response.Data, cached, cachable)
@@ -114,7 +113,6 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	if err != nil {
 		return err
 	}
-	defer s.releaseMessage(input)
 	stats.Append(stat.NoSuchKey)
 	body, err := s.postRequest(ctx, data)
 	if err != nil {
