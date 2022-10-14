@@ -484,7 +484,12 @@ func (s *Service) updatedCacheInBackground(ctx context.Context, target interface
 	targetType := reflect.TypeOf(target).Elem()
 	switch targetType.Kind() {
 	case reflect.Struct:
+		key := cachable.CacheKey()
 		storeKey := s.datastore.Key(cachable.CacheKey())
+		if key == "" {
+			fmt.Printf("key was empty for %T,%v", target, storeKey.Set)
+			return
+		}
 		if err := s.datastore.Put(ctx, storeKey, target, s.dict.hash); err != nil {
 			log.Printf("failed to write to cache: %v", err)
 		}
