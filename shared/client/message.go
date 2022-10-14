@@ -417,7 +417,7 @@ func (m *Message) CacheKeyAt(index int) string {
 
 //CacheKey returns cache key
 func (m *Message) CacheKey() string {
-	if m.key != "" {
+	if m.key != "" || len(m.keys) == 0 {
 		return m.key
 	}
 	m.key = buildKey(m.keys, &m.buffer)
