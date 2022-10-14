@@ -328,6 +328,9 @@ func (s *Service) initDatastore() error {
 			return storable.New(ds.Fields)
 		}
 	}
+	if s.datastore != nil {
+		s.datastore.SetMode(datastore.ModeClient)
+	}
 	return nil
 }
 
