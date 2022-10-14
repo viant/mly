@@ -478,7 +478,7 @@ func (s *Service) getHost() (*Host, error) {
 }
 
 func (s *Service) updatedCacheInBackground(ctx context.Context, target interface{}, cachable Cachable, hash int) {
-	if s.datastore == nil {
+	if s.datastore == nil || !s.datastore.Enabled() {
 		return
 	}
 	targetType := reflect.TypeOf(target).Elem()
