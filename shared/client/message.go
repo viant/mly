@@ -426,6 +426,8 @@ func (m *Message) CacheKey() string {
 
 func buildKey(keys []string, buffer *bytes.Buffer) string {
 	buffer.WriteString(keys[0])
+
+	//
 	for i := 1; i < len(keys); i++ {
 		buffer.WriteByte(common.KeyDelimiter)
 		buffer.WriteString(keys[i])
