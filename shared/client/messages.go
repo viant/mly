@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"sync"
 )
 
@@ -60,6 +61,7 @@ func NewMessages(newDict func() *Dictionary) Messages {
 					buf:        make([]byte, bufferSize),
 					keys:       make([]string, keysLen),
 					dictionary: newDict(),
+					buffer:     new(bytes.Buffer),
 				}
 			},
 		},

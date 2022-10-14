@@ -20,7 +20,7 @@ type (
 		pool      *messages
 		keys      []string
 		key       string
-		buffer    bytes.Buffer
+		buffer    *bytes.Buffer
 
 		//used to represent vector
 		multiKeys [][]string
@@ -410,7 +410,7 @@ func (m *Message) CacheKeyAt(index int) string {
 	if m.multiKey[index] != "" {
 		return m.multiKey[index]
 	}
-	m.multiKey[index] = buildKey(m.multiKeys[index], &m.buffer)
+	m.multiKey[index] = buildKey(m.multiKeys[index], m.buffer)
 	m.buffer.Reset()
 	return m.multiKey[index]
 }
@@ -420,7 +420,7 @@ func (m *Message) CacheKey() string {
 	if m.key != "" || len(m.keys) == 0 {
 		return m.key
 	}
-	m.key = buildKey(m.keys, &m.buffer)
+	m.key = buildKey(m.keys, m.buffer)
 	return m.key
 }
 
