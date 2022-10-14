@@ -132,7 +132,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	if err = s.handleResponse(ctx, response.Data, cached, cachable); err != nil {
 		return fmt.Errorf("failed to handle resp: %w", err)
 	}
-	go s.updatedCacheInBackground(ctx, response.Data, cachable, s.dict.hash)
+	s.updatedCache(ctx, response.Data, cachable, s.dict.hash)
 	s.assertDictHash(response)
 	return nil
 }
@@ -477,7 +477,7 @@ func (s *Service) getHost() (*Host, error) {
 	return nil, fmt.Errorf("%v:%v %w", s.Hosts[0].Name, s.Hosts[0].Port, common.ErrNodeDown)
 }
 
-func (s *Service) updatedCacheInBackground(ctx context.Context, target interface{}, cachable Cachable, hash int) {
+func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable Cachable, hash int) {
 	if s.datastore == nil || !s.datastore.Enabled() {
 		return
 	}
@@ -507,13 +507,20 @@ func (s *Service) updatedCacheInBackground(ctx context.Context, target interface
 
 	xSlice := xunsafe.NewSlice(targetType)
 	dataPtr := xunsafe.AsPointer(target)
+
+	waitGroup := sync.WaitGroup{}
+	waitGroup.Add(batchSize)
 	for index := 0; index < batchSize; index++ {
-		value := xSlice.ValuePointerAt(dataPtr, index)
-		cacheableIndex := offsets[index]
-		if cachable.CacheHit(cacheableIndex) {
-			continue
-		}
-		key := s.datastore.Key(cachable.CacheKeyAt(cacheableIndex))
-		s.datastore.Put(ctx, key, value, hash)
+		go func(index int) {
+			defer waitGroup.Done()
+			value := xSlice.ValuePointerAt(dataPtr, index)
+			cacheableIndex := offsets[index]
+			if cachable.CacheHit(cacheableIndex) {
+				return
+			}
+			key := s.datastore.Key(cachable.CacheKeyAt(cacheableIndex))
+			s.datastore.Put(ctx, key, value, hash)
+		}(index)
 	}
+	waitGroup.Wait()
 }
