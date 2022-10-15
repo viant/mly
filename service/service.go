@@ -100,6 +100,9 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 		onDoneDecrement()
 	}()
 	err := request.Validate()
+	if s.config.Debug {
+		fmt.Printf("Validation error [%v]: %v\n", s.config.ID, err)
+	}
 	if err != nil {
 		stats.Append(err)
 		return fmt.Errorf("%w, body: %s", err, request.Body)
@@ -116,6 +119,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 func (s *Service) transformOutput(ctx context.Context, request *Request, output interface{}) (common.Storable, error) {
 	inputIndex := s.inputIndex(output)
 	anObject := request.input.ObjectAt(s.inputProvider, inputIndex)
+
 	transformed, err := s.transformer(ctx, s.signature, anObject, output)
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform: %v, %w", s.config.ID, err)
