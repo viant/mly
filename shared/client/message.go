@@ -401,6 +401,8 @@ func (m *Message) FlagCacheHit(index int) {
 
 //CacheKeyAt returns cache key for supplied index
 func (m *Message) CacheKeyAt(index int) string {
+	m.keyLock.Lock()
+	defer m.keyLock.Unlock()
 	if m.batchSize == 0 {
 		return m.CacheKey()
 	}
@@ -410,10 +412,8 @@ func (m *Message) CacheKeyAt(index int) string {
 	if m.multiKey[index] != "" {
 		return m.multiKey[index]
 	}
-	m.keyLock.Lock()
 	m.multiKey[index] = buildKey(m.multiKeys[index], m.buffer)
 	m.buffer.Reset()
-	m.keyLock.Unlock()
 	return m.multiKey[index]
 }
 
