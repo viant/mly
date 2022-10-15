@@ -100,7 +100,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 		onDoneDecrement()
 	}()
 	err := request.Validate()
-	if s.config.Debug {
+	if s.config.Debug && err != nil {
 		fmt.Printf("Validation error [%v]: %v\n", s.config.ID, err)
 	}
 	if err != nil {
