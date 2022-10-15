@@ -27,6 +27,7 @@ type (
 		multiKey  []string
 		transient []*transient
 		cacheHits []bool
+		keyMux    sync.Mutex
 
 		dictionary *Dictionary
 	}
@@ -410,8 +411,10 @@ func (m *Message) CacheKeyAt(index int) string {
 	if m.multiKey[index] != "" {
 		return m.multiKey[index]
 	}
+	m.keyMux.Lock()
 	m.multiKey[index] = buildKey(m.multiKeys[index], m.buffer)
 	m.buffer.Reset()
+	m.keyMux.Unlock()
 	return m.multiKey[index]
 }
 
