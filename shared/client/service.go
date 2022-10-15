@@ -509,19 +509,13 @@ func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable
 	xSlice := xunsafe.NewSlice(targetType)
 	dataPtr := xunsafe.AsPointer(target)
 
-	waitGroup := sync.WaitGroup{}
-	waitGroup.Add(batchSize)
 	for index := 0; index < batchSize; index++ {
-		go func(index int) {
-			defer waitGroup.Done()
-			value := xSlice.ValuePointerAt(dataPtr, index)
-			cacheableIndex := offsets[index]
-			if cachable.CacheHit(cacheableIndex) {
-				return
-			}
-			key := s.datastore.Key(cachable.CacheKeyAt(cacheableIndex))
-			s.datastore.Put(ctx, key, value, hash)
-		}(index)
+		value := xSlice.ValuePointerAt(dataPtr, index)
+		cacheableIndex := offsets[index]
+		if cachable.CacheHit(cacheableIndex) {
+			return
+		}
+		key := s.datastore.Key(cachable.CacheKeyAt(cacheableIndex))
+		s.datastore.Put(ctx, key, value, hash)
 	}
-	waitGroup.Wait()
 }
