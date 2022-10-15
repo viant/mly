@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-const bufferSize = 8 * 1024
+const bufferSize = 64 * 1024
 
 //Messages represent a message
 type Messages interface {
