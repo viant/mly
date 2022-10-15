@@ -36,6 +36,6 @@ func (e *Endpoint) Init() {
 		e.PoolMaxSize = 512
 	}
 	if e.BufferSize == 0 {
-		e.BufferSize = 1024
+		e.BufferSize = 128 * 1024
 	}
 }
