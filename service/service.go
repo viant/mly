@@ -421,6 +421,9 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	if s.logger == nil || len(request.Body) == 0 {
 		return
 	}
+	if !s.config.Stream.CanSample() {
+		return
+	}
 	msg := s.msgProvider.NewMessage()
 	defer msg.Free()
 

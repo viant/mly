@@ -18,7 +18,7 @@ require (
 	github.com/viant/gmetric v0.2.6
 	github.com/viant/gtly v0.1.1-0.20220929163617-a9b6dbce2bdc
 	github.com/viant/scache v0.4.0
-	github.com/viant/tapper v0.6.5
+	github.com/viant/tapper v0.6.6
 	github.com/viant/toolbox v0.34.5
 	github.com/viant/xunsafe v0.8.1-0.20220921220858-82f5aba1919f
 	github.com/yuin/gopher-lua v0.0.0-20210529063254-f4c35e4016d9 // indirect
