@@ -48,7 +48,7 @@ func (h *Handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		}
 		request.Body = data[:size]
 		if h.service.config.Debug {
-			fmt.Printf("input: %s\n", request.Body)
+			fmt.Printf("[%v] input: %s\n", h.service.config.ID, request.Body)
 		}
 		err = gojay.Unmarshal(data[:size], request)
 		if err != nil {
@@ -58,7 +58,7 @@ func (h *Handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	err := h.handleAppRequest(ctx, writer, request, response)
 	if h.service.config.Debug {
 		data, _ := json.Marshal(response.Data)
-		fmt.Printf("output: %s %T\n", data, response.Data)
+		fmt.Printf("[%v] output: %s %T\n", h.service.config.ID, data, response.Data)
 	}
 	return err
 }
