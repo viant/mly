@@ -511,6 +511,10 @@ func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable
 
 	for index := 0; index < batchSize; index++ {
 		value := xSlice.ValuePointerAt(dataPtr, index)
+		if value == nil {
+			fmt.Printf("value was empty: [%v/%v]: %T %+v\n", index, batchSize, value, value)
+			continue
+		}
 		cacheableIndex := offsets[index]
 		if cachable.CacheHit(cacheableIndex) {
 			return
