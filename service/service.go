@@ -444,6 +444,10 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	if s.dictionary != nil {
 		msg.PutInt("dict_hash", int(s.dictionary.Hash))
 	}
+
+	if value, ok := output.([]interface{}); ok {
+		output = value[0]
+	}
 	switch actual := output.(type) {
 	case [][]int64:
 		if len(actual) > 0 {
@@ -463,10 +467,11 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 			case 1:
 				msg.PutFloat(s.signature.Output.Name, float64(actual[0][0]))
 			default:
-				panic("not supported yet")
-				//Add support to tapper
-				//msg.PutByte(',')
-				//msg.PutFloats(s.signature.Output.Name, float64(actual[0][0]))
+				var floats = make([]float64, len(actual[0]))
+				for i, v := range actual[0] {
+					floats[i] = float64(v)
+				}
+				msg.PutFloats(s.signature.Output.Name, floats)
 			}
 		}
 	}
