@@ -83,28 +83,13 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	var cachedCount int
 	var cached []interface{}
 	if isCachable {
-		cached = make([]interface{}, batchSize)
-		dataType := response.DataItemType()
-		if batchSize > 0 {
-			if cachedCount, err = s.readFromCacheInBatch(ctx, batchSize, dataType, cachable, response, cached); err != nil {
-				if !common.IsTransientError(err) {
-					log.Printf("cache error: %v", err)
-				}
-			}
-		} else {
-			key := cachable.CacheKey()
-			has, dictHash, err := s.readFromCache(ctx, key, response.Data)
-			if err != nil && !common.IsTransientError(err) {
-				log.Printf("cache error: %v", err)
-			}
-			if has {
-				response.Status = common.StatusCached
-				response.DictHash = dictHash
-				return nil
-			}
+		cachedCount, err = s.loadFromCache(ctx, &cached, batchSize, response, cachable)
+		if err != nil {
+			return err
 		}
 	}
-	if cachedCount == batchSize && batchSize > 0 {
+
+	if (batchSize > 0 && cachedCount == batchSize) || cachedCount > 0 {
 		response.Status = common.StatusCached
 		return s.handleResponse(ctx, response.Data, cached, cachable)
 	}
@@ -135,13 +120,40 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	return nil
 }
 
+func (s *Service) loadFromCache(ctx context.Context, cached *[]interface{}, batchSize int, response *Response, cachable Cachable) (int, error) {
+	*cached = make([]interface{}, batchSize)
+	dataType := response.DataItemType()
+	if batchSize > 0 {
+		cachedCount, err := s.readFromCacheInBatch(ctx, batchSize, dataType, cachable, response, *cached)
+		if err != nil {
+			if !common.IsTransientError(err) {
+				log.Printf("cache error: %v", err)
+			}
+		}
+		return cachedCount, err
+	}
+
+	key := cachable.CacheKey()
+	has, dictHash, err := s.readFromCache(ctx, key, response.Data)
+	if err != nil && !common.IsTransientError(err) {
+		log.Printf("cache error: %v", err)
+	}
+	cachedCount := 0
+	if has {
+		cachedCount = 1
+		response.Status = common.StatusCached
+		response.DictHash = dictHash
+	}
+	return cachedCount, nil
+}
+
 func (s *Service) readFromCacheInBatch(ctx context.Context, batchSize int, dataType reflect.Type, cachable Cachable, response *Response, cached []interface{}) (int, error) {
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(batchSize)
 	var err error
 	mux := sync.Mutex{}
 	var cachedCount = 0
-	for i := 0; i < batchSize; i++ {
+	for k := 0; k < batchSize; k++ {
 		go func(index int) {
 			defer waitGroup.Done()
 			cacheEntry := reflect.New(dataType.Elem()).Interface()
@@ -151,6 +163,7 @@ func (s *Service) readFromCacheInBatch(ctx context.Context, batchSize int, dataT
 			defer mux.Unlock()
 			if e != nil {
 				err = e
+				return
 			}
 			if has {
 				response.DictHash = dictHash
@@ -158,7 +171,7 @@ func (s *Service) readFromCacheInBatch(ctx context.Context, batchSize int, dataT
 				cached[index] = cacheEntry
 				cachedCount++
 			}
-		}(i)
+		}(k)
 	}
 	waitGroup.Wait()
 	return cachedCount, err
@@ -485,34 +498,19 @@ func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable
 	targetType := reflect.TypeOf(target).Elem()
 	switch targetType.Kind() {
 	case reflect.Struct:
-		key := cachable.CacheKey()
-		storeKey := s.datastore.Key(cachable.CacheKey())
-		if key == "" {
-			fmt.Printf("key was empty for %T,%v", target, storeKey.Set)
-			return
-		}
-		if err := s.datastore.Put(ctx, storeKey, target, s.dict.hash); err != nil {
-			log.Printf("failed to write to cache: %v", err)
-		}
+		s.updateSingleEntry(ctx, target, cachable)
 		return
 	}
+
 	batchSize := cachable.BatchSize()
-	var offsets = make([]int, batchSize) //index offsets to recncile local cache hits
-	offset := 0
-	for i := 0; i < batchSize; i++ {
-		offsets[offset] = i
-		if !cachable.CacheHit(i) {
-			offset++
-		}
-	}
+	offsets := mapNonCachedPositions(batchSize, cachable)
 
 	xSlice := xunsafe.NewSlice(targetType)
 	dataPtr := xunsafe.AsPointer(target)
-
-	for index := 0; index < batchSize; index++ {
+	xSliceLen := xSlice.Len(dataPtr) //response data is a slice, iterate vi slice to update response
+	for index := 0; index < xSliceLen; index++ {
 		value := xSlice.ValuePointerAt(dataPtr, index)
-		if value == nil {
-			fmt.Printf("value was empty: [%v/%v]: %T %+v\n", index, batchSize, value, value)
+		if value == nil { //no actual value was returned from mly service
 			continue
 		}
 		cacheableIndex := offsets[index]
@@ -522,4 +520,35 @@ func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable
 		key := s.datastore.Key(cachable.CacheKeyAt(cacheableIndex))
 		s.datastore.Put(ctx, key, value, hash)
 	}
+}
+
+//mapNonCachedPositions maps non cachable original slice element position  into actial request slice positions
+/*
+	client.data:[v1, v2, v3, v4]
+	assuming v1 and v3 are found in local cache
+	only v2, v3 needs to send to mly server, and once we receive response we need to map index 0, 1, into original item positions: 1, 3
+*/
+func mapNonCachedPositions(batchSize int, cachable Cachable) []int {
+	var offsets = make([]int, batchSize) //index offsets to recncile local cache hits
+	offset := 0
+	for i := 0; i < batchSize; i++ {
+		offsets[offset] = i
+		if !cachable.CacheHit(i) {
+			offset++
+		}
+	}
+	return offsets
+}
+
+func (s *Service) updateSingleEntry(ctx context.Context, target interface{}, cachable Cachable) {
+	key := cachable.CacheKey()
+	storeKey := s.datastore.Key(cachable.CacheKey())
+	if key == "" {
+		fmt.Printf("key was empty for %T,%v", target, storeKey.Set)
+		return
+	}
+	if err := s.datastore.Put(ctx, storeKey, target, s.dict.hash); err != nil {
+		log.Printf("failed to write to cache: %v", err)
+	}
+	return
 }

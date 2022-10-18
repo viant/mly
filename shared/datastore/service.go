@@ -143,7 +143,9 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 
 	if s.useCache && key != nil {
 		if err == nil {
-			err = s.updateCache(key, storable, dictHash)
+			if storable != nil {
+				err = s.updateCache(key, storable, dictHash)
+			}
 		} else if common.IsKeyNotFound(err) {
 			if e := s.updateNotFound(key); e != nil {
 				return 0, types.ErrKeyNotFound
@@ -167,6 +169,9 @@ func (s *Service) updateNotFound(key *Key) error {
 }
 
 func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error {
+	if entryData == nil {
+		return fmt.Errorf("entyr was nil")
+	}
 	if aMap, ok := entryData.(map[string]interface{}); ok {
 		if data, err := json.Marshal(aMap); err == nil {
 			entryData = data
