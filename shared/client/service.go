@@ -567,7 +567,7 @@ func (s *Service) updateSingleEntry(ctx context.Context, target interface{}, cac
 }
 
 func (s *Service) reportBatch(count int, cached []interface{}) {
-	fmt.Printf("[%v] batchSize: %v, found in cache: %v", s.Config.Model, len(cached), count)
+	fmt.Printf("[%v] batchSize: %v, found in cache: %v\n", s.Config.Model, len(cached), count)
 	if count == 0 {
 		return
 	}
