@@ -428,6 +428,7 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	defer msg.Free()
 
 	data := request.Body
+	hasBatchSzie := bytes.Contains(data, []byte("batch_size"))
 	begin := bytes.IndexByte(data, '{')
 	end := bytes.LastIndexByte(data, '}')
 	if end == -1 {
@@ -454,7 +455,11 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 			switch len(actual[0]) {
 			case 0:
 			case 1:
-				msg.PutInt(s.signature.Output.Name, int(actual[0][0]))
+				if hasBatchSzie {
+					msg.PutInts(s.signature.Output.Name, []int{int(actual[0][0])})
+				} else {
+					msg.PutInt(s.signature.Output.Name, int(actual[0][0]))
+				}
 			default:
 				ints := *(*[]int)(unsafe.Pointer(&actual[0]))
 				msg.PutInts(s.signature.Output.Name, ints)
@@ -465,7 +470,11 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 			switch len(actual[0]) {
 			case 0:
 			case 1:
-				msg.PutFloat(s.signature.Output.Name, float64(actual[0][0]))
+				if hasBatchSzie {
+					msg.PutFloats(s.signature.Output.Name, []float64{float64(actual[0][0])})
+				} else {
+					msg.PutFloat(s.signature.Output.Name, float64(actual[0][0]))
+				}
 			default:
 				var floats = make([]float64, len(actual[0]))
 				for i, v := range actual[0] {
@@ -474,8 +483,6 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 				msg.PutFloats(s.signature.Output.Name, floats)
 			}
 		}
-	default:
-		fmt.Printf("unsupported type: %T\n", output)
 	}
 
 	if err := s.logger.Log(msg); err != nil {
