@@ -12,6 +12,7 @@ type Config struct {
 	CacheScope         *CacheScope
 	Datastore          *config.Remote
 	MaxRetry           int
+	Debug              bool
 	DictHashValidation bool
 }
 

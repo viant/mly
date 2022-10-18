@@ -14,7 +14,6 @@ import (
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
 	"github.com/viant/mly/shared/stat"
-	"github.com/viant/toolbox"
 	"github.com/viant/xunsafe"
 	"golang.org/x/net/http2"
 	"io"
@@ -75,7 +74,6 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		s.releaseMessage(input)
 	}()
 	cachable, isCachable := input.(Cachable)
-
 	batchSize := cachable.BatchSize()
 	if response.Data == nil {
 		return fmt.Errorf("response data was empty - aborting request")
@@ -90,6 +88,10 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		}
 	}
 
+	if s.Config.Debug {
+		s.reportBatch(cachedCount, cached)
+	}
+
 	if (batchSize > 0 && cachedCount == batchSize) || cachedCount > 0 {
 		response.Status = common.StatusCached
 		return s.handleResponse(ctx, response.Data, cached, cachable)
@@ -100,7 +102,13 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		return err
 	}
 	stats.Append(stat.NoSuchKey)
+	if s.Config.Debug {
+		fmt.Printf("[%v] request: %s\n", s.Config.Model, data)
+	}
 	body, err := s.postRequest(ctx, data)
+	if s.Config.Debug {
+		fmt.Printf("[%v] response: %s, %v\n", s.Config.Model, body, err)
+	}
 	if err != nil {
 		stats.Append(err)
 		return err
@@ -115,8 +123,6 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	if err = s.handleResponse(ctx, response.Data, cached, cachable); err != nil {
 		return fmt.Errorf("failed to handle resp: %w", err)
 	}
-	fmt.Printf("cachedCount: %v , batchSize: %v%T(%v)\n", cachedCount, batchSize, response.Data, response.Data)
-	toolbox.Dump(response.Data)
 	s.updatedCache(ctx, response.Data, cachable, s.dict.hash)
 	s.assertDictHash(response)
 	return nil
@@ -410,7 +416,7 @@ func (s *Service) handleResponse(ctx context.Context, target interface{}, cached
 	default:
 		return fmt.Errorf("invalid response type expected []*T, but had: %T", target)
 	}
-	err := ReconcileData(target, cachable, cached)
+	err := ReconcileData(s.Config.Debug, target, cachable, cached)
 	return err
 }
 
@@ -514,7 +520,6 @@ func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable
 	dataPtr := xunsafe.AsPointer(target)
 	xSliceLen := xSlice.Len(dataPtr) //response data is a slice, iterate vi slice to update response
 	if xSliceLen > batchSize {
-		fmt.Printf("slice size: %v,  %v\n", batchSize, xSliceLen)
 		xSliceLen = batchSize
 	}
 	for index := 0; index < xSliceLen; index++ {
@@ -553,11 +558,23 @@ func (s *Service) updateSingleEntry(ctx context.Context, target interface{}, cac
 	key := cachable.CacheKey()
 	storeKey := s.datastore.Key(cachable.CacheKey())
 	if key == "" {
-		fmt.Printf("key was empty for %T,%v", target, storeKey.Set)
 		return
 	}
 	if err := s.datastore.Put(ctx, storeKey, target, s.dict.hash); err != nil {
 		log.Printf("failed to write to cache: %v", err)
 	}
 	return
+}
+
+func (s *Service) reportBatch(count int, cached []interface{}) {
+	fmt.Printf("[%v] batchSize: %v, found in cache: %v", s.Config.Model, len(cached), count)
+	if count == 0 {
+		return
+	}
+	for i, v := range cached {
+		if v == nil {
+			continue
+		}
+		fmt.Printf("[%v] cached[%v] %+v\n", s.Config.Model, i, v)
+	}
 }

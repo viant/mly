@@ -305,7 +305,7 @@ func TestReconcileData(t *testing.T) {
 
 	for _, testCase := range testCases {
 		target := testCase.target()
-		err := client.ReconcileData(target, testCase.Cachable(), testCase.cached)
+		err := client.ReconcileData(false, target, testCase.Cachable(), testCase.cached)
 		assert.Nil(t, err, testCase.description)
 		actual := reflect.ValueOf(target).Elem().Interface()
 		assert.EqualValues(t, testCase.expect, actual, testCase.description)
