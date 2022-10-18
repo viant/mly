@@ -484,7 +484,6 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 			}
 		}
 	}
-
 	if err := s.logger.Log(msg); err != nil {
 		fmt.Printf("failed to log model eval: %v %v\n", s.config.ID, err)
 	}
