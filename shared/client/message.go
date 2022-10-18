@@ -164,7 +164,12 @@ func (m *Message) StringsKey(key string, values []string) {
 			m.multiKeys[i][index] = keyValue
 		}
 	}
+	if index <= 0 {
+		return
+	}
+
 	m.expendKeysIfNeeded(len(values), index, keyValue)
+
 }
 
 // stringsKey sets key/values pair
@@ -204,6 +209,9 @@ func (m *Message) IntsKey(key string, values []int) {
 }
 
 func (m *Message) expendKeysIfNeeded(valuesLen int, index int, keyValue string) {
+	if index < 0 {
+		return
+	}
 	if valuesLen > 1 || m.batchSize <= 1 {
 		return
 	}
