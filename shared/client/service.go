@@ -111,7 +111,6 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	if response.Status != common.StatusOK {
 		return nil
 	}
-
 	if err = s.handleResponse(ctx, response.Data, cached, cachable); err != nil {
 		return fmt.Errorf("failed to handle resp: %w", err)
 	}
@@ -500,6 +499,9 @@ func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable
 	case reflect.Struct:
 		s.updateSingleEntry(ctx, target, cachable)
 		return
+	case reflect.Slice:
+	default:
+		fmt.Printf("unspportd target type: %T", target)
 	}
 
 	batchSize := cachable.BatchSize()
@@ -508,6 +510,10 @@ func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable
 	xSlice := xunsafe.NewSlice(targetType)
 	dataPtr := xunsafe.AsPointer(target)
 	xSliceLen := xSlice.Len(dataPtr) //response data is a slice, iterate vi slice to update response
+	if xSliceLen > batchSize {
+		fmt.Printf("slice size: %v,  %v\n", batchSize, xSliceLen)
+		xSliceLen = batchSize
+	}
 	for index := 0; index < xSliceLen; index++ {
 		value := xSlice.ValuePointerAt(dataPtr, index)
 		if value == nil { //no actual value was returned from mly service

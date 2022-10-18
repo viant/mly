@@ -46,6 +46,9 @@ type (
 )
 
 func (s *Strings) ValueAt(index int) interface{} {
+	if index >= len(s.Values) {
+		return s.Values[0]
+	}
 	return s.Values[index]
 }
 
@@ -112,6 +115,9 @@ func (s *Int32s) Feed(batchSize int) interface{} {
 }
 
 func (s *Int32s) ValueAt(index int) interface{} {
+	if index >= len(s.Values) {
+		return s.Values[0]
+	}
 	return s.Values[index]
 }
 
@@ -174,6 +180,9 @@ func (s *Int64s) Len() int {
 }
 
 func (s *Int64s) ValueAt(index int) interface{} {
+	if index >= len(s.Values) {
+		return s.Values[0]
+	}
 	return s.Values[index]
 }
 
@@ -232,6 +241,9 @@ func (s *Bools) Len() int {
 }
 
 func (s *Bools) ValueAt(index int) interface{} {
+	if index >= len(s.Values) {
+		return s.Values[0]
+	}
 	return s.Values[index]
 }
 
@@ -289,6 +301,9 @@ func (s *Float32s) Len() int {
 }
 
 func (s *Float32s) ValueAt(index int) interface{} {
+	if index >= len(s.Values) {
+		return s.Values[0]
+	}
 	return s.Values[index]
 }
 
