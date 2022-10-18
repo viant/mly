@@ -130,7 +130,7 @@ func (s *Service) loadFromCache(ctx context.Context, cached *[]interface{}, batc
 				log.Printf("cache error: %v", err)
 			}
 		}
-		return cachedCount, err
+		return cachedCount, nil
 	}
 
 	key := cachable.CacheKey()
