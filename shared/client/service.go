@@ -14,6 +14,7 @@ import (
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
 	"github.com/viant/mly/shared/stat"
+	"github.com/viant/toolbox"
 	"github.com/viant/xunsafe"
 	"golang.org/x/net/http2"
 	"io"
@@ -114,6 +115,8 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	if err = s.handleResponse(ctx, response.Data, cached, cachable); err != nil {
 		return fmt.Errorf("failed to handle resp: %w", err)
 	}
+	fmt.Printf("cachedCount: %v , batchSize: %v%T(%v)\n", cachedCount, batchSize, response.Data, response.Data)
+	toolbox.Dump(response.Data)
 	s.updatedCache(ctx, response.Data, cachable, s.dict.hash)
 	s.assertDictHash(response)
 	return nil
