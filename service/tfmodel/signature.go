@@ -18,7 +18,6 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 	result := &domain.Signature{
 		Method: signature.MethodName,
 	}
-
 	for k, v := range signature.Outputs {
 		output := domain.Output{}
 		output.Name = k
@@ -34,13 +33,12 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 		tryAssignDataType(v, output)
 		result.Outputs = append(result.Outputs, output)
 	}
-	result.Output = result.Outputs[0]
 
+	result.Output = result.Outputs[0]
 	var inputs = make([]string, 0, len(signature.Inputs))
 	for k := range signature.Inputs {
 		inputs = append(inputs, k)
 	}
-
 	sort.Strings(inputs)
 	for _, k := range inputs {
 		v := signature.Inputs[k]

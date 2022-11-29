@@ -22,6 +22,17 @@ type (
 	}
 )
 
+func (m *MetaInput) OutputIndex() map[string]int {
+	var outputIndex = map[string]int{}
+	if len(m.Outputs) == 0 {
+		return outputIndex
+	}
+	for i, f := range m.Outputs {
+		outputIndex[f.Name] = i
+	}
+	return outputIndex
+}
+
 func (d *MetaInput) KeysLen() int {
 	return len(d.Inputs)
 }

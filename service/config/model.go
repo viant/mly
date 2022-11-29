@@ -7,6 +7,7 @@ import (
 	"github.com/viant/tapper/config"
 	"os"
 	"path"
+	"time"
 )
 
 //Model represents model config
@@ -25,6 +26,14 @@ type Model struct {
 	Modified         *Modified      `json:",omitempty" yaml:",omitempty"`
 	Stream           *config.Stream `json:",omitempty" yaml:",omitempty"`
 	shared.MetaInput `json:",omitempty" yaml:",inline"`
+	DictMeta         DictionaryMeta
+}
+
+//DictionaryMeta represents dictionary meta
+type DictionaryMeta struct {
+	Hash     int
+	Reloaded time.Time
+	Error    string
 }
 
 //UseDictionary returns true if dictionary can be used

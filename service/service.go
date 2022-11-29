@@ -225,18 +225,22 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	var dictionary *common.Dictionary
 	s.reconcileSignatureWithInput(signature)
 	if s.config.UseDictionary() {
+		s.config.DictMeta.Error = ""
 		if s.config.DictURL != "" {
 			if dictionary, err = s.loadDictionary(ctx, s.config.DictURL); err != nil {
+				s.config.DictMeta.Error = err.Error()
 				return err
 			}
 		} else {
 			dictionary, err = layers.Dictionary(model.Session, model.Graph, signature)
 			if err != nil {
+				s.config.DictMeta.Error = err.Error()
 				return err
 			}
-
 		}
 		s.dictionary = dictionary
+		s.config.DictMeta.Hash = dictionary.Hash
+		s.config.DictMeta.Reloaded = time.Now()
 	}
 
 	var inputs = make(map[string]*domain.Input)
@@ -576,9 +580,13 @@ func (srv *Service) reconcileSignatureWithInput(signature *domain.Signature) {
 		}
 		delete(byName, field.Name)
 	}
-	if len(signature.Outputs) > 0 {
-		for _, output := range signature.Outputs {
 
+	if len(signature.Outputs) > 0 {
+		outputIndex := srv.config.OutputIndex()
+		for _, output := range signature.Outputs {
+			if _, has := outputIndex[output.Name]; has {
+				continue
+			}
 			field := &shared.Field{Name: output.Name, DataType: output.DataType}
 			if field.DataType == "" {
 				field.SetRawType(reflect.TypeOf(""))
