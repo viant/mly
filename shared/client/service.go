@@ -31,17 +31,17 @@ import (
 type Service struct {
 	Config
 	sync.RWMutex
-	dict        *Dictionary
-	gmetrics    *gmetric.Service
-	counter     *gmetric.Operation
-	datastore   datastore.Storer
-	mux         sync.RWMutex
-	messages    Messages
-	poolErr     error
-	hostIndex   int64
-	newStorable func() common.Storable
-	dictRefresh int32
-	httpClient  http.Client
+	dict               *Dictionary
+	gmetrics           *gmetric.Service
+	counter            *gmetric.Operation
+	datastore          datastore.Storer
+	mux                sync.RWMutex
+	messages           Messages
+	poolErr            error
+	hostIndex          int64
+	newStorable        func() common.Storable
+	dictRefreshPending int32
+	httpClient         http.Client
 }
 
 //NewMessage returns a new message
@@ -362,7 +362,7 @@ func (s *Service) Close() error {
 }
 
 func (s *Service) refreshMetadata() {
-	defer atomic.StoreInt32(&s.dictRefresh, 0)
+	defer atomic.StoreInt32(&s.dictRefreshPending, 0)
 	if err := s.loadModelDictionary(); err != nil {
 		log.Printf("failed to refresh meta data: %v", err)
 	}
@@ -423,7 +423,7 @@ func (s *Service) handleResponse(ctx context.Context, target interface{}, cached
 func (s *Service) assertDictHash(response *Response) {
 	dict := s.dictionary()
 	if dict != nil && response.DictHash != dict.hash {
-		if atomic.CompareAndSwapInt32(&s.dictRefresh, 0, 1) {
+		if atomic.CompareAndSwapInt32(&s.dictRefreshPending, 0, 1) {
 			go s.refreshMetadata()
 		}
 	}

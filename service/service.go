@@ -237,6 +237,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 				s.config.DictMeta.Error = err.Error()
 				return err
 			}
+
 		}
 		s.dictionary = dictionary
 		s.config.DictMeta.Hash = dictionary.Hash

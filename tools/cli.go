@@ -66,11 +66,14 @@ func Run(args []string) {
 }
 
 func Discover(options *Options) error {
+	fs := afs.New()
+	if options.Operation == "dictHash" {
+		return discoverDictHash(options, fs)
+	}
 	model, err := loadModel(context.Background(), options.SourceURL)
 	if err != nil {
 		return err
 	}
-	fs := afs.New()
 	switch options.Operation {
 	case "signature":
 		return discoverSignature(options, model, fs)
@@ -78,11 +81,27 @@ func Discover(options *Options) error {
 		return discoverLayers(options, model, fs)
 	case "config":
 		return discoverConfig(options, model, fs)
-
 	default:
 		return fmt.Errorf("unsupported option: '%v'", options.Operation)
 	}
 
+}
+
+func discoverDictHash(options *Options, fs afs.Service) error {
+	source, err := fs.DownloadWithURL(context.Background(), options.SourceURL)
+	if err != nil {
+		return err
+	}
+	dict := common.Dictionary{}
+	if err = sjson.Unmarshal(source, &dict); err != nil {
+		return err
+	}
+	fmt.Printf("dict hash: %v\n", dict.UpdateHash())
+	for _, l := range dict.Layers {
+		fmt.Printf("layer: %v hash: %v\n", l.Name, l.Hash)
+
+	}
+	return nil
 }
 
 const exportSuffix = "_lookup_index_table_lookup_table_export_values/LookupTableExportV2"
@@ -109,7 +128,8 @@ func discoverLayers(options *Options, model *tf.SavedModel, fs afs.Service) erro
 	provider := msg.NewProvider(100*1024*1024, 1, json.New)
 	aMessage := provider.NewMessage()
 	dictLayers := common.Layers(dictionary.Layers)
-	aMessage.PutInt("Hash", 0)
+
+	aMessage.PutInt("Hash", dictionary.Hash)
 	aMessage.PutObjects("Layers", dictLayers.Encoders())
 	logger.Log(aMessage)
 	aMessage.Free()
