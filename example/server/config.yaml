@@ -1,0 +1,10 @@
+Models:
+  - ID: sls
+    #URL: /w/example/model/sls_model
+    URL: /w/example/model/sls_model.zip/zip://localhost/sls_model
+    Location: /tmp/sls
+    UseDictionary: true
+    Inputs:
+      - Name: sl
+        Index: 0
+        DataType: string

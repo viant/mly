@@ -241,6 +241,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		}
 		s.dictionary = dictionary
 		s.config.DictMeta.Hash = dictionary.Hash
+		fmt.Printf("%v\n", dictionary.Hash)
 		s.config.DictMeta.Reloaded = time.Now()
 	}
 
@@ -412,7 +413,7 @@ func (s *Service) getStreamID() string {
 }
 
 func (s *Service) scheduleModelReload() {
-	for range time.Tick(time.Minute) {
+	for range time.Tick(5 * time.Second) {
 		if err := s.reloadIfNeeded(context.Background()); err != nil {
 			fmt.Printf("failed to reload model: %v, due to %v", s.config.ID, err)
 		}
