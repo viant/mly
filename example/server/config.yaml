@@ -1,8 +1,9 @@
 Models:
   - ID: sls
+    Dir: /sls_model
     #URL: /w/example/model/sls_model
-    URL: /w/example/model/sls_model.zip/zip://localhost/sls_model
-    Location: /tmp/sls
+    URL: example/model/sls_model.zip/zip://localhost/sls_model
+    Location: /tmp/sls_model
     UseDictionary: true
     Inputs:
       - Name: sl

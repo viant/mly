@@ -207,6 +207,7 @@ func (s *Service) evaluate(ctx context.Context, request *Request) ([]interface{}
 }
 
 func (s *Service) reloadIfNeeded(ctx context.Context) error {
+	fmt.Printf("current %+v\n", *s.config.Modified)
 	snapshot, err := s.modifiedSnapshot(ctx, s.config.URL, &config.Modified{})
 	if err != nil {
 		return err
@@ -241,7 +242,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		}
 		s.dictionary = dictionary
 		s.config.DictMeta.Hash = dictionary.Hash
-		fmt.Printf("%v\n", dictionary.Hash)
+		fmt.Printf("%+v\n", dictionary.Hash)
 		s.config.DictMeta.Reloaded = time.Now()
 	}
 
@@ -272,6 +273,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	s.dictionary = dictionary
 	s.inputs = inputs
 	s.config.Modified = snapshot
+	fmt.Printf("updated %+v\n", *s.config.Modified)
 	return nil
 }
 
