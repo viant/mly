@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
+	"github.com/viant/afs/option"
 	"github.com/viant/afs/url"
 	"github.com/viant/gmetric"
 	"github.com/viant/gtly"
@@ -319,7 +320,8 @@ func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *co
 }
 
 func (s *Service) loadModel(ctx context.Context, err error) (*tf.SavedModel, error) {
-	if err := s.fs.Copy(ctx, s.config.URL, s.config.Location); err != nil {
+	options := option.NewSource(&option.NoCache{Source: option.NoCacheBaseURL})
+	if err := s.fs.Copy(ctx, s.config.URL, s.config.Location, options); err != nil {
 		return nil, err
 	}
 	model, err := tf.LoadSavedModel(s.config.Location, s.config.Tags, nil)
