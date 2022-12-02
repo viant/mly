@@ -390,6 +390,8 @@ github.com/tensorflow/tensorflow v2.4.2+incompatible/go.mod h1:itOSERT4trABok4UO
 github.com/viant/afs v1.0.0/go.mod h1:wdiEDffZKJwj1ZSFasy7hHoxLQdSpFZkd3XOWNt1aN0=
 github.com/viant/afs v1.16.1-0.20220708154004-5cc767a16d95 h1:eoY10srUM6grqgeWytWgNzFpgvfiCa+2S3DcEFxW7Ws=
 github.com/viant/afs v1.16.1-0.20220708154004-5cc767a16d95/go.mod h1:bo/jkTH8sBUhG0PQcPsuskvjb/5uEzgiwygGwtaDw8Q=
+github.com/viant/afs v1.16.1-0.20221201181023-455837320ec5 h1:roScADfArV4sxN0CB14BQbMlPRf4PpVeX3dx9lMQFC4=
+github.com/viant/afs v1.16.1-0.20221201181023-455837320ec5/go.mod h1:bo/jkTH8sBUhG0PQcPsuskvjb/5uEzgiwygGwtaDw8Q=
 github.com/viant/afsc v1.8.0 h1:EV/9pueBovKDxXh7ce/50bnmOzfXj7x8XqxkEf1mAgk=
 github.com/viant/afsc v1.8.0/go.mod h1:FA/xVjaMM10qGByabP8anTVMH6N4eUsAeWm5xcEZJJA=
 github.com/viant/assertly v0.4.8/go.mod h1:aGifi++jvCrUaklKEKT0BU95igDNaqkvz+49uaYMPRU=

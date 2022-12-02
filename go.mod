@@ -12,7 +12,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.7.1
 	github.com/tensorflow/tensorflow v2.4.2+incompatible
-	github.com/viant/afs v1.16.1-0.20220708154004-5cc767a16d95
+	github.com/viant/afs v1.16.1-0.20221201181023-455837320ec5
 	github.com/viant/afsc v1.8.0
 	github.com/viant/bintly v0.2.0
 	github.com/viant/gmetric v0.2.6
