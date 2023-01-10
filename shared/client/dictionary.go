@@ -31,6 +31,10 @@ func (d *Dictionary) size() int {
 	return len(d.registry)
 }
 
+func (d *Dictionary) Fields() map[string]*shared.Field {
+	return d.inputs
+}
+
 func (d *Dictionary) lookupString(key string, value string) (string, int) {
 	if d == nil {
 		return "", unknownKeyField

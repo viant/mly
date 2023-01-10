@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/viant/bintly"
 	"github.com/viant/mly/shared"
@@ -142,6 +143,8 @@ func TestService_Run(t *testing.T) {
 			msg := srv.NewMessage()
 			testCase.initMessage(msg)
 
+			msgs := msg.Strings()
+			fmt.Printf("MMM :%v\n", msgs)
 			err = srv.Run(context.Background(), msg, response)
 			if !assert.Nil(t, err, testCase.description) {
 				continue

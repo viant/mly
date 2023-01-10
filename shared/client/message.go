@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/viant/mly/shared/common"
 	"reflect"
@@ -36,6 +37,39 @@ type (
 		kind   reflect.Kind
 	}
 )
+
+func (m *Message) Strings() []string {
+	fields := m.dictionary.Fields()
+	if len(m.transient) == 0 {
+		return nil
+	}
+	var result = make([]string, 0)
+	for i := 0; i < m.batchSize; i++ {
+		record := map[string]interface{}{}
+
+		for _, trans := range m.transient {
+			field, ok := fields[trans.name]
+			if !ok {
+				continue
+			}
+			var values []string
+			switch actual := trans.values.(type) {
+			case []string:
+				values = actual
+			}
+			value := values[0]
+			if i < len(values) {
+				value = values[i]
+			}
+			record[field.Name] = value
+
+		}
+		if data, _ := json.Marshal(record); len(data) > 0 {
+			result = append(result, string(data))
+		}
+	}
+	return result
+}
 
 func (m *Message) CacheHit(index int) bool {
 	if index < len(m.cacheHits) {
