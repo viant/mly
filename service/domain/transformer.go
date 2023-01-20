@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"fmt"
+
 	"github.com/viant/gtly"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
@@ -77,7 +78,7 @@ func Transform(ctx context.Context, signature *Signature, input *gtly.Object, ou
 			case []int64:
 				outputValue = t[0]
 			default:
-				return nil, fmt.Errorf("unsupported output type: %v %T", signature.Outputs[0].Name, t)
+				return nil, fmt.Errorf("unsupported output sub-type: %v %T", signature.Outputs[0].Name, t)
 			}
 			pairs = append(pairs, &kvPair{
 				k: signature.Outputs[i].Name,
