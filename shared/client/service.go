@@ -6,6 +6,16 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"net"
+	"net/http"
+	"reflect"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/francoispqt/gojay"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/shared/client/config"
@@ -16,15 +26,6 @@ import (
 	"github.com/viant/mly/shared/stat"
 	"github.com/viant/xunsafe"
 	"golang.org/x/net/http2"
-	"io"
-	"io/ioutil"
-	"log"
-	"net"
-	"net/http"
-	"reflect"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 //Service represent mly client
@@ -416,7 +417,8 @@ func (s *Service) handleResponse(ctx context.Context, target interface{}, cached
 	default:
 		return fmt.Errorf("invalid response type expected []*T, but had: %T", target)
 	}
-	err := ReconcileData(s.Config.Debug, target, cachable, cached)
+
+	err := reconcileData(s.Config.Debug, target, cachable, cached)
 	return err
 }
 

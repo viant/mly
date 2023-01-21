@@ -1,18 +1,18 @@
-package client_test
+package client
 
 import (
-	"github.com/stretchr/testify/assert"
-	"github.com/viant/mly/shared"
-	"github.com/viant/mly/shared/client"
-	"github.com/viant/mly/shared/common"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/viant/mly/shared"
+	"github.com/viant/mly/shared/common"
 )
 
 func TestReconcileData(t *testing.T) {
 
-	messages := client.NewMessages(func() *client.Dictionary {
-		return client.NewDictionary(&common.Dictionary{}, []*shared.Field{
+	messages := NewMessages(func() *Dictionary {
+		return NewDictionary(&common.Dictionary{}, []*shared.Field{
 			{
 				Name:     "initMessage",
 				Wildcard: true,
@@ -26,7 +26,7 @@ func TestReconcileData(t *testing.T) {
 
 	var testCases = []struct {
 		description string
-		Cachable    func() client.Cachable
+		Cachable    func() Cachable
 		cached      []interface{}
 		target      func() interface{}
 		expect      interface{}
@@ -35,7 +35,7 @@ func TestReconcileData(t *testing.T) {
 		{
 			description: "singleKey: nothing cached",
 			cached:      []interface{}{},
-			Cachable: func() client.Cachable {
+			Cachable: func() Cachable {
 				msg := messages.Borrow()
 				msg.StringKey("initMessage", "ab")
 				return msg
@@ -57,7 +57,7 @@ func TestReconcileData(t *testing.T) {
 					Output: 3.57,
 				},
 			},
-			Cachable: func() client.Cachable {
+			Cachable: func() Cachable {
 				msg := messages.Borrow()
 				msg.StringKey("initMessage", "ab")
 				msg.FlagCacheHit(0)
@@ -90,7 +90,7 @@ func TestReconcileData(t *testing.T) {
 				nil,
 			},
 
-			Cachable: func() client.Cachable {
+			Cachable: func() Cachable {
 				msg := messages.Borrow()
 				msg.StringsKey("initMessage", []string{"ab", "cd", "ef", "yz"})
 				msg.FlagCacheHit(0)
@@ -139,7 +139,7 @@ func TestReconcileData(t *testing.T) {
 				},
 			},
 
-			Cachable: func() client.Cachable {
+			Cachable: func() Cachable {
 				msg := messages.Borrow()
 				msg.StringsKey("initMessage", []string{"ab", "cd", "ef", "yz"})
 				msg.FlagCacheHit(0)
@@ -182,7 +182,7 @@ func TestReconcileData(t *testing.T) {
 				nil,
 			},
 
-			Cachable: func() client.Cachable {
+			Cachable: func() Cachable {
 				msg := messages.Borrow()
 				msg.StringsKey("initMessage", []string{"ab", "cd", "ef", "yz"})
 				msg.FlagCacheHit(0)
@@ -232,7 +232,7 @@ func TestReconcileData(t *testing.T) {
 				},
 			},
 
-			Cachable: func() client.Cachable {
+			Cachable: func() Cachable {
 				msg := messages.Borrow()
 				msg.StringsKey("initMessage", []string{"ab", "cd", "ef", "yz"})
 				msg.FlagCacheHit(0)
@@ -264,7 +264,7 @@ func TestReconcileData(t *testing.T) {
 		{
 			description: "multiKey: nothing cached",
 			cached:      []interface{}{},
-			Cachable: func() client.Cachable {
+			Cachable: func() Cachable {
 				msg := messages.Borrow()
 				msg.StringsKey("initMessage", []string{"ab", "cd", "ef", "yz"})
 				return msg
@@ -305,7 +305,7 @@ func TestReconcileData(t *testing.T) {
 
 	for _, testCase := range testCases {
 		target := testCase.target()
-		err := client.ReconcileData(false, target, testCase.Cachable(), testCase.cached)
+		err := reconcileData(true, target, testCase.Cachable(), testCase.cached)
 		assert.Nil(t, err, testCase.description)
 		actual := reflect.ValueOf(target).Elem().Interface()
 		assert.EqualValues(t, testCase.expect, actual, testCase.description)
