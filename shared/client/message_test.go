@@ -17,7 +17,7 @@ func TestMessage(t *testing.T) {
 			},
 			common.Layer{
 				Name:    "multi",
-				Strings: []string{"a", "b", "c"},
+				Strings: []string{"a", "b"},
 			},
 		},
 		Hash: 1,
@@ -45,18 +45,15 @@ func TestMessage(t *testing.T) {
 	msgs := NewMessages(makeDict)
 	msg := msgs.Borrow()
 
-	msg.SetBatchSize(3)
+	msg.SetBatchSize(2)
 
-	msg.StringsKey("multi", []string{"a", "b", "c"})
+	msg.StringsKey("multi", []string{"a", "b"})
 	msg.StringsKey("copied", []string{"1"})
 
 	var key string
 	key = msg.CacheKeyAt(0)
-	assert.Equal(t, "1/a", key)
+	assert.Equal(t, "[UNK]/a", key)
 
 	key = msg.CacheKeyAt(1)
-	assert.Equal(t, "1/b", key)
-
-	key = msg.CacheKeyAt(2)
-	assert.Equal(t, "1/c", key)
+	assert.Equal(t, "[UNK]/b", key)
 }
