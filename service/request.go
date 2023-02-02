@@ -172,6 +172,9 @@ func (r *Request) Validate() error {
 	if len(r.inputs) != r.supplied {
 		missing := make([]string, 0)
 		for _, input := range r.inputs {
+			if input.Auxiliary {
+				continue
+			}
 			if r.Feeds[input.Index] == nil {
 				missing = append(missing, input.Name)
 			}
