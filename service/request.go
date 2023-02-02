@@ -188,5 +188,5 @@ func (r *Request) Validate() error {
 
 //NKeys returns object keys
 func (r *Request) NKeys() int {
-	return 2 + len(r.inputs)
+	return 0
 }

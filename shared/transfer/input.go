@@ -1,6 +1,8 @@
 package transfer
 
-import "github.com/viant/gtly"
+import (
+	"github.com/viant/gtly"
+)
 
 type Input struct {
 	BatchSize int
