@@ -2,15 +2,16 @@ package config
 
 import (
 	"fmt"
-	"github.com/viant/afs/file"
-	"github.com/viant/mly/shared"
-	"github.com/viant/tapper/config"
 	"os"
 	"path"
 	"time"
+
+	"github.com/viant/afs/file"
+	"github.com/viant/mly/shared"
+	"github.com/viant/tapper/config"
 )
 
-//Model represents model config
+// Model represents model config
 type Model struct {
 	ID               string
 	Dir              string
@@ -29,19 +30,19 @@ type Model struct {
 	DictMeta         DictionaryMeta
 }
 
-//DictionaryMeta represents dictionary meta
+// DictionaryMeta is used to confirm proper reloading of model components
 type DictionaryMeta struct {
 	Hash     int
 	Reloaded time.Time
 	Error    string
 }
 
-//UseDictionary returns true if dictionary can be used
+// UseDictionary returns true if dictionary can be used
 func (m Model) UseDictionary() bool {
 	return m.UseDict == nil || *m.UseDict
 }
 
-//Init initialises model config
+// Init initialises model config
 func (m *Model) Init() {
 	if len(m.Tags) == 0 {
 		m.Tags = []string{"serve"}
@@ -54,7 +55,7 @@ func (m *Model) Init() {
 	m.MetaInput.Init()
 }
 
-//Validate validates model config
+// Validate validates model config
 func (m *Model) Validate() error {
 	if m.ID == "" {
 		return fmt.Errorf("model.ID was empty")

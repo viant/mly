@@ -3,22 +3,24 @@ package layers
 import (
 	"encoding/binary"
 	"fmt"
+	"hash"
+	"sort"
+	"unsafe"
+
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/shared/common"
-	"hash"
-	"sort"
-	"unsafe"
 )
 
-//Dictionary returns dictionary
+// Dictionary generates dictionary from TF model
 func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signature) (*common.Dictionary, error) {
 	var layers []string
 	for _, input := range signature.Inputs {
 		if input.Wildcard {
 			continue
 		}
+
 		layer := input.Name
 		if input.Layer != "" {
 			layer = input.Layer
@@ -32,6 +34,7 @@ func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signatur
 	return dictionary, nil
 }
 
+// DiscoverDictionary extracts vocabulary from layers
 func DiscoverDictionary(session *tf.Session, graph *tf.Graph, layers []string) (*common.Dictionary, error) {
 	var result = &common.Dictionary{}
 	for _, name := range layers {

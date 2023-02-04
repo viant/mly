@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/francoispqt/gojay"
-	"github.com/viant/mly/service/buffer"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/francoispqt/gojay"
+	"github.com/viant/mly/service/buffer"
 )
 
 type Handler struct {
@@ -46,10 +47,12 @@ func (h *Handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		if err != nil {
 			return err
 		}
+
 		request.Body = data[:size]
 		if h.service.config.Debug {
 			fmt.Printf("[%v] input: %s\n", h.service.config.ID, request.Body)
 		}
+
 		err = gojay.Unmarshal(data[:size], request)
 		if err != nil {
 			return err
