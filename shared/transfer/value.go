@@ -2,9 +2,10 @@ package transfer
 
 import (
 	"fmt"
+	"reflect"
+
 	"github.com/francoispqt/gojay"
 	"github.com/viant/toolbox"
-	"reflect"
 )
 
 type (
@@ -14,6 +15,8 @@ type (
 		ValueAt(index int) interface{}
 		UnmarshalJSONArray(dec *gojay.Decoder) error
 		Len() int
+		// Will make a new []interface{} that copies old value and fills the rest with the first element.
+		// Panics if batchSize is less than current Values size.
 		Feed(batchSize int) interface{}
 	}
 
@@ -57,6 +60,7 @@ func (s *Strings) Feed(batchSize int) interface{} {
 	for i, item := range s.Values {
 		result[i] = []string{item}
 	}
+
 	for i := len(s.Values); i < batchSize; i++ {
 		result[i] = []string{s.Values[0]}
 		s.Values = append(s.Values, s.Values[0])
@@ -411,20 +415,17 @@ func (v *Values) ValueAt(index int) Value {
 	return (*v)[index]
 }
 
+// SetAt will create []Value at index or extend current array to support index
 func (v *Values) SetAt(index int, name string, kind reflect.Kind) (Value, error) {
-	if index < len(*v) {
-		if (*v)[index] == nil {
-			if err := v.allocate(index, name, kind); err != nil {
-				return nil, err
-			}
-		}
-		return (*v)[index], nil
+	if index >= len(*v) {
+		*v = append(*v, make([]Value, 1+index-len(*v))...)
 	}
-	*v = append(*v, make([]Value, 1+index-len(*v))...)
+
 	err := v.allocate(index, name, kind)
 	if err != nil {
 		return nil, err
 	}
+
 	return (*v)[index], nil
 }
 

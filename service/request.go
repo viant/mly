@@ -2,28 +2,33 @@ package service
 
 import (
 	"fmt"
+	"reflect"
+	"strconv"
+
 	"github.com/francoispqt/gojay"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/transfer"
-	"reflect"
-	"strconv"
 )
 
-//Request represent a request
+var exists struct{} = struct{}{}
+
+// Request represents the server-side post-processed information about a request.
+// There is no strict struct for request payload since some of the keys of the request are dynamically generated based on the model inputs.
+// See shared/client.Message for client-side perspective.
 type Request struct {
-	Body     []byte
+	Body     []byte // usually the POST JSON content
 	Feeds    []interface{}
 	inputs   map[string]*domain.Input
-	supplied int
+	supplied map[string]struct{}
 	input    *transfer.Input
 }
 
-//Put puts data to request
+// Put is used when constructing a request NOT using gojay.
 func (r *Request) Put(key string, value string) error {
-	//r.Pairs = append(r.Pairs, &Pairs{key , value})
 	if input, ok := r.inputs[key]; ok {
-		r.supplied++
+		r.supplied[key] = exists
+
 		switch input.Type.Kind() {
 		case reflect.String:
 			r.Feeds[input.Index] = [][]string{{value}}
@@ -58,18 +63,30 @@ func (r *Request) Put(key string, value string) error {
 			}
 			r.Feeds[input.Index] = [][]float32{{float32(val)}}
 		default:
-			//TODO add more type support
+			// TODO add more type support
 			return fmt.Errorf("unsupported input type: %T", reflect.New(input.Type).Interface())
 		}
 	}
+
 	return nil
 }
 
-//UnmarshalJSONObject umarshal
+// UnmarshalJSONObject gojay implementation; see service.(*Handler).serveHTTP()
+// There is some polymorphism involved, as well as loose-typing.
+// Model inputs aren't strictly typed from the perspective of the request.
+// The primary polymorphism comes from the support for multiple rows worth of inputs.
+// There are 2 optional keys that aren't part of the model input: "batch_size" and "cache_key".
+// If the key "batch_size" is provided, then the keys' values should be an array of scalars; otherwise, the keys' values can be a single scalar.
+// The key "cache_key" is used for caching, and should be an array of strings if "batch_size" is provided.
 func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	if r.input == nil {
 		r.input = &transfer.Input{}
 	}
+
+	if r.supplied == nil {
+		r.supplied = make(map[string]struct{})
+	}
+
 	switch key {
 	case common.BatchSizeKey:
 		return dec.Int(&r.input.BatchSize)
@@ -87,11 +104,12 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	default:
 		input, ok := r.inputs[key]
 		if ok {
-			r.supplied++
+			r.supplied[key] = exists
 			inputValue, err := r.input.SetAt(input.Index, input.Name, input.Type.Kind())
 			if err != nil {
 				return err
 			}
+
 			if r.input.BatchMode() {
 				if err := dec.DecodeArray(inputValue); err != nil {
 					return err
@@ -167,26 +185,27 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	return nil
 }
 
-//Validate validates if request is valid
+// Validate is only used server-side.
+// Extra fields are ignored.
 func (r *Request) Validate() error {
-	if len(r.inputs) != r.supplied {
+	// TODO this isn't super accurate but it works as a quick check
+	if len(r.inputs) != len(r.supplied) {
 		missing := make([]string, 0)
 		for _, input := range r.inputs {
-			if input.Auxiliary {
-				continue
-			}
-			if r.Feeds[input.Index] == nil {
+			if _, ok := r.supplied[input.Name]; !ok {
 				missing = append(missing, input.Name)
 			}
 		}
+
 		if len(missing) > 0 {
 			return fmt.Errorf("failed to build request due to missing fields: %v", missing)
 		}
 	}
+
 	return nil
 }
 
-//NKeys returns object keys
+// NKeys a gojay feature, set to 0 to handle "improper" (but syntactically valid) requests (duplicate JSON keys)
 func (r *Request) NKeys() int {
 	return 0
 }
