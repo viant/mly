@@ -6,6 +6,15 @@ import (
 	"context"
 	sjson "encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+	"unsafe"
+
 	"github.com/google/uuid"
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
@@ -29,17 +38,9 @@ import (
 	"github.com/viant/tapper/msg/json"
 	"github.com/viant/xunsafe"
 	"gopkg.in/yaml.v3"
-	"io"
-	"os"
-	"reflect"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
-	"unsafe"
 )
 
-//Service represents ml service
+// Service represents ml service
 type Service struct {
 	mux             sync.RWMutex
 	fs              afs.Service
@@ -60,7 +61,7 @@ type Service struct {
 	msgProvider     *msg.Provider
 }
 
-//Close closes service
+// Close closes service
 func (s *Service) Close() error {
 	if !atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
 		return fmt.Errorf("already closed")
@@ -71,17 +72,17 @@ func (s *Service) Close() error {
 	return s.evaluator.Close()
 }
 
-//Config returns service config
+// Config returns service config
 func (s *Service) Config() *config.Model {
 	return s.config
 }
 
-//Dictionary returns servie dictionary
+// Dictionary returns service dictionary
 func (s *Service) Dictionary() *common.Dictionary {
 	return s.dictionary
 }
 
-//Do handles service request
+// Do handles service request
 func (s *Service) Do(ctx context.Context, request *Request, response *Response) error {
 	err := s.do(ctx, request, response)
 	if err != nil {
@@ -275,7 +276,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	return nil
 }
 
-//modifiedSnapshot return last modified time of object from the URL
+// modifiedSnapshot return last modified time of object from the URL
 func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *config.Modified) (*config.Modified, error) {
 	objects, err := s.fs.List(ctx, URL)
 	if err != nil {
@@ -341,9 +342,14 @@ func (s *Service) isModified(snapshot *config.Modified) bool {
 	return !(modified.Max.Equal(snapshot.Max) && modified.Min.Equal(snapshot.Min))
 }
 
-//NewRequest creates a new request
+// NewRequest creates a new request
 func (s *Service) NewRequest() *Request {
-	return &Request{inputs: s.inputs, Feeds: make([]interface{}, s.config.KeysLen()), input: &transfer.Input{}}
+	return &Request{
+		inputs:   s.inputs,
+		Feeds:    make([]interface{}, s.config.KeysLen()),
+		input:    &transfer.Input{},
+		supplied: make(map[string]struct{}, s.config.KeysLen()),
+	}
 }
 
 func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[string]*datastore.Service) error {
@@ -441,7 +447,8 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	if end == -1 {
 		return
 	}
-	msg.Put(data[begin+1 : end]) //include original json from request body
+	// include original json from request body
+	msg.Put(data[begin+1 : end])
 	msg.PutByte(',')
 
 	msg.PutInt("eval_duration", int(timeTaken.Microseconds()))
@@ -517,7 +524,7 @@ func (s *Service) loadDictionary(ctx context.Context, URL string) (*common.Dicti
 	return result, decoder.Decode(result)
 }
 
-//New creates a service
+// New creates a service
 func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, datastores map[string]*datastore.Service, options ...Option) (*Service, error) {
 	location := reflect.TypeOf(&Service{}).PkgPath()
 	if metrics == nil {
@@ -604,5 +611,4 @@ func (srv *Service) reconcileSignatureWithInput(signature *domain.Signature) {
 		}
 		byName[k].Auxiliary = true
 	}
-
 }
