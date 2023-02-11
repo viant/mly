@@ -172,11 +172,8 @@ func (m *Message) StringsKey(key string, values []string) {
 			m.multiKeys[i][index] = keyValue
 		}
 	}
-	if index <= 0 {
-		return
-	}
 
-	m.expendKeysIfNeeded(len(values), index, keyValue)
+	m.expandKeysIfNeeds(len(values), index, keyValue)
 
 }
 
@@ -192,25 +189,30 @@ func (m *Message) IntsKey(key string, values []int) {
 		if len(m.multiKeys[i]) == 0 {
 			m.multiKeys[i] = make([]string, m.dictionary.inputSize())
 		}
+
 		if intKeyValue, index = m.dictionary.lookupInt(key, value); index != unknownKeyField {
 			keyValue = strconv.Itoa(intKeyValue)
 			m.multiKeys[i][index] = keyValue
 		}
 	}
-	m.expendKeysIfNeeded(len(values), index, keyValue)
+
+	m.expandKeysIfNeeds(len(values), index, keyValue)
 }
 
-func (m *Message) expendKeysIfNeeded(valuesLen int, index int, keyValue string) {
+func (m *Message) expandKeysIfNeeds(valuesLen int, index int, keyValue string) {
 	if index < 0 {
 		return
 	}
+
 	if valuesLen > 1 || m.batchSize <= 1 {
 		return
 	}
+
 	for i := 1; i < m.batchSize; i++ {
 		if len(m.multiKeys[i]) == 0 {
 			m.multiKeys[i] = make([]string, m.dictionary.inputSize())
 		}
+
 		m.multiKeys[i][index] = keyValue
 	}
 }
@@ -261,7 +263,7 @@ func (m *Message) FloatsKey(key string, values []float32) {
 			m.multiKeys[i][index] = keyValue
 		}
 	}
-	m.expendKeysIfNeeded(len(values), index, keyValue)
+	m.expandKeysIfNeeds(len(values), index, keyValue)
 }
 
 // FloatsKey sets key/values pair
@@ -396,12 +398,15 @@ func (m *Message) CacheKeyAt(index int) string {
 	if m.batchSize == 0 {
 		return m.CacheKey()
 	}
+
 	if len(m.multiKey) == 0 {
 		m.multiKey = make([]string, len(m.multiKeys))
 	}
+
 	if m.multiKey[index] != "" {
 		return m.multiKey[index]
 	}
+
 	m.multiKey[index] = buildKey(m.multiKeys[index], m.buffer)
 	m.buffer.Reset()
 	return m.multiKey[index]
