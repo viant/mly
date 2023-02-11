@@ -13,7 +13,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/google/uuid"
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
@@ -89,6 +88,7 @@ func (s *Service) Do(ctx context.Context, request *Request, response *Response) 
 		response.Error = err.Error()
 		response.Status = common.StatusError
 	}
+
 	return nil
 }
 
@@ -119,10 +119,9 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 }
 
 func (s *Service) transformOutput(ctx context.Context, request *Request, output interface{}) (common.Storable, error) {
-	inputIndex := s.inputIndex(output)
-	anObject := request.input.ObjectAt(s.inputProvider, inputIndex)
-
-	transformed, err := s.transformer(ctx, s.signature, anObject, output)
+	inputIndex := inputIndex(output)
+	inputObject := request.input.ObjectAt(s.inputProvider, inputIndex)
+	transformed, err := s.transformer(ctx, s.signature, inputObject, output)
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform: %v, %w", s.config.ID, err)
 	}
@@ -134,7 +133,7 @@ func (s *Service) transformOutput(ctx context.Context, request *Request, output 
 	return transformed, nil
 }
 
-func (s *Service) inputIndex(output interface{}) int {
+func inputIndex(output interface{}) int {
 	inputIndex := 0
 	if out, ok := output.(*shared.Output); ok {
 		inputIndex = out.InputIndex
@@ -146,13 +145,16 @@ func (s *Service) buildResponse(ctx context.Context, request *Request, response 
 	if s.dictionary != nil {
 		response.DictHash = s.dictionary.Hash
 	}
+
 	if !request.input.BatchMode() {
 		var err error
+		// single input
 		response.Data, err = s.transformOutput(ctx, request, tensorValues)
 		return err
 	}
 
 	output := &shared.Output{Values: tensorValues}
+	// index 0 call to get data type
 	transformed, err := s.transformOutput(ctx, request, output)
 	if err != nil {
 		return err
@@ -164,8 +166,10 @@ func (s *Service) buildResponse(ctx context.Context, request *Request, response 
 	xSlice := xunsafe.NewSlice(sliceType)
 	response.xSlice = xSlice
 	response.sliceLen = request.input.BatchSize
+
 	appender := xSlice.Appender(slicePtr)
 	appender.Append(transformed)
+	// index 1 - end calls
 	for i := 1; i < request.input.BatchSize; i++ {
 		output.InputIndex = i
 		if transformed, err = s.transformOutput(ctx, request, output); err != nil {
@@ -276,7 +280,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	return nil
 }
 
-// modifiedSnapshot return last modified time of object from the URL
+// modifiedSnapshot checks and updates modified times based on the object in URL
 func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *config.Modified) (*config.Modified, error) {
 	objects, err := s.fs.List(ctx, URL)
 	if err != nil {
@@ -441,7 +445,7 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	defer msg.Free()
 
 	data := request.Body
-	hasBatchSzie := bytes.Contains(data, []byte("batch_size"))
+	hasBatchSize := bytes.Contains(data, []byte("batch_size"))
 	begin := bytes.IndexByte(data, '{')
 	end := bytes.LastIndexByte(data, '}')
 	if end == -1 {
@@ -463,41 +467,47 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	if value, ok := output.([]interface{}); ok {
 		output = value[0]
 	}
+
 	switch actual := output.(type) {
+	// assume each batch has 1 output...
 	case [][]int64:
 		if len(actual) > 0 {
-			switch len(actual[0]) {
+			switch len(actual) {
 			case 0:
 			case 1:
-				if hasBatchSzie {
+				if hasBatchSize {
 					msg.PutInts(s.signature.Output.Name, []int{int(actual[0][0])})
 				} else {
 					msg.PutInt(s.signature.Output.Name, int(actual[0][0]))
 				}
 			default:
-				ints := *(*[]int)(unsafe.Pointer(&actual[0]))
+				var ints = make([]int, len(actual))
+				for i, vec := range actual {
+					ints[i] = int(vec[0])
+				}
 				msg.PutInts(s.signature.Output.Name, ints)
 			}
 		}
 	case [][]float32:
 		if len(actual) > 0 {
-			switch len(actual[0]) {
+			switch len(actual) {
 			case 0:
 			case 1:
-				if hasBatchSzie {
+				if hasBatchSize {
 					msg.PutFloats(s.signature.Output.Name, []float64{float64(actual[0][0])})
 				} else {
 					msg.PutFloat(s.signature.Output.Name, float64(actual[0][0]))
 				}
 			default:
-				var floats = make([]float64, len(actual[0]))
-				for i, v := range actual[0] {
-					floats[i] = float64(v)
+				var floats = make([]float64, len(actual))
+				for i, vec := range actual {
+					floats[i] = float64(vec[0])
 				}
 				msg.PutFloats(s.signature.Output.Name, floats)
 			}
 		}
 	}
+
 	if err := s.logger.Log(msg); err != nil {
 		fmt.Printf("failed to log model eval: %v %v\n", s.config.ID, err)
 	}
