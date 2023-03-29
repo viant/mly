@@ -278,6 +278,9 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	s.dictionary = dictionary
 	s.inputs = inputs
 	s.config.Modified = snapshot
+
+	atomic.StoreInt32(&s.ReloadOK, 1)
+
 	return nil
 }
 
@@ -429,8 +432,6 @@ func (s *Service) scheduleModelReload() {
 		if err := s.reloadIfNeeded(context.Background()); err != nil {
 			fmt.Printf("failed to reload model: %v, due to %v", s.config.ID, err)
 			atomic.StoreInt32(&s.ReloadOK, 0)
-		} else {
-			atomic.StoreInt32(&s.ReloadOK, 1)
 		}
 
 		if atomic.LoadInt32(&s.closed) != 0 {
