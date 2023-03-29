@@ -55,6 +55,7 @@ type Service struct {
 	serviceMetric   *gmetric.Operation
 	evaluatorMetric *gmetric.Operation
 	closed          int32
+	ReloadOK        int32
 	inputProvider   *gtly.Provider
 	logger          *tlog.Logger
 	msgProvider     *msg.Provider
@@ -427,8 +428,13 @@ func (s *Service) scheduleModelReload() {
 	for range time.Tick(time.Minute) {
 		if err := s.reloadIfNeeded(context.Background()); err != nil {
 			fmt.Printf("failed to reload model: %v, due to %v", s.config.ID, err)
+			atomic.StoreInt32(&s.ReloadOK, 0)
+		} else {
+			atomic.StoreInt32(&s.ReloadOK, 1)
 		}
+
 		if atomic.LoadInt32(&s.closed) != 0 {
+			// we are shutting down
 			return
 		}
 	}
@@ -536,10 +542,12 @@ func (s *Service) loadDictionary(ctx context.Context, URL string) (*common.Dicti
 
 // New creates a service
 func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, datastores map[string]*datastore.Service, options ...Option) (*Service, error) {
-	location := reflect.TypeOf(&Service{}).PkgPath()
 	if metrics == nil {
 		metrics = gmetric.New()
 	}
+
+	location := reflect.TypeOf(&Service{}).PkgPath()
+
 	cfg.Init()
 	srv := &Service{
 		fs:              fs,
@@ -549,16 +557,20 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 		useDatastore:    cfg.UseDictionary() && cfg.DataStore != "",
 		inputs:          make(map[string]*domain.Input),
 	}
+
 	for _, opt := range options {
 		opt.Apply(srv)
 	}
+
 	var err error
 	if err = srv.init(ctx, cfg, datastores); err != nil {
 		return nil, err
 	}
+
 	if srv.inputProvider, err = newObjectProvider(srv.config.Inputs); err != nil {
 		return nil, err
 	}
+
 	return srv, err
 }
 

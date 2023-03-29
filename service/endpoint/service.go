@@ -3,6 +3,8 @@ package endpoint
 import (
 	"context"
 	"fmt"
+	"sync"
+
 	"github.com/viant/afs"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service"
@@ -12,7 +14,6 @@ import (
 	"github.com/viant/mly/shared/datastore"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
-	"sync"
 
 	"log"
 	"net/http"
@@ -29,6 +30,7 @@ type Service struct {
 	server   *http.Server
 	fs       afs.Service
 	handlers map[string]*service.Handler
+	health   *healthHandler
 }
 
 //Metric returns operation metrics
@@ -84,10 +86,15 @@ func (s *Service) initModel(datastores map[string]*datastore.Service, pool *buff
 	handler := service.NewHandler(srv, pool, s.config.Endpoint.WriteTimeout-time.Millisecond)
 	lock.Lock()
 	defer lock.Unlock()
+
+	s.health.RegisterHealthPoint(model.ID, &srv.ReloadOK)
+
 	s.handlers[model.ID] = handler
 	mux.Handle(fmt.Sprintf(common.ModelURI, model.ID), handler)
+
 	metaHandler := newMetaHandler(srv, &s.config.DatastoreList)
 	mux.Handle(fmt.Sprintf(common.MetaURI, model.ID), metaHandler)
+
 	return nil
 }
 
@@ -109,27 +116,37 @@ func (s *Service) shutdownOnInterrupt() {
 
 //New creates a bridge Service
 func New(config *Config) (*Service, error) {
-	metrics := gmetric.New()
 	mux := http.NewServeMux()
+
 	mux.Handle(configURI, NewConfigHandler(config))
+
+	healthHandler := NewHealthHandler(config)
+	mux.Handle(healthURI, healthHandler)
+
+	metrics := gmetric.New()
 	metricHandler := gmetric.NewHandler(common.MetricURI, metrics)
 	mux.Handle(common.MetricURI, metricHandler)
+
 	result := &Service{
 		config:   config,
 		metrics:  metrics,
 		fs:       afs.New(),
 		handlers: make(map[string]*service.Handler),
+		health:   healthHandler,
 	}
+
 	pool := buffer.New(config.Endpoint.PoolMaxSize, config.Endpoint.BufferSize)
 
 	datastores, err := datastore.NewStores(&config.DatastoreList, metrics)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create datastores: %w", err)
 	}
+
 	err = result.initModelHandler(datastores, pool, mux)
 	if err != nil {
 		return nil, err
 	}
+
 	result.server = &http.Server{
 		Addr:           ":" + strconv.Itoa(config.Endpoint.Port),
 		Handler:        h2c.NewHandler(mux, &http2.Server{}),
@@ -137,6 +154,7 @@ func New(config *Config) (*Service, error) {
 		WriteTimeout:   time.Millisecond * time.Duration(config.Endpoint.WriteTimeoutMs),
 		MaxHeaderBytes: config.Endpoint.MaxHeaderBytes,
 	}
+
 	result.shutdownOnInterrupt()
 	return result, nil
 }
