@@ -27,7 +27,7 @@ This project provides libraries for both the client and the web service.
 
 The web service supports multiple TensorFlow model integrations on the URI level, with `GET`, `POST`  method support with HTTP 2.0 in full duplex mode as provided by Golang libraries.
 
-The service automatically detects and reloads any model changes.
+The service automatically detects and reloads any model changes; it will poll the source files for modifications once a minute.
 Technically, any HTTP client can work with the service, but to get the seamless caching benefit, it's recommended to use provided client.
 
 ## Quickstart
@@ -276,12 +276,68 @@ Where `MyOutputType` could implement the following interfaces to avoid reflectio
 - [Bintly](https://github.com/viant/bintly) (in-memory serialization)
 - [Gojay JSON](https://github.com/francoispqt/gojay/) (HTTP response)
 
-## Metrics
+## Endpoints
 
-- `/v1/api/config` - shows the loaded and processed configuration
-- `/v1/api/health` - configured to show if any models are failing to reload
-- `/v1/api/metric/operations` - all metrics registered in the web service
-- `/v1/api/metric/operation/$MetricID` - individual metric `$MetricID`
+###  `/v1/api/config` 
+
+Shows the loaded and processed configuration.
+
+### `/v1/api/health` 
+
+Shows if any models are failing to reload.
+Payload is a JSON object whose keys are each model ID as specified in the `config.yaml`, with values a number, where 0 indicates a failure to reload and 1 indicates that the last attempted reload was successful.
+
+#### Example
+
+For a `config.yaml` like:
+
+```yaml
+Endpoint:
+  Port: 8086
+Models:
+  - ID: ml0
+    URL: gs://modelBucket/Ml0ModelFolder
+    OutputType: float32
+  - ID: mlx
+    URL: gs://modelBucket/MlXModelFolder
+    OutputType: float32
+```
+
+The endpoint will provide a response like:
+
+```
+{
+  "ml0": 1,
+  "mlx": 1
+}
+```
+
+### `/v1/api/metric/operations` 
+
+All metrics registered in the web service.
+These are provided via [`gmetric`](https://github.com/viant/gmetric).
+
+In all these, `%s` is `Model[].ID` (i.e. from `config.yaml`)
+
+- `/v1/api/metric/operation/%sPerf` - Records metrics related to model handlers (compare with the related `Eval` metrics to calculate overhead).
+- `/v1/api/metric/operation/%sEval` - Records metrics related to the TensorFlow operations.
+
+### `/v1/api/model`
+
+Model operations.
+
+In all these, `%s` is `Model[].ID` (i.e. from `config.yaml`)
+
+- `/v1/api/model/%s/eval` - runs `GET` / `POST` model prediction.
+- `/v1/api/model/%s/meta/config` - provides configuration for client related to model
+- `/v1/api/model/%s/meta/dictionary` - provides current dictionary
+
+## Client Metrics (`gmetric`)
+
+These are provided via [`gmetric`](https://github.com/viant/gmetric).
+
+- `%sperformance` where `%s` is the datastore ID, i.e. `DataStores[].ID` from `config.yaml`.
+- `%sClient` where `%s` is the model ID, i.e. `Models[].ID` from `config.yaml`.
 
 ## License
 
