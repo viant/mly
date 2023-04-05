@@ -81,7 +81,7 @@ func (s *Service) initModelHandler(datastores map[string]*datastore.Service, poo
 func (s *Service) initModel(datastores map[string]*datastore.Service, pool *buffer.Pool, mux *http.ServeMux, model *config.Model, lock *sync.Mutex) error {
 	srv, err := service.New(context.TODO(), s.fs, model, s.metrics, datastores)
 	if err != nil {
-		return fmt.Errorf("failed to create service for modelService: %v, due to %w", model.ID, err)
+		return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)
 	}
 	handler := service.NewHandler(srv, pool, s.config.Endpoint.WriteTimeout-time.Millisecond)
 	lock.Lock()
@@ -107,7 +107,6 @@ func (s *Service) shutdownOnInterrupt() {
 		<-sigint
 		// We received an interrupt signal, shut down.
 		if err := s.Shutdown(context.Background()); err != nil {
-			// Error from closing listeners, or context timeout:
 			log.Printf("HTTP Service Shutdown: %v", err)
 		}
 		close(closed)

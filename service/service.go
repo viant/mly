@@ -201,14 +201,17 @@ func (s *Service) evaluate(ctx context.Context, request *Request) ([]interface{}
 	defer func() {
 		onDone(time.Now(), stats.Values()...)
 	}()
+
 	s.mux.RLock()
 	evaluator := s.evaluator
 	s.mux.RUnlock()
+
 	result, err := evaluator.Evaluate(request.Feeds)
 	if err != nil {
 		stats.Append(err)
 		return nil, err
 	}
+
 	s.logEvaluation(request, result, time.Now().Sub(startTime))
 	return result, nil
 }
@@ -216,7 +219,7 @@ func (s *Service) evaluate(ctx context.Context, request *Request) ([]interface{}
 func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	snapshot, err := s.modifiedSnapshot(ctx, s.config.URL, &config.Modified{})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to check changes:%w", err)
 	}
 	if !s.isModified(snapshot) {
 		return nil
@@ -227,7 +230,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	}
 	signature, err := tfmodel.Signature(model)
 	if err != nil {
-		return err
+		return fmt.Errorf("signature error:%w", err)
 	}
 	var dictionary *common.Dictionary
 	s.reconcileSignatureWithInput(signature)
@@ -242,7 +245,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 			dictionary, err = layers.Dictionary(model.Session, model.Graph, signature)
 			if err != nil {
 				s.config.DictMeta.Error = err.Error()
-				return err
+				return fmt.Errorf("dictionary error:%w", err)
 			}
 
 		}
@@ -288,8 +291,9 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *config.Modified) (*config.Modified, error) {
 	objects, err := s.fs.List(ctx, URL)
 	if err != nil {
-		return resource, err
+		return resource, fmt.Errorf("failed to list URL:%s; error:%w", URL, err)
 	}
+
 	if extURL := url.SchemeExtensionURL(URL); extURL != "" {
 		object, err := s.fs.Object(ctx, extURL)
 		if err != nil {
@@ -331,11 +335,12 @@ func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *co
 func (s *Service) loadModel(ctx context.Context, err error) (*tf.SavedModel, error) {
 	options := option.NewSource(&option.NoCache{Source: option.NoCacheBaseURL})
 	if err := s.fs.Copy(ctx, s.config.URL, s.config.Location, options); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to copy model %v, %s, due to %w", s.config.URL, s.config.Location, err)
 	}
+
 	model, err := tf.LoadSavedModel(s.config.Location, s.config.Tags, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load model %v, due to %w", s.config.URL, err)
+		return nil, fmt.Errorf("failed to load model %v, %s, due to %w", s.config.URL, s.config.Location, err)
 	}
 	return model, nil
 }
@@ -429,7 +434,10 @@ func (s *Service) getStreamID() string {
 
 func (s *Service) scheduleModelReload() {
 	for range time.Tick(time.Minute) {
-		if err := s.reloadIfNeeded(context.Background()); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		if err := s.reloadIfNeeded(ctx); err != nil {
 			fmt.Printf("failed to reload model: %v, due to %v", s.config.ID, err)
 			atomic.StoreInt32(&s.ReloadOK, 0)
 		}
@@ -565,7 +573,7 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 
 	var err error
 	if err = srv.init(ctx, cfg, datastores); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("init error:%w", err)
 	}
 
 	if srv.inputProvider, err = newObjectProvider(srv.config.Inputs); err != nil {
