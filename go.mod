@@ -15,7 +15,7 @@ require (
 	github.com/viant/afs v1.16.1-0.20221201181023-455837320ec5
 	github.com/viant/afsc v1.8.0
 	github.com/viant/bintly v0.2.0
-	github.com/viant/gmetric v0.2.6
+	github.com/viant/gmetric v0.3.1-0.20230405233616-cc90deee60c4
 	github.com/viant/gtly v0.1.1-0.20220929163617-a9b6dbce2bdc
 	github.com/viant/scache v0.4.0
 	github.com/viant/tapper v0.6.6
