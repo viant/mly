@@ -2,68 +2,87 @@ package endpoint
 
 import (
 	"context"
-	"github.com/jessevdk/go-flags"
 	"log"
 	"sync"
+
+	"github.com/jessevdk/go-flags"
 )
 
 //RunAppWithConfig run application
 func RunAppWithConfig(Version string, args []string, configProvider func(options *Options) (*Config, error)) {
+	err := RunAppWithConfigError(Version, args, configProvider)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func RunAppWithConfigError(Version string, args []string, configProvider func(options *Options) (*Config, error)) error {
 	options := &Options{}
 	_, err := flags.ParseArgs(options, args)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if IsHelpOption(args) {
-		return
+		return nil
 	}
 	if options.Version {
 		log.Printf("Mly: Version: %v\n", Version)
-		return
+		return nil
 	}
 	config, err := configProvider(options)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	runApp(config, nil)
+	return runApp(config, nil)
 }
 
 //RunApp run application
 func RunApp(Version string, args []string, wg *sync.WaitGroup) {
-	options := &Options{}
-	_, err := flags.ParseArgs(options, args)
+	err := RunAppError(Version, args, wg)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if IsHelpOption(args) {
-		return
+}
+
+func RunAppError(Version string, args []string, wg *sync.WaitGroup) error {
+	options := &Options{}
+	_, err := flags.ParseArgs(options, args)
+	if err != nil {
+		return nil
 	}
+
+	if IsHelpOption(args) {
+		return nil
+	}
+
 	if options.Version {
 		log.Printf("Mly: Version: %v\n", Version)
-		return
+		return nil
 	}
 
 	ctx := context.Background()
 	config, err := NewConfigFromURL(ctx, options.ConfigURL)
 	if err != nil {
-		log.Fatal(err)
+		return nil
 	}
 	config.Init()
-	runApp(config, wg)
+
+	return runApp(config, wg)
 }
 
-func runApp(config *Config, wg *sync.WaitGroup) {
+func runApp(config *Config, wg *sync.WaitGroup) error {
 	if err := config.Validate(); err != nil {
-		log.Fatal(err)
+		return err
 	}
+
 	srv, err := New(config)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if wg != nil {
 		wg.Done()
 	}
-	srv.ListenAndServe()
+	return srv.ListenAndServe()
 }
 
 //IsHelpOption returns true if helper
