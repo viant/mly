@@ -32,13 +32,9 @@ Technically, any HTTP client can work with the service, but to get the seamless 
 
 ## Quickstart
 
-To start a HTTP service with 2 models, create a `config.yaml` file, then `curl`: 
+To start a HTTP service with 2 models, from the repository root:
 
-```
-curl 'http://localhost:8086/v1/api/model/ml0/eval?modelInput1=val1&modelInputX=valueX'
-```
-
-`config.yaml`
+1. Create a `config.yaml` file:
 
 ```yaml
 Endpoint:
@@ -51,6 +47,9 @@ Models:
     URL: gs://modelBucket/MlXModelFolder
     OutputType: float32
 ```
+
+2. Start the example server (in the background) with `go run ./example/server -c config.yaml`.
+3. Then invoke a prediction with `curl 'http://localhost:8086/v1/api/model/ml0/eval?modelInput1=val1&modelInputX=valueX'`.
 
 ## Caching
 
