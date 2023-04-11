@@ -225,6 +225,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		return fmt.Errorf("failed to check changes:%w", err)
 	}
 	if !s.isModified(snapshot) {
+		atomic.StoreInt32(&s.ReloadOK, 1)
 		return nil
 	}
 	model, err := s.loadModel(ctx, err)
@@ -444,12 +445,14 @@ func (s *Service) scheduleModelReload() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		if err := s.reloadIfNeeded(ctx); err != nil {
+		err := s.reloadIfNeeded(ctx)
+		if err != nil {
 			log.Printf("failed to reload model: %v, due to %v", s.config.ID, err)
 			atomic.StoreInt32(&s.ReloadOK, 0)
 		}
 
 		if atomic.LoadInt32(&s.closed) != 0 {
+			log.Printf("shutting down")
 			// we are shutting down
 			return
 		}
