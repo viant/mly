@@ -3,6 +3,8 @@ package endpoint
 import (
 	"context"
 	"encoding/json"
+	"io/ioutil"
+
 	"github.com/pkg/errors"
 	"github.com/viant/afs"
 	"github.com/viant/mly/service/config"
@@ -11,7 +13,6 @@ import (
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/toolbox"
 	"gopkg.in/yaml.v2"
-	"io/ioutil"
 
 	"net/http"
 )
@@ -25,6 +26,7 @@ type Config struct {
 	config.ModelList      `json:",omitempty" yaml:",inline"`
 	sconfig.DatastoreList `json:",omitempty" yaml:",inline"`
 	Endpoint              econfig.Endpoint
+	EnableMemProf         bool
 	AllowedSubnet         []string `json:",omitempty" yaml:",omitempty"`
 }
 

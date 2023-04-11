@@ -44,13 +44,13 @@ func (s *Service) mustEmbedUnimplementedEvaluatorServer() {
 
 //ListenAndServe start http endpoint
 func (s *Service) ListenAndServe() error {
-	fmt.Printf("starting mly service endpoint: %v\n", s.config.Endpoint.Port)
+	log.Printf("starting mly service endpoint: %v\n", s.config.Endpoint.Port)
 	return s.server.ListenAndServe()
 }
 
 //ListenAndServeTLS start https endpoint on secure port
 func (s *Service) ListenAndServeTLS(certFile, keyFile string) error {
-	fmt.Printf("starting mly service endpoint: %v\n", s.config.Endpoint.Port)
+	log.Printf("starting mly service endpoint: %v\n", s.config.Endpoint.Port)
 	return s.server.ListenAndServeTLS(certFile, keyFile)
 }
 
@@ -62,28 +62,38 @@ func (s *Service) Shutdown(ctx context.Context) error {
 func (s *Service) initModelHandler(datastores map[string]*datastore.Service, pool *buffer.Pool, mux *http.ServeMux) error {
 	var err error
 	waitGroup := sync.WaitGroup{}
-	waitGroup.Add(len(s.config.ModelList.Models))
+	numModels := len(s.config.ModelList.Models)
+	waitGroup.Add(numModels)
 	var lock sync.Mutex
+	log.Printf("init %d models...\n", numModels)
+
 	for i := range s.config.ModelList.Models {
 		go func(model *config.Model) {
 			defer waitGroup.Done()
+			log.Printf("model %s init...\n", model.ID)
+
 			if e := s.initModel(datastores, pool, mux, model, &lock); e != nil {
+				log.Printf("model %s error:%s\n", model.ID, e)
 				lock.Lock()
 				err = e
 				lock.Unlock()
 			}
+
+			log.Printf("model %s done\n", model.ID)
 		}(s.config.ModelList.Models[i])
 	}
 	waitGroup.Wait()
+	log.Println("all model services ready")
 	return err
 }
 
 func (s *Service) initModel(datastores map[string]*datastore.Service, pool *buffer.Pool, mux *http.ServeMux, model *config.Model, lock *sync.Mutex) error {
-	srv, err := service.New(context.TODO(), s.fs, model, s.metrics, datastores)
+	srv, err := service.New(context.Background(), s.fs, model, s.metrics, datastores)
 	if err != nil {
 		return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)
 	}
 	handler := service.NewHandler(srv, pool, s.config.Endpoint.WriteTimeout-time.Millisecond)
+
 	lock.Lock()
 	defer lock.Unlock()
 
@@ -119,6 +129,11 @@ func New(config *Config) (*Service, error) {
 
 	mux.Handle(configURI, NewConfigHandler(config))
 
+	if config.EnableMemProf {
+		log.Print("!!! enabling memory profiling endpoint !!!")
+		mux.Handle(memProfURI, NewProfHandler(config))
+	}
+
 	healthHandler := NewHealthHandler(config)
 	mux.Handle(healthURI, healthHandler)
 
@@ -134,13 +149,12 @@ func New(config *Config) (*Service, error) {
 		health:   healthHandler,
 	}
 
-	pool := buffer.New(config.Endpoint.PoolMaxSize, config.Endpoint.BufferSize)
-
 	datastores, err := datastore.NewStores(&config.DatastoreList, metrics)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create datastores: %w", err)
 	}
 
+	pool := buffer.New(config.Endpoint.PoolMaxSize, config.Endpoint.BufferSize)
 	err = result.initModelHandler(datastores, pool, mux)
 	if err != nil {
 		return nil, err

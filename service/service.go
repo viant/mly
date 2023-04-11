@@ -7,6 +7,7 @@ import (
 	sjson "encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"reflect"
 	"strings"
@@ -104,7 +105,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	}()
 	err := request.Validate()
 	if s.config.Debug && err != nil {
-		fmt.Printf("Validation error [%v]: %v\n", s.config.ID, err)
+		log.Printf("Validation error [%v]: %v\n", s.config.ID, err)
 	}
 	if err != nil {
 		stats.Append(err)
@@ -113,6 +114,8 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	stats.Append(stat.Evaluate)
 	tensorValues, err := s.evaluate(ctx, request)
 	if err != nil {
+		stats.Append(err)
+		log.Printf("evaluate error [%+v] [%+v]", err, request)
 		return err
 	}
 
@@ -232,6 +235,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("signature error:%w", err)
 	}
+
 	var dictionary *common.Dictionary
 	s.reconcileSignatureWithInput(signature)
 	if s.config.UseDictionary() {
@@ -258,6 +262,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	for i, input := range signature.Inputs {
 		inputs[input.Name] = &signature.Inputs[i]
 	}
+
 	for _, input := range s.config.Inputs {
 		if _, ok := inputs[input.Name]; ok {
 			continue
@@ -274,8 +279,10 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	if s.config.OutputType != "" {
 		signature.Output.DataType = s.config.OutputType
 	}
+
 	s.mux.Lock()
 	defer s.mux.Unlock()
+
 	s.evaluator = evaluator
 	s.signature = signature
 	s.dictionary = dictionary
@@ -438,7 +445,7 @@ func (s *Service) scheduleModelReload() {
 		defer cancel()
 
 		if err := s.reloadIfNeeded(ctx); err != nil {
-			fmt.Printf("failed to reload model: %v, due to %v", s.config.ID, err)
+			log.Printf("failed to reload model: %v, due to %v", s.config.ID, err)
 			atomic.StoreInt32(&s.ReloadOK, 0)
 		}
 
@@ -524,7 +531,7 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	}
 
 	if err := s.logger.Log(msg); err != nil {
-		fmt.Printf("failed to log model eval: %v %v\n", s.config.ID, err)
+		log.Printf("failed to log model eval: %v %v\n", s.config.ID, err)
 	}
 }
 
@@ -551,6 +558,7 @@ func (s *Service) loadDictionary(ctx context.Context, URL string) (*common.Dicti
 
 // New creates a service
 func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, datastores map[string]*datastore.Service, options ...Option) (*Service, error) {
+
 	if metrics == nil {
 		metrics = gmetric.New()
 	}

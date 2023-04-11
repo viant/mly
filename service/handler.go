@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -34,6 +35,9 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 func (h *Handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Request) error {
 	ctx, cancel := h.NewContext()
 	defer cancel()
+
+	isDebug := h.service.config.Debug
+
 	request := h.service.NewRequest()
 	response := &Response{Status: "ok", started: time.Now()}
 	if httpRequest.Method == http.MethodGet {
@@ -49,19 +53,22 @@ func (h *Handler) serveHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		}
 
 		request.Body = data[:size]
-		if h.service.config.Debug {
-			fmt.Printf("[%v] input: %s\n", h.service.config.ID, request.Body)
+		if isDebug {
+			log.Printf("[%v] input: %s\n", h.service.config.ID, request.Body)
 		}
 
 		err = gojay.Unmarshal(data[:size], request)
 		if err != nil {
+			if isDebug {
+				log.Printf("[%v] unmarshal error: %v\n", h.service.config.ID, err)
+			}
 			return err
 		}
 	}
 	err := h.handleAppRequest(ctx, writer, request, response)
-	if h.service.config.Debug {
+	if isDebug {
 		data, _ := json.Marshal(response.Data)
-		fmt.Printf("[%v] output: %s %T\n", h.service.config.ID, data, response.Data)
+		log.Printf("[%v] output: %s %T\n", h.service.config.ID, data, response.Data)
 	}
 	return err
 }
