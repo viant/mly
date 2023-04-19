@@ -2,11 +2,12 @@ package tfmodel
 
 import (
 	"fmt"
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
-	"github.com/viant/mly/service/domain"
 	"sort"
 	"strconv"
 	"strings"
+
+	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	"github.com/viant/mly/service/domain"
 )
 
 //Signature returns model signature or error
@@ -15,9 +16,11 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 	if !ok {
 		return nil, fmt.Errorf("failed to lookup signature: %v", domain.DefaultSignatureKey)
 	}
+
 	result := &domain.Signature{
 		Method: signature.MethodName,
 	}
+
 	for k, v := range signature.Outputs {
 		output := domain.Output{}
 		output.Name = k
@@ -30,7 +33,7 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 		if output.Operation = model.Graph.Operation(operationName); output.Operation == nil {
 			return nil, fmt.Errorf("failed to lookup operation '%v' for output: %v", operationName, k)
 		}
-		tryAssignDataType(v, output)
+		tryAssignDataType(v, &output)
 		result.Outputs = append(result.Outputs, output)
 	}
 
@@ -47,6 +50,7 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 		if operation == nil {
 			return nil, fmt.Errorf("failed to lookup placeholder operation: %v", operationName)
 		}
+
 		result.Inputs = append(result.Inputs, domain.Input{
 			Name:        k,
 			Index:       len(result.Inputs),
@@ -57,10 +61,12 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 	return result, nil
 }
 
-func tryAssignDataType(v tf.TensorInfo, output domain.Output) {
+func tryAssignDataType(v tf.TensorInfo, output *domain.Output) {
 	defer func() {
 		_ = recover()
 	}()
+
 	oType := tf.TypeOf(v.DType, []int64{})
 	output.DataType = oType.Name()
+	output.DataTypeKind = oType.Kind()
 }
