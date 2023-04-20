@@ -144,10 +144,10 @@ The server accepts configuration with the following options:
   - `URL`: required model location  
     * to use S3, set environment variable `AWS_SDK_LOAD_CONFIG=true`
     * to use GCS, set environment variable `GOOGLE_APPLICATION_CREDENTIALS=true`
-  - `Tags`: optional model tags (default "serve")
+  - `Tags`: optional model tags, default "serve"
   - `OutputType`: required output type (`int64`, `float32`, etc..)
-  - `UseDict`: optional flag to use dictionary/caching (`true` by default)
-  - `KeyFields`: optional list of fields used to generate caching key (by default, all model inputs sorted alphabetically)
+  - `UseDict`: optional flag to use dictionary/caching, default `true`
+  - `KeyFields`: optional list of fields used to generate caching key (by default, all model inputs, sorted alphabetically)
   - `DataStore`: optional name of datastore cache
   - `Transformer`: optional name of model output transformer
     
@@ -163,6 +163,15 @@ The server accepts configuration with the following options:
   - `Storable`: name of registered `storable` provider
   - `Cache`: optional in-memory cache setting
       * `SizeMB`: optional cache size in MB
+
+* `Endpoint`: some special administrative options
+  - `Port`: used in `addr` for `http.Server`, default `8080`
+  - `ReadTimeoutMs`, `WriteTimeoutMs` - additional settings for `http.Server`, default `5000` for both
+  - `MaxHeaderBytes` - additional settings for `http.Server`, default `8192` (`8 * 1024`)
+  - `WriteTimeout` - maximum request timeout
+  - `PoolMaxSize`, `BufferSize`: controls implementation of `net/http/httputil`, default `512` and `131072` (`128 * 1024`), respectively
+
+* `EnableMemProf`: enables endpoint for memory profiling
 
 ### Client
  

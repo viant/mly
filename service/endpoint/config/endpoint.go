@@ -23,7 +23,7 @@ func (e *Endpoint) Init() {
 	if e.ReadTimeoutMs == 0 {
 		e.ReadTimeoutMs = 5000
 	}
-	if e.ReadTimeoutMs == 0 {
+	if e.WriteTimeoutMs == 0 {
 		e.WriteTimeoutMs = 5000
 	}
 	if e.WriteTimeout == 0 {
