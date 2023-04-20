@@ -1,22 +1,25 @@
-## Mly tools
+# Mly tools (v1)
 
-### Installation
+Provided in setup and run assistance.
+
+## System Installation
 
 ```bash
 git clone https://github.com/viant/mly.git
-cd mly/tools/mly
-go build
-cp mlytool /usr/local/bin
+( cd mly/tools/mly
+  go build
+  cp -v mlytool /usr/local/bin/mly )
 ```
 
-### Usage
+# Usage
 
 ```bash
 mly -h
 ```
 
-##### Exporting layers
+## Exporting layers
 
 ```bash
-mlytool -m=discover -s=~/model/ -d=layers.json -o=layers
+mly -m=discover -s=~/model/ -d=layers.json -o=layers
 ```
+
