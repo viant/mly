@@ -215,6 +215,7 @@ func (s *Service) evaluate(ctx context.Context, request *Request) ([]interface{}
 		return nil, err
 	}
 
+	// TODO doesn't need to block this thread
 	s.logEvaluation(request, result, time.Now().Sub(startTime))
 	return result, nil
 }
@@ -476,8 +477,16 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	if end == -1 {
 		return
 	}
+
+	// procedurally build the JSON string
+
 	// include original json from request body
-	msg.Put(data[begin+1 : end])
+	// remove all newlines as they break JSONL
+	singleLineBody := bytes.ReplaceAll(data[begin+1:end], []byte("\n"), []byte(" "))
+	singleLineBody = bytes.ReplaceAll(singleLineBody, []byte("\r"), []byte(" "))
+	msg.Put(singleLineBody)
+
+	// add some metadata
 	msg.PutByte(',')
 
 	msg.PutInt("eval_duration", int(timeTaken.Microseconds()))
