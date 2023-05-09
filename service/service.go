@@ -165,14 +165,18 @@ func (s *Service) buildResponse(ctx context.Context, request *Request, response 
 	}
 
 	sliceType := reflect.SliceOf(reflect.TypeOf(transformed))
+	// xSlice = make([]`sliceType`, request.input.BatchSize)
 	sliceValue := reflect.MakeSlice(sliceType, 0, request.input.BatchSize)
 	slicePtr := xunsafe.ValuePointer(&sliceValue)
 	xSlice := xunsafe.NewSlice(sliceType)
+
 	response.xSlice = xSlice
 	response.sliceLen = request.input.BatchSize
 
+	// xSlice = append(xSlice, transformed)
 	appender := xSlice.Appender(slicePtr)
 	appender.Append(transformed)
+
 	// index 1 - end calls
 	for i := 1; i < request.input.BatchSize; i++ {
 		output.InputIndex = i
@@ -181,6 +185,7 @@ func (s *Service) buildResponse(ctx context.Context, request *Request, response 
 		}
 		appender.Append(transformed)
 	}
+
 	response.Data = sliceValue.Interface()
 	return nil
 }
@@ -213,6 +218,10 @@ func (s *Service) evaluate(ctx context.Context, request *Request) ([]interface{}
 	if err != nil {
 		stats.Append(err)
 		return nil, err
+	}
+
+	if s.config.Debug {
+		log.Printf("[%s] %+v", s.config.ID, result)
 	}
 
 	// TODO doesn't need to block this thread
@@ -499,45 +508,46 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	}
 
 	if value, ok := output.([]interface{}); ok {
-		output = value[0]
-	}
+		for outputIdx, v := range value {
+			outputName := s.signature.Outputs[outputIdx].Name
 
-	switch actual := output.(type) {
-	// assume each batch has 1 output...
-	case [][]int64:
-		if len(actual) > 0 {
-			switch len(actual) {
-			case 0:
-			case 1:
-				if hasBatchSize {
-					msg.PutInts(s.signature.Output.Name, []int{int(actual[0][0])})
-				} else {
-					msg.PutInt(s.signature.Output.Name, int(actual[0][0]))
+			switch actual := v.(type) {
+			case [][]int64:
+				if len(actual) > 0 {
+					switch len(actual) {
+					case 0:
+					case 1:
+						if hasBatchSize {
+							msg.PutInts(outputName, []int{int(actual[0][0])})
+						} else {
+							msg.PutInt(outputName, int(actual[0][0]))
+						}
+					default:
+						var ints = make([]int, len(actual))
+						for i, vec := range actual {
+							ints[i] = int(vec[0])
+						}
+						msg.PutInts(outputName, ints)
+					}
 				}
-			default:
-				var ints = make([]int, len(actual))
-				for i, vec := range actual {
-					ints[i] = int(vec[0])
+			case [][]float32:
+				if len(actual) > 0 {
+					switch len(actual) {
+					case 0:
+					case 1:
+						if hasBatchSize {
+							msg.PutFloats(outputName, []float64{float64(actual[0][0])})
+						} else {
+							msg.PutFloat(outputName, float64(actual[0][0]))
+						}
+					default:
+						var floats = make([]float64, len(actual))
+						for i, vec := range actual {
+							floats[i] = float64(vec[0])
+						}
+						msg.PutFloats(outputName, floats)
+					}
 				}
-				msg.PutInts(s.signature.Output.Name, ints)
-			}
-		}
-	case [][]float32:
-		if len(actual) > 0 {
-			switch len(actual) {
-			case 0:
-			case 1:
-				if hasBatchSize {
-					msg.PutFloats(s.signature.Output.Name, []float64{float64(actual[0][0])})
-				} else {
-					msg.PutFloat(s.signature.Output.Name, float64(actual[0][0]))
-				}
-			default:
-				var floats = make([]float64, len(actual))
-				for i, vec := range actual {
-					floats[i] = float64(vec[0])
-				}
-				msg.PutFloats(s.signature.Output.Name, floats)
 			}
 		}
 	}

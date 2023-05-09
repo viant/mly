@@ -9,10 +9,10 @@ import (
 	"github.com/viant/mly/shared/common/storable"
 )
 
-//Transformer represents output transformer
+// Transformer represents output transformer
 type Transformer func(ctx context.Context, signature *Signature, input *gtly.Object, output interface{}) (common.Storable, error)
 
-//Transform transform default model output
+// Transform default Transformer
 func Transform(ctx context.Context, signature *Signature, input *gtly.Object, output interface{}) (common.Storable, error) {
 	fields := []*storable.Field{}
 	for _, output := range signature.Outputs {
@@ -40,25 +40,6 @@ func Transform(ctx context.Context, signature *Signature, input *gtly.Object, ou
 			k: signature.Outputs[0].Name,
 			v: outputValue,
 		})
-	case []string:
-		outputValue = val[0]
-		pairs = append(pairs, &kvPair{
-			k: signature.Outputs[0].Name,
-			v: outputValue,
-		})
-
-	case []int64:
-		outputValue = val[0]
-		pairs = append(pairs, &kvPair{
-			k: signature.Outputs[0].Name,
-			v: outputValue,
-		})
-	case []float32:
-		outputValue = val[0]
-		pairs = append(pairs, &kvPair{
-			k: signature.Outputs[0].Name,
-			v: outputValue,
-		})
 	case [][]int64:
 		outputValue = val[0][0]
 		pairs = append(pairs, &kvPair{
@@ -69,14 +50,14 @@ func Transform(ctx context.Context, signature *Signature, input *gtly.Object, ou
 		for i := range val {
 			tensor := val[i]
 			switch t := tensor.(type) {
-			case []float32:
-				outputValue = t[0]
-			case []float64:
-				outputValue = t[0]
-			case []string:
-				outputValue = t[0]
-			case []int64:
-				outputValue = t[0]
+			case [][]float32:
+				outputValue = t[0][0]
+			case [][]float64:
+				outputValue = t[0][0]
+			case [][]string:
+				outputValue = t[0][0]
+			case [][]int64:
+				outputValue = t[0][0]
 			default:
 				return nil, fmt.Errorf("unsupported output sub-type: %v %T", signature.Outputs[0].Name, t)
 			}
