@@ -63,7 +63,7 @@ func Discover(options *Options) error {
 
 	defer writer.Close()
 	if options.Operation == "dictHash" {
-		return FetchDictHash(options, fs, writer)
+		return FetchDictHash(writer, options.DestURL, fs)
 	}
 
 	model, err := LoadModel(context.Background(), options.SourceURL)

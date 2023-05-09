@@ -4,13 +4,16 @@ import (
 	"context"
 	"fmt"
 
+	_ "github.com/jessevdk/go-flags"
 	"github.com/viant/afs"
 	"github.com/viant/mly/service/endpoint"
 	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/tools"
 )
 
-// use this for to check is a command is being used
+// use this for to check is a command is being used, as there doesn't seem to be a library-provided method for this
+// without resorting to the procedural construction of commands
+// alternatively, convert all our leaf commands to implement flags.Command, but that *feels* like a violation of dependency inversion
 type Commandable struct {
 	Active bool
 }
@@ -31,6 +34,8 @@ type FlagSpec struct {
 		JSON struct {
 			URL string
 		} `positional-args:"yes" required:"1" description:"Dictionary JSON file URL"`
+
+		OutputURL string `short:"o" long:"output" description:"Optional override on where to write output, defaults to STDOUT"`
 	} `command:"dict" description:"Read a dictionary JSON file"`
 	FromModel struct {
 		Desc struct {
@@ -72,7 +77,13 @@ func Operate(options *FlagSpec) error {
 
 		srv.ListenAndServe()
 	} else if options.Dict.JSON.URL != "" {
+		fs := afs.New()
+		w, err := tools.GetWriter(options.Dict.OutputURL, fs)
+		if err != nil {
+			return err
+		}
 
+		tools.FetchDictHash(w, options.Dict.JSON.URL, fs)
 	} else if options.FromModel.ModelURL != "" {
 		discover := options.FromModel
 		modelURL := discover.ModelURL
@@ -93,7 +104,6 @@ func Operate(options *FlagSpec) error {
 		}
 
 		if discover.Desc.Action != "" {
-			// TODO these should all be commands
 			switch discover.Desc.Action {
 			case "dict":
 				return tools.DiscoverDictHash(model, writer)

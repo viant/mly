@@ -28,8 +28,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func FetchDictHash(options *Options, fs afs.Service, writer io.Writer) error {
-	source, err := fs.DownloadWithURL(context.Background(), options.SourceURL)
+func FetchDictHash(writer io.Writer, sourceURL string, fs afs.Service) error {
+	source, err := fs.DownloadWithURL(context.Background(), sourceURL)
 	if err != nil {
 		return err
 	}
@@ -161,6 +161,8 @@ func GenerateTable(w io.Writer, single bool, signature *domain.Signature) error 
 		}
 	}
 
+	fmt.Fprint(w, "  -- inputs\n")
+
 	for _, input := range signature.Inputs {
 		var bqType string
 		switch input.Type.Kind() {
@@ -176,6 +178,9 @@ func GenerateTable(w io.Writer, single bool, signature *domain.Signature) error 
 
 		fmt.Fprintf(w, "  %s %s,\n", input.Name, typeMod(bqType))
 	}
+
+	fmt.Fprint(w, "  -- !! remember to add auxiliary fields !!\n")
+	fmt.Fprint(w, "  -- outputs\n")
 
 	for _, output := range signature.Outputs {
 		var bqType string
@@ -193,6 +198,7 @@ func GenerateTable(w io.Writer, single bool, signature *domain.Signature) error 
 		fmt.Fprintf(w, "  %s %s,\n", output.Name, typeMod(bqType))
 	}
 
+	fmt.Fprint(w, "  -- request metadata\n")
 	fmt.Fprint(w, "  timestamp TIMESTAMP,\n")
 	fmt.Fprint(w, "  eval_duration INT64,\n")
 	fmt.Fprintf(w, "  cache_key %s,\n", typeMod("STRING"))
