@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/viant/mly/example/string_lookup_int"
 	"github.com/viant/mly/shared/client"
-	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/toolbox"
 )
@@ -44,9 +42,6 @@ func RunWithOptions(options *Options) error {
 	response := &client.Response{}
 
 	storableSrv := storable.Singleton()
-	storableSrv.Register("sli", func() common.Storable {
-		return new(string_lookup_int.Record)
-	})
 
 	maker, err := storableSrv.Lookup(options.Storable)
 	if err != nil {

@@ -9,7 +9,7 @@ pipeline:
     aerospike:
       action: docker:run
       image: 'aerospike/aerospike-server'
-      name: aero
+      name: mly_aero
       ports:
         3000: 3000
         3001: 3001

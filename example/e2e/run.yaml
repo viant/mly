@@ -4,10 +4,9 @@ init:
     credentials: localhost
   appPath: $WorkingDirectory(../..)
 
-
 pipeline:
   init:
-    description: initialise test (docker,database,build app)
+    description: Initialize separate dependencies
     system:
       action: run
       request: '@system'
@@ -17,7 +16,6 @@ pipeline:
       action: run
       request: '@build'
       tasks: '*'
-
 
   test:
     action: run

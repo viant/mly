@@ -1,17 +1,16 @@
 pipeline:
-
   copyConfig:
     action: storage:copy
     expand: true
     source:
-      URL: ${appPath}/example/server/etc/config.yaml
+      URL: ${appPath}/example/e2e/etc/config.yaml
     dest:
       URL: /tmp/e2e/config.yaml
 
   stop:
     action: process:stop
     target: $target
-    input: datly
+    input: mly-endly
 
   start:
     action: process:start
@@ -20,6 +19,9 @@ pipeline:
     directory: /tmp/e2e
     checkError: true
     immuneToHangups: true
+    command: ./mly-endly -c=/tmp/e2e/config.yaml
     env:
-      TEST: 1
-    command: ./mly -c=/tmp/e2e/config.yaml
+      DEBUG: 'true'
+      DYLD_LIBRARY_PATH: /usr/local/lib
+      LD_LIBRARY_PATH: /usr/local/lib
+    

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"reflect"
+	"sort"
 
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
@@ -132,20 +133,40 @@ func buildDefaultConfig(sourceURL string, model *tf.SavedModel, ID string, signa
 	cfg.Endpoint.Port = 8087
 	configModel := &sconfig.Model{}
 	configModel.ID = ID
-	useDict := true
-	configModel.UseDict = &useDict
 	configModel.URL = sourceURL
 	configModel.DataStore = ID
+
+	useDict := true
+
 	var fields []*shared.Field
 	for _, input := range signature.Inputs {
 		hasDictionary := tfmodel.MatchOperation(model.Graph, input.Name) != ""
+		inputType := input.Type
 		fields = append(fields, &shared.Field{
 			Name:     input.Name,
 			Index:    input.Index,
+			DataType: inputType.Name(),
 			Wildcard: !hasDictionary,
 		})
+
+		isFloat := inputType.Kind() == reflect.Float32 || inputType.Kind() == reflect.Float64
+		useDict = useDict && !isFloat
 	}
 	configModel.Inputs = fields
+
+	fields = make([]*shared.Field, 0)
+	for _, output := range signature.Outputs {
+		fields = append(fields, &shared.Field{
+			Name:     output.Name,
+			Index:    output.Index,
+			DataType: output.DataType,
+		})
+	}
+	sort.Sort(shared.Fields(fields))
+	configModel.Outputs = fields
+
+	configModel.UseDict = &useDict
+
 	cfg.Models = []*sconfig.Model{configModel}
 	return cfg
 }

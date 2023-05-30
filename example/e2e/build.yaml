@@ -1,11 +1,44 @@
+init:
+  tfPath: ${appPath}/example/lib/libtensorflow-cpu-${os.system}-x86_64-2.4.2.tar.gz
+  goVersion: 1.17
 
 pipeline:
-
   deploy:
     set_sdk:
       action: sdk.set
       target: $target
-      sdk: go:1.17
+      sdk: go:${goVersion}
+
+    install_tensorflow:
+      when: "$HasResource($tfPath):False"
+      action: exec:run
+      target: $target
+      checkError: true
+      commands:
+        - curl https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-${os.system}-x86_64-2.4.2.tar.gz --output $tfPath
+        - sudo tar -xmzvf $tfPath -C /usr/local
+
+    install_tensorflow_darwin:
+      when: "${os.system}:darwin"
+      action: exec:run
+      target: $target
+        - sudo update_dyld_shared_cache
+
+    build_build_tensorflow_go:
+      action: docker:build
+      path: ${appPath}/example/e2e/docker-build-tensorflow-go/Dockerfile
+      tags: ['mly-docker-build-tensorflow-go:1.0']
+      ImageBuildOptions:
+        BuildArgs:
+          GO_VERSION: ${goVersion}
+
+    build_tensorflow_go:
+      action: docker:run
+      image: mly-docker-build-tensorflow-go:1.0
+      name: mly-build-tensorflow-go
+      foreground: true
+      mount:
+        "${appPath}": /opt/src
 
     package:
       action: exec:run
@@ -13,9 +46,7 @@ pipeline:
       checkError: true
       commands:
         - mkdir -p /tmp/e2e
-        - cd ${appPath}/example/server/mly
-        - go build
-        - mv mly /tmp/e2e/
-        - cd ${appPath}/example/client/mlyc
-        - go build
-        - mv mlyc /tmp/e2e/
+        - touch /tmp/e2e/mly-endly /tmp/e2e/mlyc
+        - rm -v /tmp/e2e/mly-endly /tmp/e2e/mlyc
+        - go build -o /tmp/e2e/mly-endly ${appPath}/example/server/mly
+        - go build -o /tmp/e2e/mlyc ${appPath}/example/client/mlyc
