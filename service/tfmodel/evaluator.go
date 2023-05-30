@@ -2,7 +2,9 @@ package tfmodel
 
 import (
 	"fmt"
+
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/domain"
 )
 
@@ -30,8 +32,9 @@ func (e *Evaluator) feeds(feeds []interface{}) (map[tf.Output]*tf.Tensor, error)
 func (e *Evaluator) Evaluate(params []interface{}) ([]interface{}, error) {
 	feeds, err := e.feeds(params)
 	if err != nil {
-		return nil, err
+		return nil, clienterr.Wrap(err)
 	}
+
 	output, err := e.session.Run(feeds, e.fetches, e.targets)
 	if err != nil {
 		return nil, err

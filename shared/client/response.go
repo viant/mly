@@ -2,9 +2,10 @@ package client
 
 import (
 	"encoding/json"
-	"github.com/francoispqt/gojay"
 	"reflect"
 	"time"
+
+	"github.com/francoispqt/gojay"
 )
 
 //Response represents a response
@@ -40,19 +41,21 @@ func (r *Response) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	case "data":
 		isEmpty := r.Data == nil
 
-		var embedded = gojay.EmbeddedJSON{}
 		if !isEmpty {
 			if unmarshaler, ok := r.Data.(gojay.UnmarshalerJSONObject); ok {
 				return dec.Object(unmarshaler)
 			}
+
 			if unmarshaler, ok := r.Data.(gojay.UnmarshalerJSONArray); ok {
 				return dec.Array(unmarshaler)
 			}
 		}
 
+		var embedded = gojay.EmbeddedJSON{}
 		if err := dec.EmbeddedJSON(&embedded); err != nil {
 			return err
 		}
+
 		if isEmpty {
 			var aMap = make(map[string]interface{})
 			if err := json.Unmarshal(embedded, &aMap); err != nil {

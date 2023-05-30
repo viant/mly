@@ -30,9 +30,11 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 			operationName = operationName[:index]
 			output.Index, _ = strconv.Atoi(indexValue)
 		}
+
 		if output.Operation = model.Graph.Operation(operationName); output.Operation == nil {
-			return nil, fmt.Errorf("failed to lookup operation '%v' for output: %v", operationName, k)
+			return nil, fmt.Errorf("failed to lookup output operation '%v' for output: %v", operationName, k)
 		}
+
 		tryAssignDataType(v, &output)
 		result.Outputs = append(result.Outputs, output)
 	}
@@ -42,13 +44,14 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 	for k := range signature.Inputs {
 		inputs = append(inputs, k)
 	}
+
 	sort.Strings(inputs)
 	for _, k := range inputs {
 		v := signature.Inputs[k]
 		operationName := domain.DefaultSignatureKey + "_" + k
 		operation := model.Graph.Operation(operationName)
 		if operation == nil {
-			return nil, fmt.Errorf("failed to lookup placeholder operation: %v", operationName)
+			return nil, fmt.Errorf("failed to lookup input operation: %v", operationName)
 		}
 
 		result.Inputs = append(result.Inputs, domain.Input{

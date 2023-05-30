@@ -22,6 +22,7 @@ import (
 	"github.com/viant/afs/url"
 	"github.com/viant/gmetric"
 	"github.com/viant/gtly"
+	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/layers"
@@ -89,6 +90,7 @@ func (s *Service) Do(ctx context.Context, request *Request, response *Response) 
 	if err != nil {
 		response.Error = err.Error()
 		response.Status = common.StatusError
+		return err
 	}
 
 	return nil
@@ -105,17 +107,18 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	}()
 	err := request.Validate()
 	if s.config.Debug && err != nil {
-		log.Printf("Validation error [%v]: %v\n", s.config.ID, err)
+		log.Printf("[%v do] validation error: %v\n", s.config.ID, err)
 	}
 	if err != nil {
 		stats.Append(err)
-		return fmt.Errorf("%w, body: %s", err, request.Body)
+		return clienterr.Wrap(fmt.Errorf("%w, body: %s", err, request.Body))
 	}
+
 	stats.Append(stat.Evaluate)
 	tensorValues, err := s.evaluate(ctx, request)
 	if err != nil {
 		stats.Append(err)
-		log.Printf("evaluate error [%+v] [%+v]", err, request)
+		log.Printf("[%v do] eval error:(%+v) request:(%+v)", s.config.ID, err, request)
 		return err
 	}
 
@@ -129,11 +132,13 @@ func (s *Service) transformOutput(ctx context.Context, request *Request, output 
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform: %v, %w", s.config.ID, err)
 	}
+
 	if s.useDatastore {
 		dictHash := s.Dictionary().Hash
 		key := s.datastore.Key(request.input.KeyAt(inputIndex))
 		go s.datastore.Put(ctx, key, transformed, dictHash)
 	}
+
 	return transformed, nil
 }
 
@@ -150,6 +155,7 @@ func (s *Service) buildResponse(ctx context.Context, request *Request, response 
 		response.DictHash = s.dictionary.Hash
 	}
 
+	// TODO change with understanding that batched / multi-request always operates on the first dimension
 	if !request.input.BatchMode() {
 		var err error
 		// single input
@@ -221,7 +227,7 @@ func (s *Service) evaluate(ctx context.Context, request *Request) ([]interface{}
 	}
 
 	if s.config.Debug {
-		log.Printf("[%s] %+v", s.config.ID, result)
+		log.Printf("[%s eval] %+v", s.config.ID, result)
 	}
 
 	// TODO doesn't need to block this thread
@@ -457,12 +463,12 @@ func (s *Service) scheduleModelReload() {
 
 		err := s.reloadIfNeeded(ctx)
 		if err != nil {
-			log.Printf("failed to reload model: %v, due to %v", s.config.ID, err)
+			log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
 			atomic.StoreInt32(&s.ReloadOK, 0)
 		}
 
 		if atomic.LoadInt32(&s.closed) != 0 {
-			log.Printf("shutting down")
+			log.Printf("[%s reload] stopping reload loop", s.config.ID)
 			// we are shutting down
 			return
 		}
@@ -553,7 +559,7 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	}
 
 	if err := s.logger.Log(msg); err != nil {
-		log.Printf("failed to log model eval: %v %v\n", s.config.ID, err)
+		log.Printf("[%s log] failed to log: %v\n", s.config.ID, err)
 	}
 }
 

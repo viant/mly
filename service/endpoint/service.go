@@ -66,6 +66,7 @@ func (s *Service) initModelHandler(datastores map[string]*datastore.Service, poo
 	waitGroup.Add(numModels)
 	var lock sync.Mutex
 	log.Printf("init %d models...\n", numModels)
+	start := time.Now()
 
 	for i := range s.config.ModelList.Models {
 		go func(model *config.Model) {
@@ -83,7 +84,8 @@ func (s *Service) initModelHandler(datastores map[string]*datastore.Service, poo
 		}(s.config.ModelList.Models[i])
 	}
 	waitGroup.Wait()
-	log.Println("all model services ready")
+
+	log.Printf("all model services ready, %s", time.Since(start))
 	return err
 }
 

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -104,11 +105,11 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}
 	stats.Append(stat.NoSuchKey)
 	if s.Config.Debug {
-		fmt.Printf("[%v] request: %s\n", s.Config.Model, data)
+		fmt.Printf("[%v] request: %s\n", s.Config.Model, strings.Trim(string(data), " \n"))
 	}
 	body, err := s.postRequest(ctx, data)
 	if s.Config.Debug {
-		fmt.Printf("[%v] response: %s, %v\n", s.Config.Model, body, err)
+		fmt.Printf("[%v] response.Body: %s, %v\n", s.Config.Model, body, err)
 	}
 	if err != nil {
 		stats.Append(err)
@@ -118,6 +119,11 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal: '%s'; due to %w", body, err)
 	}
+
+	if s.Config.Debug {
+		fmt.Printf("[%v] response.Data: %s, %v\n", s.Config.Model, response.Data, err)
+	}
+
 	if response.Status != common.StatusOK {
 		return nil
 	}
@@ -325,29 +331,29 @@ func (s *Service) getHTTPClient(host *Host) *http.Client {
 }
 
 func (s *Service) initDatastore() error {
-	ds := s.Config.Datastore
-	if ds.Datastore.ID == "" {
+	remoteCfg := s.Config.Datastore
+	if remoteCfg.Datastore.ID == "" {
 		return nil
 	}
-	if ds == nil {
+	if remoteCfg == nil {
 		return nil
 	}
 	var stores = map[string]*datastore.Service{}
 	var err error
 	datastores := &sconfig.DatastoreList{
-		Datastores:  []*sconfig.Datastore{&ds.Datastore},
-		Connections: ds.Connections,
+		Datastores:  []*sconfig.Datastore{&remoteCfg.Datastore},
+		Connections: remoteCfg.Connections,
 	}
 	if stores, err = datastore.NewStores(datastores, s.gmetrics); err != nil {
 		return err
 	}
-	s.datastore = stores[ds.ID]
-	if len(ds.Fields) > 0 {
-		if err := ds.FieldsDescriptor(ds.Fields); err != nil {
+	s.datastore = stores[remoteCfg.ID]
+	if len(remoteCfg.Fields) > 0 {
+		if err := remoteCfg.FieldsDescriptor(remoteCfg.Fields); err != nil {
 			return err
 		}
 		s.newStorable = func() common.Storable {
-			return storable.New(ds.Fields)
+			return storable.New(remoteCfg.Fields)
 		}
 	}
 	if s.datastore != nil {
@@ -385,7 +391,6 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 }
 
 func (s *Service) discoverConfig(host *Host, URL string) (*config.Remote, error) {
-
 	httpClient := s.getHTTPClient(host)
 
 	response, err := httpClient.Get(URL)
@@ -402,6 +407,18 @@ func (s *Service) discoverConfig(host *Host, URL string) (*config.Remote, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse load %v, config:   %s, %v", URL, data, err)
 	}
+
+	if s.Config.Debug {
+		prefix := fmt.Sprintf("[%v] config.Remote.", s.Config.Model)
+		fmt.Printf("%sConnections:%V\n", prefix, cfg.Connections)
+		fmt.Printf("%sDatastore:%V\n", prefix, cfg.Datastore)
+
+		fmt.Printf("%sMetaInput.Inputs:%V\n", prefix, cfg.MetaInput.Inputs)
+		fmt.Printf("%sMetaInput.Auxiliary:%V\n", prefix, cfg.MetaInput.Auxiliary)
+		fmt.Printf("%sMetaInput.KeyFields:%V\n", prefix, cfg.MetaInput.KeyFields)
+		fmt.Printf("%sMetaInput.Outputs:%V\n", prefix, cfg.MetaInput.Outputs)
+	}
+
 	return cfg, err
 }
 
