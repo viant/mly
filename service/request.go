@@ -44,6 +44,12 @@ func (r *Request) Put(key string, value string) error {
 				return fmt.Errorf("failed to parse int: '%v' for %v, %w", val, key, err)
 			}
 			r.Feeds[input.Index] = int(val)
+		case reflect.Int32:
+			val, err := strconv.ParseInt(value, 10, 32)
+			if err != nil {
+				return fmt.Errorf("failed to parse int32: '%v' for %v, %w", val, key, err)
+			}
+			r.Feeds[input.Index] = [][]int32{{int32(val)}}
 		case reflect.Int64:
 			val, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
@@ -71,7 +77,8 @@ func (r *Request) Put(key string, value string) error {
 	return nil
 }
 
-// UnmarshalJSONObject gojay implementation; see service.(*Handler).serveHTTP()
+// implements gojay.UnmarshalJSONObject
+// see service.(*Handler).serveHTTP()
 // There is some polymorphism involved, as well as loose-typing.
 // Model inputs aren't strictly typed from the perspective of the request.
 // The primary polymorphism comes from the support for multiple rows worth of inputs.
@@ -103,23 +110,27 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 		}
 	default:
 		input, ok := r.inputs[key]
-		if ok {
-			r.supplied[key] = exists
-			inputValue, err := r.input.SetAt(input.Index, input.Name, input.Type.Kind())
-			if err != nil {
+		if !ok {
+			return fmt.Errorf("unknown field:%v, available:%v", key, r.inputs)
+		}
+
+		r.supplied[key] = exists
+		inputValue, err := r.input.SetAt(input.Index, input.Name, input.Type.Kind())
+		if err != nil {
+			return err
+		}
+
+		if r.input.BatchMode() {
+			if err := dec.DecodeArray(inputValue); err != nil {
 				return err
 			}
-
-			if r.input.BatchMode() {
-				if err := dec.DecodeArray(inputValue); err != nil {
-					return err
-				}
-				if !input.Auxiliary {
-					r.Feeds[input.Index] = inputValue.Feed(r.input.BatchSize)
-				}
-				return nil
+			if !input.Auxiliary {
+				r.Feeds[input.Index] = inputValue.Feed(r.input.BatchSize)
 			}
+			return nil
+		}
 
+		outerr := func() error {
 			switch input.Type.Kind() {
 			case reflect.String:
 				value := ""
@@ -131,7 +142,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					r.Feeds[input.Index] = [][]string{{value}}
 				}
 			case reflect.Bool:
-				value := false
+				var value bool
 				if err := dec.Bool(&value); err != nil {
 					return err
 				}
@@ -140,7 +151,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 				}
 				_ = inputValue.Set(value)
 			case reflect.Int:
-				value := 0
+				var value int
 				if err := dec.Int(&value); err != nil {
 					return err
 				}
@@ -148,13 +159,22 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					r.Feeds[input.Index] = [][]int{{value}}
 				}
 				_ = inputValue.Set(value)
-			case reflect.Int64:
-				value := 0
-				if err := dec.Int(&value); err != nil {
+			case reflect.Int32:
+				var value int32
+				if err := dec.Int32(&value); err != nil {
 					return err
 				}
 				if !input.Auxiliary {
-					r.Feeds[input.Index] = [][]int64{{int64(value)}}
+					r.Feeds[input.Index] = [][]int32{{value}}
+				}
+				_ = inputValue.Set(value)
+			case reflect.Int64:
+				var value int64
+				if err := dec.Int64(&value); err != nil {
+					return err
+				}
+				if !input.Auxiliary {
+					r.Feeds[input.Index] = [][]int64{{value}}
 				}
 				_ = inputValue.Set(value)
 			case reflect.Float64:
@@ -176,13 +196,23 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 				}
 				_ = inputValue.Set(value)
 			default:
-				return fmt.Errorf("unsupported input type: %T", reflect.New(input.Type).Interface())
+				return fmt.Errorf("unsupported request input type: %T", reflect.New(input.Type).Interface())
 			}
-		} else {
-			return fmt.Errorf("unknwon field %v, avails: %v", key, r.inputs)
+
+			return nil
+		}()
+
+		if outerr != nil {
+			return fmt.Errorf("error decoding %s, %v", key, outerr)
 		}
 	}
+
 	return nil
+}
+
+// implements gojay.UnmarshalJSONObject
+func (r *Request) NKeys() int {
+	return 0
 }
 
 // Validate is only used server-side.
@@ -203,9 +233,4 @@ func (r *Request) Validate() error {
 	}
 
 	return nil
-}
-
-// NKeys a gojay feature, set to 0 to handle "improper" (but syntactically valid) requests (duplicate JSON keys)
-func (r *Request) NKeys() int {
-	return 0
 }

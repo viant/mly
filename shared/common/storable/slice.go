@@ -2,12 +2,13 @@ package storable
 
 import (
 	"fmt"
+	"reflect"
+	"strings"
+
 	"github.com/francoispqt/gojay"
 	"github.com/viant/bintly"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/toolbox"
-	"reflect"
-	"strings"
 )
 
 //Slice represents slice registry
@@ -108,8 +109,10 @@ func (s *Slice) MarshalJSONObject(enc *gojay.Encoder) {
 			enc.StringKey(key, value)
 		case int:
 			enc.IntKey(key, value)
+		case int32:
+			enc.Int32Key(key, value)
 		case int64:
-			enc.IntKey(key, int(value))
+			enc.Int64Key(key, value)
 		case float32:
 			enc.Float32Key(key, value)
 		case float64:

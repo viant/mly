@@ -53,6 +53,18 @@ func WithHashValidation(enable bool) Option {
 	return &dictHashValidationOpt{enable: enable}
 }
 
+type withDebug struct {
+	enable bool
+}
+
+func (o *withDebug) Apply(c *Service) {
+	c.Config.Debug = o.enable
+}
+
+func WithDebug(enable bool) Option {
+	return &withDebug{enable: enable}
+}
+
 type cacheScopeOption struct {
 	scope CacheScope
 }

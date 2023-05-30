@@ -3,27 +3,15 @@ Endpoint:
 
 models:
   - id: sls
-    url: ${appPath}/example/model/sls_model
+    url: ${appPath}/example/model/string_lookups_int_model
     useDict: true
     transformer: sls
     datastore: sls
     inputs:
       - name: sa
       - name: sl
-      - name: x
+      - name: aux
         auxiliary: true
-
-  - id: vec
-    url: ${appPath}/example/model/vec_model
-    useDict: true
-    transformer: vec
-    datastore: vec
-    inputs:
-      - name: sl
-        index: 0
-      - name: tv
-        index: 1
-        wildcard: true
 
 connections:
   - id: localL1
@@ -41,11 +29,3 @@ datastores:
     storable: sls
     timeToLiveMs: 3600000
 
-  - id: vec
-    cache:
-      sizeMb: 128
-    connection: localL1
-    namespace: test
-    dataset: vec
-    storable: vec
-    timeToLiveMs: 3600000

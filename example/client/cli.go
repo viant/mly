@@ -1,8 +1,9 @@
 package client
 
 import (
-	"github.com/jessevdk/go-flags"
 	"log"
+
+	"github.com/jessevdk/go-flags"
 )
 
 func Run(args []string) {
@@ -11,6 +12,7 @@ func Run(args []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	if err = RunWithOptions(options); err != nil {
 		log.Fatal(err)
 	}
