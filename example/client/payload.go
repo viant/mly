@@ -26,9 +26,9 @@ func (c *CliPayload) Iterator(pair common.Pair) error {
 	return nil
 }
 
+// Not implementating this side of interface, not used -- the interface itself may not be necessary
 func (c *CliPayload) Pair(key string, value interface{}) error {
 	return nil
-
 }
 
 func (c *CliPayload) SetBatch(msg *client.Message) {

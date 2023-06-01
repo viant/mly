@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"time"
+
 	"github.com/aerospike/aerospike-client-go"
 	"github.com/aerospike/aerospike-client-go/types"
 	"github.com/viant/bintly"
@@ -14,7 +17,6 @@ import (
 	"github.com/viant/mly/shared/stat"
 	"github.com/viant/scache"
 	"github.com/viant/toolbox"
-	"time"
 )
 
 type CacheStatus int
@@ -53,6 +55,24 @@ func (s *Service) Config() *config.Datastore {
 	return s.config
 }
 
+func (s *Service) debug() bool {
+	return s.config.Debug
+}
+
+func (s *Service) ServerDeprecatedFuncAnnouncement() {
+	if s.mode == ModeClient {
+		return
+	}
+
+	if s.config.Cache != nil && (s.l1Client != nil || s.l2Client != nil) {
+		log.Printf("datastore %s may have in-memory cache enabled, which is unneeded since backplanes will capture most cache hits", s.config.ID)
+	}
+}
+
+func (s *Service) id() string {
+	return s.config.ID
+}
+
 func (s *Service) Mode() StoreMode {
 	return s.mode
 }
@@ -72,34 +92,53 @@ func (s *Service) Key(key string) *Key {
 	return NewKey(s.config, key)
 }
 
-//Put puts entry to the datastore
+// Put puts entry to the datastore
 func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) error {
-	//Add to local cache first
+	// Add to local cache first
 	if err := s.updateCache(key, value, dictHash); err != nil {
 		return err
 	}
+
 	if s.l1Client == nil || s.mode == ModeClient {
 		return nil
 	}
+
 	storable := getStorable(value)
 	bins, err := storable.Iterator().ToMap()
 	if err != nil {
 		return err
 	}
+
 	if dictHash > 0 {
 		bins[common.HashBin] = dictHash
 	}
+
 	writeKey, _ := key.Key()
+
+	isDebug := s.debug()
+	if isDebug {
+		log.Printf("[%s datastore put] l1 %+v bins %+v", s.id(), writeKey, bins)
+	}
+
 	wp := key.WritePolicy(0)
 	wp.SendKey = true
 	if s.l1Client != nil && !s.config.ReadOnly {
 		if err = s.l1Client.Put(ctx, wp, writeKey, bins); err != nil {
 			return err
 		}
+
+		if isDebug {
+			log.Printf("[%s datastore put] l1 OK", s.id())
+		}
 	}
+
 	if s.l2Client != nil && !s.config.L2.ReadOnly {
 		k2Key, _ := key.L2.Key()
 		err = s.l2Client.Put(ctx, wp, k2Key, bins)
+
+		if isDebug {
+			log.Printf("[%s datastore put] l2 err:%v", s.id(), err)
+		}
 	}
 	return err
 }
@@ -115,6 +154,7 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 	defer func() {
 		onDone(time.Now(), *stats...)
 	}()
+
 	if s.useCache {
 		status, dictHash, err := s.readFromCache(key, storable, stats)
 		if err != nil {
@@ -128,6 +168,7 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 			return dictHash, nil
 		}
 	}
+
 	if s.mode == ModeServer { //in server mode, cache hit rate would be low and expensive, thus skipping it
 		return 0, types.ErrKeyNotFound
 	}
@@ -170,8 +211,13 @@ func (s *Service) updateNotFound(key *Key) error {
 
 func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error {
 	if entryData == nil {
-		return fmt.Errorf("entyr was nil")
+		return fmt.Errorf("entry was nil")
 	}
+
+	if s.cache == nil {
+		return nil
+	}
+
 	if aMap, ok := entryData.(map[string]interface{}); ok {
 		if data, err := json.Marshal(aMap); err == nil {
 			entryData = data
@@ -191,6 +237,11 @@ func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error
 	if err != nil {
 		return fmt.Errorf("failed to set cache " + err.Error())
 	}
+
+	if s.debug() {
+		log.Printf("[%s datastore update] local cache:\"%s\" (%d bytes) set", s.id(), key.AsString(), len(data))
+	}
+
 	return nil
 }
 
@@ -313,10 +364,16 @@ func (s *Service) fromClient(ctx context.Context, client client.Service, key *Ke
 	}
 
 	storable := getStorable(value)
+	if s.debug() {
+		log.Printf("[%s datastore from] storable: %T %+v", s.id(), storable, storable)
+		log.Printf("[%s datastore from] bins: %+v", s.id(), record.Bins)
+	}
+
 	err = storable.Set(common.MapToIterator(record.Bins))
 	if err != nil {
 		return 0, fmt.Errorf("failed to map record: %+v, due to %w", key, err)
 	}
+
 	dictHash := 0
 	if value, ok := record.Bins[common.HashBin]; ok {
 		dictHash = toolbox.AsInt(value)
@@ -325,25 +382,23 @@ func (s *Service) fromClient(ctx context.Context, client client.Service, key *Ke
 	return dictHash, nil
 }
 
-//New returns a new Service
-func New(l1Client, l2Client client.Service, counter *gmetric.Operation) *Service {
-	srv := &Service{l1Client: l1Client, l2Client: l2Client, counter: counter}
-	return srv
-}
-
-//NewWithCache creates Service with cache
+// NewWithCache creates a cache optionally
 func NewWithCache(config *config.Datastore, l1Client, l2Client client.Service, counter *gmetric.Operation) (*Service, error) {
-	if config.Cache == nil {
-		return New(l1Client, l2Client, counter), nil
-	}
 	srv := &Service{
 		config:   config,
 		l1Client: l1Client,
 		l2Client: l2Client,
-		useCache: true,
+		useCache: config.Cache != nil,
 		counter:  counter,
 	}
+
+	// in server mode, cache hit rate is low, i.e., the chance a key exists not in L1 but in local cache is very low
+	// the only time this would happen is when a client makes a request while another client's request is populating L1
+
 	var err error
-	srv.cache, err = scache.New(config.Cache)
+	if config.Cache != nil {
+		srv.cache, err = scache.New(config.Cache)
+	}
+
 	return srv, err
 }

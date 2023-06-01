@@ -105,10 +105,12 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 		onDone(time.Now(), stats.Values()...)
 		onDoneDecrement()
 	}()
+
 	err := request.Validate()
 	if s.config.Debug && err != nil {
 		log.Printf("[%v do] validation error: %v\n", s.config.ID, err)
 	}
+
 	if err != nil {
 		stats.Append(err)
 		return clienterr.Wrap(fmt.Errorf("%w, body: %s", err, request.Body))
@@ -128,6 +130,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 func (s *Service) transformOutput(ctx context.Context, request *Request, output interface{}) (common.Storable, error) {
 	inputIndex := inputIndex(output)
 	inputObject := request.input.ObjectAt(s.inputProvider, inputIndex)
+
 	transformed, err := s.transformer(ctx, s.signature, inputObject, output)
 	if err != nil {
 		return nil, fmt.Errorf("failed to transform: %v, %w", s.config.ID, err)
@@ -135,8 +138,21 @@ func (s *Service) transformOutput(ctx context.Context, request *Request, output 
 
 	if s.useDatastore {
 		dictHash := s.Dictionary().Hash
-		key := s.datastore.Key(request.input.KeyAt(inputIndex))
-		go s.datastore.Put(ctx, key, transformed, dictHash)
+		cacheKey := request.input.KeyAt(inputIndex)
+
+		isDebug := s.config.Debug
+		key := s.datastore.Key(cacheKey)
+
+		go func() {
+			err := s.datastore.Put(ctx, key, transformed, dictHash)
+			if err != nil {
+				log.Printf("[%s trout] put error:%v", s.config.ID, err)
+			}
+
+			if isDebug {
+				log.Printf("[%s trout] put:\"%s\" ok", s.config.ID, cacheKey)
+			}
+		}()
 	}
 
 	return transformed, nil
@@ -394,7 +410,11 @@ func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[st
 	if err != nil {
 		return err
 	}
-	s.transformer = getTransformer(cfg.Transformer, s.signature)
+
+	s.transformer, err = getTransformer(cfg.Transformer, s.signature)
+	if err != nil {
+		return nil
+	}
 
 	if err = s.initDatastore(cfg, datastores); err != nil {
 		return err
@@ -418,9 +438,11 @@ func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datast
 	if !s.useDatastore {
 		return nil
 	}
+
 	if s.signature == nil {
 		return fmt.Errorf("signature was emtpy")
 	}
+
 	if len(cfg.KeyFields) == 0 {
 		for _, input := range s.signature.Inputs {
 			cfg.KeyFields = append(cfg.KeyFields, input.Name)
@@ -433,13 +455,16 @@ func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datast
 			return fmt.Errorf("failed to lookup datastore ID: %v", cfg.DataStore)
 		}
 	}
+
 	datastoreConfig := s.datastore.Config()
 	if datastoreConfig.Storable == "" && len(datastoreConfig.Fields) == 0 {
 		_ = datastoreConfig.FieldsDescriptor(storable.NewFields(s.signature.Output.Name, cfg.OutputType))
 	}
+
 	if s.newStorable == nil {
 		s.newStorable = getStorable(datastoreConfig)
 	}
+
 	return nil
 }
 

@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"log"
 	"reflect"
 	"unsafe"
 
@@ -16,7 +17,7 @@ func reconcileData(debug bool, target interface{}, cachable Cachable, cached []i
 	targetPtr := xunsafe.AsPointer(target)
 
 	if debug {
-		fmt.Printf("reconciling: %T %+v\n", target, target)
+		log.Printf("reconciling: %T %+v", target, target)
 	}
 
 	switch targetType.Kind() {
@@ -30,6 +31,7 @@ func reconcileData(debug bool, target interface{}, cachable Cachable, cached []i
 		*(*unsafe.Pointer)(targetPtr) = *(*unsafe.Pointer)(xunsafe.AsPointer(cached[0]))
 		return nil
 	case reflect.Slice:
+		// noop
 	default:
 		return fmt.Errorf("unsupported target type expected *T or []*T, but had: %T", target)
 	}
@@ -51,22 +53,26 @@ func reconcileData(debug bool, target interface{}, cachable Cachable, cached []i
 		*(*unsafe.Pointer)(itemPtrAddr) = xunsafe.AsPointer(cached[i])
 
 		if debug {
-			fmt.Printf("cache->output[%v] %+v\n", i, cacheEntry)
+			log.Printf("cache->output[%v] %+v", i, cacheEntry)
 		}
 	}
 
-	prevSlice := (*reflect.SliceHeader)(targetPtr)
+	oldSlice := (*reflect.SliceHeader)(targetPtr)
 	if !hadDataOnlyInCache {
 		// copy all predicted values to nil spots from cache
 		offsets := buildOffsets(batchSize, cachable)
 		if debug {
-			fmt.Printf("offsets map: %+v\n", offsets)
+			log.Printf("offsets map: %+v, oldSlice.Len:%d", offsets, oldSlice.Len)
 		}
 
-		for index := 0; index < prevSlice.Len; index++ {
+		for index := 0; index < oldSlice.Len; index++ {
 			value := xSlice.ValuePointerAt(targetPtr, index)
 			cacheableIndex := offsets[index]
 			if cachable.CacheHit(cacheableIndex) {
+				if debug {
+					log.Printf("cache hit %d for index:%d", cacheableIndex, index)
+				}
+
 				continue
 			}
 
@@ -75,15 +81,15 @@ func reconcileData(debug bool, target interface{}, cachable Cachable, cached []i
 
 			if debug {
 				// means mly server response
-				fmt.Printf("response[%v]->output[%v]: %+v\n", index, cacheableIndex, value)
+				log.Printf("response[%v]->output[%v]: %+v", index, cacheableIndex, value)
 			}
 		}
 	}
 
 	nextSlice := *(*reflect.SliceHeader)(newDataPtr)
-	prevSlice.Cap = nextSlice.Cap
-	prevSlice.Len = nextSlice.Len
-	prevSlice.Data = nextSlice.Data
+	oldSlice.Cap = nextSlice.Cap
+	oldSlice.Len = nextSlice.Len
+	oldSlice.Data = nextSlice.Data
 
 	return nil
 }

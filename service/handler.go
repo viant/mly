@@ -52,7 +52,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 		request.Body = data[:size]
 		if isDebug {
-			log.Printf("[%v http] input: %s\n", h.service.config.ID, strings.Trim(string(request.Body), " \n\r"))
+			trimmed := strings.Trim(string(request.Body), " \n\r")
+			log.Printf("[%v http] input: %s\n", h.service.config.ID, trimmed)
 		}
 
 		err = gojay.Unmarshal(data[:size], request)
@@ -61,7 +62,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 				log.Printf("[%v http] unmarshal error: %v\n", h.service.config.ID, err)
 			}
 
-			http.Error(writer, err.Error(), http.StatusBadRequest)
+			rmsg := fmt.Sprintf("%s (are your input types correct?)", err.Error())
+			http.Error(writer, rmsg, http.StatusBadRequest)
 			return
 		}
 	}

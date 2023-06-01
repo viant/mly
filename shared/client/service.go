@@ -76,14 +76,17 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		s.releaseMessage(input)
 	}()
 	cachable, isCachable := input.(Cachable)
-	batchSize := cachable.BatchSize()
 	if response.Data == nil {
 		return fmt.Errorf("response data was empty - aborting request")
 	}
 	var err error
 	var cachedCount int
 	var cached []interface{}
+
+	batchSize := 0
 	if isCachable {
+		batchSize = cachable.BatchSize()
+
 		cachedCount, err = s.loadFromCache(ctx, &cached, batchSize, response, cachable)
 		if err != nil {
 			return err
@@ -94,7 +97,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		s.reportBatch(cachedCount, cached)
 	}
 
-	if (batchSize > 0 && cachedCount == batchSize) || cachedCount > 0 {
+	if (batchSize > 0 && cachedCount == batchSize) || (batchSize == 0 && cachedCount > 0) {
 		response.Status = common.StatusCached
 		return s.handleResponse(ctx, response.Data, cached, cachable)
 	}
@@ -103,10 +106,12 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	if err != nil {
 		return err
 	}
+
 	stats.Append(stat.NoSuchKey)
 	if s.Config.Debug {
 		fmt.Printf("[%v] request: %s\n", s.Config.Model, strings.Trim(string(data), " \n"))
 	}
+
 	body, err := s.postRequest(ctx, data)
 	if s.Config.Debug {
 		fmt.Printf("[%v] response.Body: %s, %v\n", s.Config.Model, body, err)
@@ -115,6 +120,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		stats.Append(err)
 		return err
 	}
+
 	err = gojay.Unmarshal(body, response)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal: '%s'; due to %w", body, err)
@@ -125,13 +131,17 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}
 
 	if response.Status != common.StatusOK {
+		// TODO is this correct?
 		return nil
 	}
+
 	if err = s.handleResponse(ctx, response.Data, cached, cachable); err != nil {
 		return fmt.Errorf("failed to handle resp: %w", err)
 	}
+
 	s.updatedCache(ctx, response.Data, cachable, s.dict.hash)
 	s.assertDictHash(response)
+
 	return nil
 }
 
@@ -196,10 +206,12 @@ func (s *Service) readFromCache(ctx context.Context, key string, target interfac
 	if s.datastore == nil || !s.datastore.Enabled() {
 		return false, 0, nil
 	}
+
 	dataType := reflect.TypeOf(target)
 	if dataType.Kind() != reflect.Ptr {
-		return false, 0, fmt.Errorf("invalida response data type: expeted ptr but had: %T", target)
+		return false, 0, fmt.Errorf("invalid response data type: expeted ptr but had: %T", target)
 	}
+
 	storeKey := s.datastore.Key(key)
 	dictHash, err := s.datastore.GetInto(ctx, storeKey, target)
 	if err == nil {
@@ -207,6 +219,7 @@ func (s *Service) readFromCache(ctx context.Context, key string, target interfac
 			return true, dictHash, nil
 		}
 	}
+
 	return false, 0, err
 }
 
@@ -335,18 +348,22 @@ func (s *Service) initDatastore() error {
 	if remoteCfg.Datastore.ID == "" {
 		return nil
 	}
+
 	if remoteCfg == nil {
 		return nil
 	}
+
 	var stores = map[string]*datastore.Service{}
 	var err error
 	datastores := &sconfig.DatastoreList{
 		Datastores:  []*sconfig.Datastore{&remoteCfg.Datastore},
 		Connections: remoteCfg.Connections,
 	}
+
 	if stores, err = datastore.NewStores(datastores, s.gmetrics); err != nil {
 		return err
 	}
+
 	s.datastore = stores[remoteCfg.ID]
 	if len(remoteCfg.Fields) > 0 {
 		if err := remoteCfg.FieldsDescriptor(remoteCfg.Fields); err != nil {
@@ -356,9 +373,11 @@ func (s *Service) initDatastore() error {
 			return storable.New(remoteCfg.Fields)
 		}
 	}
+
 	if s.datastore != nil {
 		s.datastore.SetMode(datastore.ModeClient)
 	}
+
 	return nil
 }
 
@@ -409,14 +428,24 @@ func (s *Service) discoverConfig(host *Host, URL string) (*config.Remote, error)
 	}
 
 	if s.Config.Debug {
-		prefix := fmt.Sprintf("[%v] config.Remote.", s.Config.Model)
-		fmt.Printf("%sConnections:%V\n", prefix, cfg.Connections)
-		fmt.Printf("%sDatastore:%V\n", prefix, cfg.Datastore)
+		prefix := fmt.Sprintf("config.Remote.")
 
-		fmt.Printf("%sMetaInput.Inputs:%V\n", prefix, cfg.MetaInput.Inputs)
-		fmt.Printf("%sMetaInput.Auxiliary:%V\n", prefix, cfg.MetaInput.Auxiliary)
-		fmt.Printf("%sMetaInput.KeyFields:%V\n", prefix, cfg.MetaInput.KeyFields)
-		fmt.Printf("%sMetaInput.Outputs:%V\n", prefix, cfg.MetaInput.Outputs)
+		for i, c := range cfg.Connections {
+			log.Printf("%sConnections[%d]:%+v", prefix, i, c)
+		}
+
+		log.Printf("%sDatastore:%+v", prefix, cfg.Datastore)
+
+		for i, mi := range cfg.MetaInput.Inputs {
+			log.Printf("%sMetaInput.Inputs[%d]:%+v", prefix, i, *mi)
+		}
+
+		log.Printf("%sMetaInput.Auxiliary:%v", prefix, cfg.MetaInput.Auxiliary)
+		log.Printf("%sMetaInput.KeyFields:%v", prefix, cfg.MetaInput.KeyFields)
+
+		for i, mo := range cfg.MetaInput.Outputs {
+			log.Printf("%sMetaInput.Outputs[%d]:%+v", prefix, i, *mo)
+		}
 	}
 
 	return cfg, err
@@ -586,7 +615,7 @@ func (s *Service) updateSingleEntry(ctx context.Context, target interface{}, cac
 }
 
 func (s *Service) reportBatch(count int, cached []interface{}) {
-	fmt.Printf("[%v] batchSize: %v, found in cache: %v\n", s.Config.Model, len(cached), count)
+	log.Printf("batchSize: %v, found in cache: %v", len(cached), count)
 	if count == 0 {
 		return
 	}
@@ -594,6 +623,6 @@ func (s *Service) reportBatch(count int, cached []interface{}) {
 		if v == nil {
 			continue
 		}
-		fmt.Printf("[%v] cached[%v] %+v\n", s.Config.Model, i, v)
+		log.Printf("cached[%v] %+v", i, v)
 	}
 }

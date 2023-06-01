@@ -133,7 +133,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 		outerr := func() error {
 			switch input.Type.Kind() {
 			case reflect.String:
-				value := ""
+				var value string
 				if err := dec.String(&value); err != nil {
 					return err
 				}

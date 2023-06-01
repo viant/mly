@@ -47,6 +47,16 @@ func TestDecode(t *testing.T) {
 			isValid: true,
 		},
 		{
+			desc: "string_issue",
+			requestEnc: `{
+	"a1": "a1_0",
+	"a2": "a2_0",
+	"a3": "a3_0",
+	"cache_key": "ck0"
+}`,
+			isValid: true,
+		},
+		{
 			desc: "invalid",
 			requestEnc: `{
 	"batch_size": 1,
@@ -99,9 +109,17 @@ func TestDecode(t *testing.T) {
 		assert.Nil(t, err)
 		err = r.Validate()
 		if tc.isValid {
-			assert.Nil(t, err)
+			var msg string
+			if err != nil {
+				msg = err.Error()
+			}
+			assert.Nil(t, err, tc.desc, msg)
 		} else {
-			assert.NotNil(t, err)
+			var msg string
+			if err != nil {
+				msg = err.Error()
+			}
+			assert.NotNil(t, err, tc.desc, msg)
 		}
 
 		if tc.additionalCheck != nil {

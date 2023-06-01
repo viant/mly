@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+
 	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/mly/shared/config/datastore"
 	"github.com/viant/scache"
@@ -16,6 +17,7 @@ type Datastore struct {
 	Storable             string
 	Fields               []*storable.Field
 	Disabled             bool `json:",omitempty" yaml:",omitempty"`
+	Debug                bool `json:",omitempty" yaml:",omitempty"`
 }
 
 //Init initialises datastore

@@ -1,6 +1,5 @@
 init:
   parentPath: $parent.path
-  expect: $LoadJSON('${parentPath}/expect.json')
 
 pipeline:
   test:
@@ -8,10 +7,19 @@ pipeline:
     target: $target
     checkError: true
     commands:
-      - /tmp/e2e/mlyc -m=sli -sl=a
+      - /tmp/e2e/mlyc -m sli -a 'sa:a;sl:a;aux:test'
+      - /tmp/e2e/mlyc -m sli -a 'sa:a;sl:a;aux:test'
+
   assert:
     action: validator:assert
     init:
       actual: $AsJSON($test.Cmd[0].Stdout)
     actual: $actual
-    expect: $expect
+    expect: $LoadJSON('${parentPath}/expect.json')
+
+  assertCache:
+    action: validator:assert
+    init:
+      actual: $AsJSON($test.Cmd[1].Stdout)
+    actual: $actual
+    expect: $LoadJSON('${parentPath}/expect-cached.json')

@@ -151,9 +151,14 @@ func New(config *Config) (*Service, error) {
 		health:   healthHandler,
 	}
 
-	datastores, err := datastore.NewStores(&config.DatastoreList, metrics)
+	datastores, err := datastore.NewStoresV2(&config.DatastoreList, metrics, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create datastores: %w", err)
+	}
+
+	// TODO remove
+	for _, ds := range datastores {
+		ds.ServerDeprecatedFuncAnnouncement()
 	}
 
 	pool := buffer.New(config.Endpoint.PoolMaxSize, config.Endpoint.BufferSize)

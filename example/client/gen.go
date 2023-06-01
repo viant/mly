@@ -108,8 +108,11 @@ func (g *genType) Iterator() common.Iterator {
 // implements shared/common.Storable
 func (g *genType) Set(iter common.Iterator) error {
 	return iter(func(key string, value interface{}) error {
-		switch key {
+		if g.D == nil {
+			g.D = make(map[string]interface{})
 		}
+
+		g.D[key] = value
 		return nil
 	})
 }
@@ -129,8 +132,6 @@ func (g *genTypes) Iterator() common.Iterator {
 // implements shared/common.Storable
 func (g *genTypes) Set(iter common.Iterator) error {
 	return iter(func(key string, value interface{}) error {
-		switch key {
-		}
 		return nil
 	})
 }

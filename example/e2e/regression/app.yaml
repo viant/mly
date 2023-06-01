@@ -3,7 +3,7 @@ pipeline:
     action: storage:copy
     expand: true
     source:
-      URL: ${appPath}/example/e2e/etc/config.yaml
+      URL: ${appPath}/example/server/etc/config.yaml
     dest:
       URL: /tmp/e2e/config.yaml
 

@@ -1,0 +1,33 @@
+init:
+  parentPath: $parent.path
+
+pipeline:
+  test:
+    action: exec:run
+    target: $target
+    checkError: true
+    commands:
+      - /tmp/e2e/mlyc -m slf -s slft -a 'sa:a;sl:a;aux:aux'
+      - /tmp/e2e/mlyc -m slf -s slft_batch -a 'sa:a,d;sl:a,a;aux:aux,l'
+      - /tmp/e2e/mlyc -m slf -s slft_batch -a 'sa:a,d;sl:a,a;aux:aux,l'
+
+  assert:
+    action: validator:assert
+    init:
+      expect: expect
+    actual: $AsJSON($test.Cmd[0].Stdout)
+    expect: $LoadJSON('${parentPath}/${expect}.json')
+
+  assertBatch:
+    action: validator:assert
+    init:
+      expect: expect-batch
+    actual: $AsJSON($test.Cmd[1].Stdout)
+    expect: $LoadJSON('${parentPath}/${expect}.json')
+
+  assertBatchCache:
+    action: validator:assert
+    init:
+      expect: expect-batch-cache
+    actual: $AsJSON($test.Cmd[2].Stdout)
+    expect: $LoadJSON('${parentPath}/${expect}.json')

@@ -1,6 +1,4 @@
-
 pipeline:
-
   reset_aero:
     init:
       action: dsunit:init
