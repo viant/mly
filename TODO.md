@@ -1,3 +1,0 @@
-- Add input hooks
-- Add config reload on client in case database/connections setting changes
-- Move TODO list to Github issues
