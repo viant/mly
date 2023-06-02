@@ -9,13 +9,17 @@ import (
 )
 
 type genType struct {
-	D map[string]interface{}
-	s map[string]*shared.Field
+	D           map[string]interface{}
+	s           map[string]*shared.Field
+	IgnoreError bool
 }
 
 type genTypes []*genType
 
-func Generated(outputs []*shared.Field, batch int) func() common.Storable {
+// Creates a representation of the generic transformer's output.
+// ignoreError is used for smoke testing when there is a specific transformer used on the model, to avoid cases when the transformed struct does not
+// match the model output signature.
+func Generated(outputs []*shared.Field, batch int, ignoreError bool) func() common.Storable {
 	return func() common.Storable {
 		mapped := make(map[string]*shared.Field, len(outputs))
 		for _, oField := range outputs {
@@ -28,6 +32,7 @@ func Generated(outputs []*shared.Field, batch int) func() common.Storable {
 			for i, _ := range gts {
 				gt := new(genType)
 				gt.s = mapped
+				gt.IgnoreError = ignoreError
 				gts[i] = gt
 			}
 
@@ -35,6 +40,7 @@ func Generated(outputs []*shared.Field, batch int) func() common.Storable {
 		} else {
 			gt := new(genType)
 			gt.s = mapped
+			gt.IgnoreError = ignoreError
 			return gt
 		}
 	}
@@ -58,6 +64,10 @@ func (g *genType) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 
 	of, ok := g.s[key]
 	if !ok {
+		if g.IgnoreError {
+			return nil
+		}
+
 		return fmt.Errorf("no such field %s", key)
 	}
 

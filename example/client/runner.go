@@ -66,7 +66,7 @@ func RunWithOptions(options *Options) error {
 			fmt.Printf("could not find Storable:\"%s\", building dynamically\n", options.Storable)
 		}
 
-		maker = checker.Generated(cli.Config.Datastore.MetaInput.Outputs, pl.Batch)
+		maker = checker.Generated(cli.Config.Datastore.MetaInput.Outputs, pl.Batch, false)
 	}
 
 	response.Data = maker()

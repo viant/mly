@@ -17,6 +17,7 @@ models:
   - id: slf
     url: ${appPath}/example/model/string_lookups_float_model
     useDict: true
+    debug: true
     datastore: slf
     transformer: slft
     inputs:
@@ -25,7 +26,7 @@ models:
       - name: aux
         auxiliary: true
     test:
-      test: true
+      singleBatch: true
 
   - id: vec
     url: ${appPath}/example/model/vectorization_int_model
@@ -54,7 +55,7 @@ models:
     inputs:
       - name: i
     test:
-      test: true
+      singleBatch: true
 
 connections:
   - id: localL1
@@ -64,26 +65,20 @@ connections:
 
 datastores:
   - id: sli
-    cache:
-      sizeMb: 16 
     connection: localL1
     namespace: test
     dataset: sli
-    timeToLiveMs: 3600000
+    timeToLiveMs: 30000
 
   - id: vec
-    cache:
-      sizeMb: 16
     connection: localL1
     namespace: test
     dataset: vec
-    timeToLiveMs: 3600000
+    timeToLiveMs: 30000
 
   - id: slf
-    cache:
-      sizeMb: 16
     connection: localL1
     namespace: test
     dataset: slf
-    timeToLiveMs: 3600000
+    timeToLiveMs: 30000
 

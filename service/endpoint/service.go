@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -158,7 +159,7 @@ func (s *Service) SelfTest() error {
 	}()
 
 	for _, m := range s.config.ModelList.Models {
-		go func(modelID string, inputs []*shared.Field, tp config.TestPayload, outputs []*shared.Field, debug bool) {
+		go func(modelID string, transformer string, inputs []*shared.Field, tp config.TestPayload, outputs []*shared.Field, debug bool) {
 			defer waitGroup.Done()
 			// for backwards compatibility, skip tests if not specified
 			if !tp.Test && !tp.SingleBatch && len(tp.Single) == 0 && len(tp.Batch) == 0 {
@@ -167,7 +168,7 @@ func (s *Service) SelfTest() error {
 			}
 
 			start := time.Now()
-			err := selfTest(hosts, timeout, modelID, inputs, tp, outputs, debug)
+			err := selfTest(hosts, timeout, modelID, transformer != "", inputs, tp, outputs, debug)
 
 			if err != nil {
 				errHandler <- err
@@ -175,7 +176,7 @@ func (s *Service) SelfTest() error {
 			}
 
 			log.Printf("tested %s %s", modelID, time.Now().Sub(start))
-		}(m.ID, m.Inputs, m.Test, m.Outputs, m.Debug)
+		}(m.ID, m.Transformer, m.Inputs, m.Test, m.Outputs, m.Debug)
 	}
 
 	waitGroup.Wait()
@@ -198,13 +199,15 @@ func (s *Service) SelfTest() error {
 	return err
 }
 
-func selfTest(host []*client.Host, timeout time.Duration, modelID string, inputs_ []*shared.Field, tp config.TestPayload, outputs []*shared.Field, debug bool) error {
-	cli, err := client.New(modelID, host)
+func selfTest(host []*client.Host, timeout time.Duration, modelID string, usesTransformer bool, inputs_ []*shared.Field, tp config.TestPayload, outputs []*shared.Field, debug bool) error {
+	cli, err := client.New(modelID, host, client.WithDebug(true))
 	if err != nil {
 		return fmt.Errorf("%s:%w", modelID, err)
 	}
 
 	inputs := cli.Config.Datastore.MetaInput.Inputs
+
+	// generate payload
 
 	var testData map[string]interface{}
 	var batchSize int
@@ -222,11 +225,11 @@ func selfTest(host []*client.Host, timeout time.Duration, modelID string, inputs
 				n := field.Name
 				switch field.DataType {
 				case "int", "int32", "int64":
-					testData[n] = 0
+					testData[n] = rand.Int31()
 				case "float", "float32", "float64":
-					testData[n] = 0.0
+					testData[n] = rand.Float32()
 				default:
-					testData[n] = ""
+					testData[n] = fmt.Sprintf("test-%d", rand.Int31())
 				}
 			}
 		}
@@ -336,15 +339,17 @@ func selfTest(host []*client.Host, timeout time.Duration, modelID string, inputs
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
 	resp := new(client.Response)
 	// see if there is a transform
 	// if there is, trigger the transform with mock data?
-	resp.Data = checker.Generated(outputs, batchSize)()
+	resp.Data = checker.Generated(outputs, batchSize, usesTransformer)()
 
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// send response
 	err = cli.Run(ctx, msg, resp)
+
 	if err != nil {
 		return fmt.Errorf("%s:Run():%w", modelID, err)
 	}

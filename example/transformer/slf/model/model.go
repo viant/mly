@@ -19,7 +19,7 @@ type Segmenteds []*Segmented
 // implements common.Storable
 func (s *Segmented) Iterator() common.Iterator {
 	return func(p common.Pair) error {
-		p("class", s.Class)
+		p("Class", s.Class)
 		return nil
 	}
 }
@@ -83,7 +83,7 @@ func (s *Segmented) NKeys() int {
 
 // implements gojay.MarshalJSONObject
 func (s *Segmented) MarshalJSONObject(enc *gojay.Encoder) {
-	enc.StringKey("class", s.Class)
+	enc.StringKey("Class", s.Class)
 }
 
 // implements gojay.MarshalJSONObject
