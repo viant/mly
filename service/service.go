@@ -28,6 +28,7 @@ import (
 	"github.com/viant/mly/service/layers"
 	"github.com/viant/mly/service/stat"
 	"github.com/viant/mly/service/tfmodel"
+	"github.com/viant/mly/service/transform"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
@@ -411,7 +412,7 @@ func (s *Service) init(ctx context.Context, cfg *config.Model, datastores map[st
 		return err
 	}
 
-	s.transformer, err = getTransformer(cfg.Transformer, s.signature)
+	s.transformer, err = transform.Get(cfg.Transformer)
 	if err != nil {
 		return nil
 	}

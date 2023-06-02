@@ -11,6 +11,8 @@ models:
       - name: sl
       - name: aux
         auxiliary: true
+    test:
+      test: true
 
   - id: slf
     url: ${appPath}/example/model/string_lookups_float_model
@@ -22,6 +24,8 @@ models:
       - name: sl
       - name: aux
         auxiliary: true
+    test:
+      test: true
 
   - id: vec
     url: ${appPath}/example/model/vectorization_int_model
@@ -33,18 +37,24 @@ models:
       - name: sl
       - name: aux
         auxiliary: true
+    test:
+      test: true
 
   - id: ll
     url: ${appPath}/example/model/broken_case_v0_5_0_model
     useDict: false
     inputs:
       - name: lookuplayer_input
+    test:
+      test: true
 
   - id: ko
     url: ${appPath}/example/model/keyed_out_model
     useDict: false
     inputs:
       - name: i
+    test:
+      test: true
 
 connections:
   - id: localL1

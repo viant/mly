@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 
@@ -82,15 +83,44 @@ func runApp(config *Config, wg *sync.WaitGroup) error {
 	if wg != nil {
 		wg.Done()
 	}
-	return srv.ListenAndServe()
+
+	server := make(chan error)
+
+	m := sync.Mutex{}
+	m.Lock()
+
+	// run server in background
+	go func() {
+		l, err := srv.Listen()
+		if err != nil {
+			server <- err
+		}
+
+		m.Unlock()
+		server <- srv.Serve(l)
+	}()
+
+	m.Lock()
+	defer m.Unlock()
+
+	err = srv.SelfTest()
+	if err != nil {
+		defer srv.Shutdown(context.Background())
+		return fmt.Errorf("self start test failure: %w", err)
+	}
+
+	log.Printf("self start test OK")
+
+	return <-server
 }
 
-//IsHelpOption returns true if helper
+// IsHelpOption returns true if helper
 func IsHelpOption(args []string) bool {
 	for _, arg := range args {
 		if arg == "-h" {
 			return true
 		}
 	}
+
 	return false
 }

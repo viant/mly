@@ -28,6 +28,14 @@ type Model struct {
 	Stream           *config.Stream `json:",omitempty" yaml:",omitempty"`
 	shared.MetaInput `json:",omitempty" yaml:",inline"`
 	DictMeta         DictionaryMeta
+	Test             TestPayload `json:",omitempty" yaml:",omitempty"`
+}
+
+type TestPayload struct {
+	Test        bool // if all blank, do a non-batch test
+	Single      map[string]interface{}
+	SingleBatch bool // only relevant with Single or blank
+	Batch       map[string][]interface{}
 }
 
 // DictionaryMeta is used to confirm proper reloading of model components

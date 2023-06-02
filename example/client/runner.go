@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	slfmodel "github.com/viant/mly/example/transformer/slf/model"
+	"github.com/viant/mly/service/endpoint/checker"
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
@@ -65,7 +66,7 @@ func RunWithOptions(options *Options) error {
 			fmt.Printf("could not find Storable:\"%s\", building dynamically\n", options.Storable)
 		}
 
-		maker = Generated(cli.Config.Datastore.MetaInput.Outputs, pl.Batch)
+		maker = checker.Generated(cli.Config.Datastore.MetaInput.Outputs, pl.Batch)
 	}
 
 	response.Data = maker()

@@ -14,7 +14,7 @@ pipeline:
 
   start:
     action: process:start
-    sleepTimeMs: 3000
+    sleepTimeMs: 5000
     target: $target
     directory: /tmp/e2e
     checkError: true
