@@ -12,12 +12,12 @@ import (
 // ReconcileData reconciles target with cached and predicted data
 // target is either the pointer to the result or a pointer to a slice of results from
 // the prediction server
-func reconcileData(debug bool, target interface{}, cachable Cachable, cached []interface{}) error {
+func reconcileData(prefix string, target interface{}, cachable Cachable, cached []interface{}) error {
 	targetType := reflect.TypeOf(target).Elem()
 	targetPtr := xunsafe.AsPointer(target)
 
-	if debug {
-		log.Printf("reconciling: %T %+v", target, target)
+	if prefix != "" {
+		log.Printf("%s reconciling: %T %+v", prefix, target, target)
 	}
 
 	switch targetType.Kind() {
@@ -52,8 +52,8 @@ func reconcileData(debug bool, target interface{}, cachable Cachable, cached []i
 		itemPtrAddr := xSlice.PointerAt(newDataPtr, uintptr(i))
 		*(*unsafe.Pointer)(itemPtrAddr) = xunsafe.AsPointer(cached[i])
 
-		if debug {
-			log.Printf("cache->output[%v] %+v", i, cacheEntry)
+		if prefix != "" {
+			log.Printf("%s cache->output[%v] %+v", prefix, i, cacheEntry)
 		}
 	}
 
@@ -61,16 +61,16 @@ func reconcileData(debug bool, target interface{}, cachable Cachable, cached []i
 	if !hadDataOnlyInCache {
 		// copy all predicted values to nil spots from cache
 		offsets := buildOffsets(batchSize, cachable)
-		if debug {
-			log.Printf("offsets map: %+v, oldSlice.Len:%d", offsets, oldSlice.Len)
+		if prefix != "" {
+			log.Printf("%s offsets map: %+v, oldSlice.Len:%d", prefix, offsets, oldSlice.Len)
 		}
 
 		for index := 0; index < oldSlice.Len; index++ {
 			value := xSlice.ValuePointerAt(targetPtr, index)
 			cacheableIndex := offsets[index]
 			if cachable.CacheHit(cacheableIndex) {
-				if debug {
-					log.Printf("cache hit %d for index:%d", cacheableIndex, index)
+				if prefix != "" {
+					log.Printf("%s cache hit %d for index:%d", prefix, cacheableIndex, index)
 				}
 
 				continue
@@ -79,9 +79,9 @@ func reconcileData(debug bool, target interface{}, cachable Cachable, cached []i
 			itemPtrAddr := xSlice.PointerAt(newDataPtr, uintptr(cacheableIndex))
 			*(*unsafe.Pointer)(itemPtrAddr) = xunsafe.AsPointer(value)
 
-			if debug {
+			if prefix != "" {
 				// means mly server response
-				log.Printf("response[%v]->output[%v]: %+v", index, cacheableIndex, value)
+				log.Printf("%s response[%v]->output[%v]: %+v", prefix, index, cacheableIndex, value)
 			}
 		}
 	}

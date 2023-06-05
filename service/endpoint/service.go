@@ -18,6 +18,7 @@ import (
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
+	"github.com/viant/toolbox"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
@@ -90,16 +91,16 @@ func (s *Service) initModelHandler(datastores map[string]*datastore.Service, poo
 	for i := range s.config.ModelList.Models {
 		go func(model *config.Model) {
 			defer waitGroup.Done()
-			log.Printf("model %s init...\n", model.ID)
-
+			mstart := time.Now()
+			log.Printf("[%s] model init...", model.ID)
 			if e := s.initModel(datastores, pool, mux, model, &lock); e != nil {
-				log.Printf("model %s error:%s\n", model.ID, e)
+				log.Printf("[%s init] error:%s", model.ID, e)
 				lock.Lock()
 				err = e
 				lock.Unlock()
 			}
 
-			log.Printf("model %s done\n", model.ID)
+			log.Printf("[%s] model loaded (%s)", model.ID, time.Now().Sub(mstart))
 		}(s.config.ModelList.Models[i])
 	}
 	waitGroup.Wait()
@@ -149,7 +150,6 @@ func (s *Service) SelfTest() error {
 	go func() {
 		for {
 			e := <-errHandler
-
 			if e == nil {
 				return
 			}
@@ -169,7 +169,6 @@ func (s *Service) SelfTest() error {
 
 			start := time.Now()
 			err := selfTest(hosts, timeout, modelID, transformer != "", inputs, tp, outputs, debug)
-
 			if err != nil {
 				errHandler <- err
 				return
@@ -219,6 +218,33 @@ func selfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 	} else {
 		if len(tp.Single) > 0 {
 			testData = tp.Single
+
+			for _, field := range inputs {
+				n := field.Name
+				sv, ok := tp.Single[n]
+				switch field.DataType {
+				case "int", "int32", "int64":
+					if !ok {
+						testData[n] = rand.Int31()
+					} else {
+						switch tsv := sv.(type) {
+						case string:
+							testData[n], err = strconv.Atoi(tsv)
+							if err != nil {
+								return err
+							}
+						}
+					}
+				case "float", "float32", "float64":
+					testData[n] = rand.Float32()
+				default:
+					if !ok {
+						testData[n] = fmt.Sprintf("test-%d", rand.Int31())
+					} else {
+						testData[n] = toolbox.AsString(sv)
+					}
+				}
+			}
 		} else {
 			testData = make(map[string]interface{})
 			for _, field := range inputs {
@@ -351,7 +377,7 @@ func selfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 	err = cli.Run(ctx, msg, resp)
 
 	if err != nil {
-		return fmt.Errorf("%s:Run():%w", modelID, err)
+		return fmt.Errorf("%s:Run():%v", modelID, err)
 	}
 
 	return nil

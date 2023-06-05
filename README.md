@@ -145,7 +145,6 @@ The server accepts configuration with the following options:
     * to use S3, set environment variable `AWS_SDK_LOAD_CONFIG=true`
     * to use GCS, set environment variable `GOOGLE_APPLICATION_CREDENTIALS=true`
   - `Tags`: optional model tags, default "serve"
-  - `OutputType`: required output type (`int64`, `float32`, etc..)
   - `UseDict`: optional flag to use dictionary/caching, default `true`
   - `KeyFields`: optional list of fields used to generate caching key (by default, all model inputs, sorted alphabetically)
   - `DataStore`: optional name of datastore cache

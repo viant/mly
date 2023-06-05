@@ -271,7 +271,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	}
 
 	var dictionary *common.Dictionary
-	s.reconcileSignatureWithInput(signature)
+	s.reconcileIOFromSignature(signature)
 	if s.config.UseDictionary() {
 		s.config.DictMeta.Error = ""
 		if s.config.DictURL != "" {
@@ -638,16 +638,23 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 		return nil, fmt.Errorf("init error:%w", err)
 	}
 
-	if srv.inputProvider, err = newObjectProvider(srv.config.Inputs); err != nil {
+	if srv.inputProvider, err = srv.newObjectProvider(); err != nil {
 		return nil, err
 	}
 
 	return srv, err
 }
 
-func newObjectProvider(inputs []*shared.Field) (*gtly.Provider, error) {
+func (s *Service) newObjectProvider() (*gtly.Provider, error) {
+	verbose := s.config.Debug
+	inputs := s.config.Inputs
+
 	var fields = make([]*gtly.Field, len(inputs))
 	for i, field := range inputs {
+		if verbose {
+			log.Printf("[%s obj] %s %v", s.config.ID, field.Name, field.RawType())
+		}
+
 		fields[i] = &gtly.Field{
 			Name: field.Name,
 			Type: field.RawType(),
@@ -660,7 +667,7 @@ func newObjectProvider(inputs []*shared.Field) (*gtly.Provider, error) {
 	return provider, nil
 }
 
-func (srv *Service) reconcileSignatureWithInput(signature *domain.Signature) {
+func (srv *Service) reconcileIOFromSignature(signature *domain.Signature) {
 	byName := srv.config.FieldByName()
 	var signatureInputs = signature.Inputs
 	if len(signatureInputs) == 0 {

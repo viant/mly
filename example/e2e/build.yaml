@@ -34,6 +34,7 @@ pipeline:
           GO_VERSION: ${goVersion}
 
     build_tensorflow_go:
+      # done in docker to ignore protobuf dependencies
       action: docker:run
       image: mly-docker-build-tensorflow-go:1.0
       name: mly-build-tensorflow-go

@@ -428,7 +428,7 @@ func (s *Service) discoverConfig(host *Host, URL string) (*config.Remote, error)
 	}
 
 	if s.Config.Debug {
-		prefix := fmt.Sprintf("config.Remote.")
+		prefix := fmt.Sprintf("[%s] config.Remote.", s.Config.Model)
 
 		for i, c := range cfg.Connections {
 			log.Printf("%sConnections[%d]:%+v", prefix, i, c)
@@ -464,7 +464,11 @@ func (s *Service) handleResponse(ctx context.Context, target interface{}, cached
 		return fmt.Errorf("invalid response type expected []*T, but had: %T", target)
 	}
 
-	err := reconcileData(s.Config.Debug, target, cachable, cached)
+	var debugPrefix string
+	if s.Config.Debug {
+		debugPrefix = fmt.Sprintf("[%s]", s.Config.Model)
+	}
+	err := reconcileData(debugPrefix, target, cachable, cached)
 	return err
 }
 
@@ -491,25 +495,27 @@ func (s *Service) postRequest(ctx context.Context, data []byte) ([]byte, error) 
 }
 
 func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte, error) {
+	evalUrl := host.evalURL(s.Model)
 	var postErr error
 	for i := 0; i < s.MaxRetry; i++ {
 		postErr = nil
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, host.evalURL(s.Model), io.NopCloser(bytes.NewReader(data)))
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, evalUrl, bytes.NewReader(data))
 		if err != nil {
 			return nil, err
 		}
-		respone, err := s.httpClient.Do(request)
+		response, err := s.httpClient.Do(request)
 		if err != nil {
 			postErr = err
 			continue
 		}
 
-		if respone.Body != nil {
-			data, err := io.ReadAll(respone.Body)
-			_ = respone.Body.Close()
-			if respone.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("invalid response: %v, %s", respone.StatusCode, data)
+		if response.Body != nil {
+			data, err := io.ReadAll(response.Body)
+			_ = response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				return nil, fmt.Errorf("invalid response: %v, %s", response.StatusCode, data)
 			}
+
 			if err != nil {
 				postErr = err
 				continue
@@ -609,13 +615,13 @@ func (s *Service) updateSingleEntry(ctx context.Context, target interface{}, cac
 		return
 	}
 	if err := s.datastore.Put(ctx, storeKey, target, s.dict.hash); err != nil {
-		log.Printf("failed to write to cache: %v", err)
+		log.Printf("[%s] failed to write to cache: %v", s.Model, err)
 	}
 	return
 }
 
 func (s *Service) reportBatch(count int, cached []interface{}) {
-	log.Printf("batchSize: %v, found in cache: %v", len(cached), count)
+	log.Printf("[%s] batchSize: %v, found in cache: %v", s.Model, len(cached), count)
 	if count == 0 {
 		return
 	}
@@ -623,6 +629,6 @@ func (s *Service) reportBatch(count int, cached []interface{}) {
 		if v == nil {
 			continue
 		}
-		log.Printf("cached[%v] %+v", i, v)
+		log.Printf("[%s] cached[%v] %+v", s.Model, i, v)
 	}
 }

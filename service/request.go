@@ -43,7 +43,7 @@ func (r *Request) Put(key string, value string) error {
 			if err != nil {
 				return fmt.Errorf("failed to parse int: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = int(val)
+			r.Feeds[input.Index] = [][]int{{int(val)}}
 		case reflect.Int32:
 			val, err := strconv.ParseInt(value, 10, 32)
 			if err != nil {

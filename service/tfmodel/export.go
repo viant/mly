@@ -2,8 +2,9 @@ package tfmodel
 
 import (
 	"fmt"
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"strings"
+
+	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 )
 
 const (
@@ -34,6 +35,11 @@ func MatchOperation(graph *tf.Graph, name string) string {
 			return candidate.Name()
 		}
 	}
+
+	for _, candidate := range graph.Operations() {
+		fmt.Printf(" - %s\n", candidate.Name())
+	}
+
 	return ""
 }
 

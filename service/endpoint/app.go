@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/jessevdk/go-flags"
 )
@@ -76,6 +77,8 @@ func runApp(config *Config, wg *sync.WaitGroup) error {
 		return err
 	}
 
+	start := time.Now()
+
 	srv, err := New(config)
 	if err != nil {
 		return err
@@ -109,7 +112,7 @@ func runApp(config *Config, wg *sync.WaitGroup) error {
 		return fmt.Errorf("self start test failure: %w", err)
 	}
 
-	log.Printf("self start test OK")
+	log.Printf("self start test done, startup full time: %s", time.Now().Sub(start))
 
 	return <-server
 }
