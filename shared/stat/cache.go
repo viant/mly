@@ -11,8 +11,9 @@ const (
 	CacheCollision = "collision"
 	CacheHit       = "cacheHit"
 	CacheExpired   = "expired"
-	Timeout        = "timeout"
-	Down           = "down"
+	// Aerospike Errors
+	Timeout = "timeout"
+	Down    = "down"
 )
 
 type cache struct{}

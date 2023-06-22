@@ -6,25 +6,26 @@ import (
 )
 
 const (
-	//Evaluate eval key
 	Evaluate = "eval"
 	Pending  = "pending"
+	Invalid  = "invalid"
 )
 
-type service struct{}
+type provider struct{}
 
 //Keys returns metric keys
-func (p service) Keys() []string {
+func (p provider) Keys() []string {
 	return []string{
 		stat.ErrorKey,
 		Evaluate,
 		Pending,
 		stat.Timeout,
+		Invalid,
 	}
 }
 
 //Map maps metric key into value index
-func (p service) Map(value interface{}) int {
+func (p provider) Map(value interface{}) int {
 	if value == nil {
 		return -1
 	}
@@ -39,12 +40,13 @@ func (p service) Map(value interface{}) int {
 			return 2
 		case stat.Timeout:
 			return 3
+		case Invalid:
+			return 4
 		}
 	}
 	return -1
 }
 
-//NewService creates service metrics
-func NewService() counter.Provider {
-	return &service{}
+func NewProvider() counter.Provider {
+	return &provider{}
 }

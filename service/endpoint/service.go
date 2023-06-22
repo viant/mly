@@ -92,7 +92,7 @@ func (s *Service) initModelHandler(datastores map[string]*datastore.Service, poo
 		go func(model *config.Model) {
 			defer waitGroup.Done()
 			mstart := time.Now()
-			log.Printf("[%s] model init...", model.ID)
+			log.Printf("[%s] model loading", model.ID)
 			if e := s.initModel(datastores, pool, mux, model, &lock); e != nil {
 				log.Printf("[%s init] error:%s", model.ID, e)
 				lock.Lock()
@@ -398,7 +398,6 @@ func (s *Service) shutdownOnInterrupt() {
 	}()
 }
 
-//New creates a bridge Service
 func New(config *Config) (*Service, error) {
 	mux := http.NewServeMux()
 

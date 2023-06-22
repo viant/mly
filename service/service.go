@@ -113,7 +113,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	}
 
 	if err != nil {
-		stats.Append(err)
+		stats.Append(stat.Invalid)
 		return clienterr.Wrap(fmt.Errorf("%w, body: %s", err, request.Body))
 	}
 
@@ -487,6 +487,7 @@ func (s *Service) scheduleModelReload() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
+		// TODO extend backwards compatibility testing
 		err := s.reloadIfNeeded(ctx)
 		if err != nil {
 			log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
@@ -544,6 +545,24 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 			outputName := s.signature.Outputs[outputIdx].Name
 
 			switch actual := v.(type) {
+			case [][]string:
+				if len(actual) > 0 {
+					switch len(actual) {
+					case 0:
+					case 1:
+						if hasBatchSize {
+							msg.PutStrings(outputName, []string{actual[0][0]})
+						} else {
+							msg.PutString(outputName, actual[0][0])
+						}
+					default:
+						var stringSlice = make([]string, len(actual))
+						for i, vec := range actual {
+							stringSlice[i] = vec[0]
+						}
+						msg.PutStrings(outputName, stringSlice)
+					}
+				}
 			case [][]int64:
 				if len(actual) > 0 {
 					switch len(actual) {
@@ -589,6 +608,7 @@ func (s *Service) logEvaluation(request *Request, output interface{}, timeTaken 
 	}
 }
 
+// Deprecated and unused. Loads common.Dictionary from a remote source.
 func (s *Service) loadDictionary(ctx context.Context, URL string) (*common.Dictionary, error) {
 	var result = &common.Dictionary{}
 	rawReader, err := s.fs.OpenURL(ctx, URL)
@@ -623,7 +643,7 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 	srv := &Service{
 		fs:              fs,
 		config:          cfg,
-		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewService()),
+		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
 		evaluatorMetric: metrics.MultiOperationCounter(location, cfg.ID+"Eval", cfg.ID+" evaluator performance", time.Microsecond, time.Minute, 2, sstat.NewService()),
 		useDatastore:    cfg.UseDictionary() && cfg.DataStore != "",
 		inputs:          make(map[string]*domain.Input),
