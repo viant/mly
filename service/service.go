@@ -113,6 +113,7 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 	}
 
 	if err != nil {
+		// only captures missing fields
 		stats.Append(stat.Invalid)
 		return clienterr.Wrap(fmt.Errorf("%w, body: %s", err, request.Body))
 	}

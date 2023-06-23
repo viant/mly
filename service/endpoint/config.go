@@ -9,7 +9,6 @@ import (
 	"github.com/viant/afs"
 	"github.com/viant/mly/service/config"
 	econfig "github.com/viant/mly/service/endpoint/config"
-	"github.com/viant/mly/shared/common"
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/toolbox"
 	"gopkg.in/yaml.v2"
@@ -21,23 +20,24 @@ const (
 	configURI = "/v1/api/config/"
 )
 
-//Config represents an endpoint config
+// Config represents an endpoint config
 type Config struct {
 	config.ModelList      `json:",omitempty" yaml:",inline"`
 	sconfig.DatastoreList `json:",omitempty" yaml:",inline"`
 	Endpoint              econfig.Endpoint
 	EnableMemProf         bool
+	EnableCPUProf         bool
 	AllowedSubnet         []string `json:",omitempty" yaml:",omitempty"`
 }
 
-//Init initialise config
+// Init initialise config
 func (c *Config) Init() {
 	c.ModelList.Init()
 	c.DatastoreList.Init()
 	c.Endpoint.Init()
 }
 
-//Validate validates config
+// Validate validates config
 func (c *Config) Validate() error {
 	if err := c.ModelList.Validate(); err != nil {
 		return err
@@ -72,26 +72,7 @@ func (c *Config) LoadFromURL(ctx context.Context, URL string, target interface{}
 	return nil
 }
 
-type configHandler struct {
-	*Config
-}
-
-func (h *configHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	if !common.IsAuthorized(request, h.Config.AllowedSubnet) {
-		writer.WriteHeader(http.StatusForbidden)
-		return
-	}
-	JSON, _ := json.Marshal(h.Config)
-	writer.Header().Set("Content-Type", "application/json")
-	writer.Write(JSON)
-}
-
-//NewConfigHandler creates a config handler
-func NewConfigHandler(config *Config) http.Handler {
-	return &configHandler{Config: config}
-}
-
-//NewConfigFromURL creates a new config from URL
+// NewConfigFromURL creates a new config from URL
 func NewConfigFromURL(ctx context.Context, URL string) (*Config, error) {
 	cfg := &Config{}
 	if err := cfg.LoadFromURL(ctx, URL, cfg); err != nil {
@@ -99,4 +80,18 @@ func NewConfigFromURL(ctx context.Context, URL string) (*Config, error) {
 	}
 	cfg.Init()
 	return cfg, cfg.Validate()
+}
+
+type configHandler struct {
+	*Config
+}
+
+func (h *configHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	JSON, _ := json.Marshal(h.Config)
+	writer.Header().Set("Content-Type", "application/json")
+	writer.Write(JSON)
+}
+
+func NewConfigHandler(config *Config) http.Handler {
+	return &configHandler{Config: config}
 }

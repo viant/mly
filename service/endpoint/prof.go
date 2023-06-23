@@ -4,34 +4,31 @@ import (
 	"net/http"
 	"runtime/pprof"
 	"sync"
-
-	"github.com/viant/mly/shared/common"
 )
 
 const memProfURI = "/v1/api/debug/memprof"
 
-type profHandler struct {
-	config *Config
-	l      *sync.Mutex
+const cpuProfIndexURI = "/v1/api/debug/pprof"
+
+const cpuProfCmdlineURI = "/v1/api/debug/pprof/cmdline"
+const cpuProfProfileURI = "/v1/api/debug/pprof/profile"
+const cpuProfSymbolURI = "/v1/api/debug/pprof/symbol"
+const cpuProfTraceURI = "/v1/api/debug/pprof/trace"
+
+type memProfHandler struct {
+	l *sync.Mutex
 }
 
-func NewProfHandler(config *Config) *profHandler {
-	return &profHandler{
-		config: config,
-		l:      new(sync.Mutex),
+func NewProfHandler() *memProfHandler {
+	return &memProfHandler{
+		l: new(sync.Mutex),
 	}
 }
 
-func (h *profHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	if !common.IsAuthorized(request, h.config.AllowedSubnet) {
-		writer.WriteHeader(http.StatusForbidden)
-		return
-	}
-
+func (h *memProfHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	h.l.Lock()
 	defer h.l.Unlock()
 
 	writer.Header().Set("Content-Disposition", "attachment; filename=memprof.prof")
 	pprof.WriteHeapProfile(writer)
-	return
 }

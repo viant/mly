@@ -24,6 +24,7 @@ import (
 
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
@@ -401,15 +402,26 @@ func (s *Service) shutdownOnInterrupt() {
 func New(config *Config) (*Service, error) {
 	mux := http.NewServeMux()
 
-	mux.Handle(configURI, NewConfigHandler(config))
+	am := NewAuthMux(mux, config)
+
+	am.Handle(configURI, NewConfigHandler(config))
 
 	if config.EnableMemProf {
 		log.Print("!!! enabling memory profiling endpoint !!!")
-		mux.Handle(memProfURI, NewProfHandler(config))
+		am.Handle(memProfURI, NewProfHandler())
 	}
 
-	healthHandler := NewHealthHandler(config)
-	mux.Handle(healthURI, healthHandler)
+	if config.EnableCPUProf {
+		log.Print("!!! enabling cpu profiling endpoints !!!")
+		am.HandleFunc(cpuProfIndexURI, pprof.Index)
+		am.HandleFunc(cpuProfCmdlineURI, pprof.Cmdline)
+		am.HandleFunc(cpuProfProfileURI, pprof.Profile)
+		am.HandleFunc(cpuProfSymbolURI, pprof.Symbol)
+		am.HandleFunc(cpuProfTraceURI, pprof.Trace)
+	}
+
+	healthHandler := NewHealthHandler()
+	am.Handle(healthURI, healthHandler)
 
 	metrics := gmetric.New()
 	metricHandler := gmetric.NewHandler(common.MetricURI, metrics)
