@@ -3,6 +3,7 @@ import itertools
 import numpy as np
 import random
 import tensorflow as tf
+import time
 from tensorflow.keras import Input, Model
 from tensorflow.keras.layers import Concatenate, Lambda, Layer
 from tensorflow.keras.layers.experimental.preprocessing import StringLookup, TextVectorization
@@ -43,6 +44,8 @@ if __name__ == '__main__':
 
     ap.add_argument('--no-lookup-layer', action='store_true', help='for broken_case_v0_5_0 model')
     ap.add_argument('--no-keyed-out', action='store_true', help='for testing v0.5.0')
+
+    ap.add_argument('--no-slow', action='store_true', help='for testing thread limit')
 
     pa, _ = ap.parse_known_args()
 
@@ -126,7 +129,9 @@ if __name__ == '__main__':
         print(test_tensor)
 
         print('# Prediction')
+        start = time.perf_counter()
         print(check_model.predict(test_tensor))
+        print(f'{time.perf_counter() - start} elapsed')
 
         save_dir = f'{check_model.name}_model'
         print(f'Saving model to {save_dir}...')
@@ -170,7 +175,10 @@ if __name__ == '__main__':
 
         lookup_source = {c: [chr(ord(l) + i) for l in vocab_data] for i, c in enumerate(str_cols)}
         print(lookup_source)
+
+        # explicitly use layers.Input instead of keras.Input
         input_layer = tf.keras.layers.Input(name='lookuplayer_input', shape=(1,), dtype=tf.int32)
+
         keys = list(range(len(vocab_data)))
         lookup_layers = [LookupLayer(keys, lookup_source[c], default_value='', name=c) for c in str_cols]
 
@@ -193,6 +201,41 @@ if __name__ == '__main__':
         test_tf_tensor = dict(i=tf.expand_dims(tf.constant(test_ll_data), axis=1))
         ko_model.predict(test_tf_tensor)
         model_test_save(test_tf_tensor, ko_model)
+
+    if not pa.no_slow:
+        repeat_depth = (1024 * 4) ** 2
+
+        r = Lambda(lambda t: tf.repeat(t, repeat_depth, axis=-1), name='repeater')
+        d = Lambda(lambda d: tf.divide(d['x'], d['y']), name='divider')
+        m = Lambda(lambda m: tf.multiply(m['x'], m['y']), name='multiplier')
+        s = Lambda(lambda t: tf.expand_dims(tf.math.reduce_sum(t, axis=-1), axis=-1), name='summer')
+
+        i_x = tf.keras.layers.Input(name='x', shape=(1,), dtype=tf.float32)
+        i_y = tf.keras.layers.Input(name='y', shape=(1,), dtype=tf.float32)
+
+        rx = r(i_x)
+        ry = r(i_y)
+        # rx / ry
+        o = d(dict(x=rx, y=ry))
+        # rx^2 / ry
+        o = m(dict(x=o, y=rx))
+        # sum(rx^2/ry)
+        so = s(o)
+        # rx^2 * sum(rx^2/ry) / ry
+        o = m(dict(x=o, y=so))
+        # rx^2 * sum(rx^2/ry) / ry^2
+        o = d(dict(x=o, y=ry))
+        # sum(rx^2 * sum(rx^2/ry) / ry^2)
+        so = s(o)
+        # [rx^2 * sum(rx^2/ry)] / [ry^2 * sum(rx^2 * sum(rx^2/ry) / ry^2)]
+        o = d(dict(x=o, y=so))
+        o = s(o)
+        o = Lambda(lambda t: t, name='output')(o)
+
+        slow_model = Model(inputs=[i_x, i_y], outputs=[o], name='slow')
+
+        test_tf_tensor = dict(x=tf.constant([[4], [8]]), y=tf.constant([[5], [9]]))
+        model_test_save(test_tf_tensor, slow_model)
 
     print('Done.')
 
