@@ -68,29 +68,10 @@ The library supports 3 types of caching:
 - external Aerospike cache
 - hybrid
 
-When the in-memory cache is used, both the client and web service manage their cache independently; meaning if data is missing in the client cache, the client will send a request to server endpoint.
-
-When an external cache is used, the client will first check the external cache that is shared with web service; if data is found, it's copied to local in-memory cache. 
-
+Currently, only the client supports the in-memory cache. 
 The in-memory cache uses [scache](https://github.com/viant/scache)'s most-recently-used implementation.
 
-**Example of `config.yaml` with in-memory cache**
-
-```yaml
-Endpoint:
-  Port: 8086
-
-Models:
-  - ID: mlX
-    URL: s3://myBucket/myModelX
-    OutputType: float32
-    Datastore: mem
-
-Datastores:
-  - ID: mem
-    Cache:
-      SizeMB: 100
-```
+When an external cache is used, the client will first check the external cache that is shared with web service; if data is found, it's copied to local in-memory cache. 
 
 To deal with larger key spaces, an external cache can be further configured using a tiered caching strategy.
 Any cached value will propagate upwards once found.
@@ -116,8 +97,6 @@ Models:
 
 Datastores:
   - ID: mlxCache
-    Cache:
-      SizeMB: 1024
     Connection: local
     Namespace: udb
     Dataset: mlvX
@@ -357,9 +336,8 @@ all compatible with Apache License, Version 2. Please see individual files for d
 
 `mly` is an open source project and contributors are welcome!
 
-See [TODO](TODO.md) list.
-
 ## Credits and Acknowledgements
 
-**Library Author:** Adrian Witas
+**Initial Author:** Adrian Witas
+**Current Author:** David Choi
 
