@@ -13,22 +13,28 @@ import (
 
 // Model represents model config
 type Model struct {
-	ID               string
-	Dir              string
-	URL              string
-	Debug            bool
-	Location         string `json:",omitempty" yaml:",omitempty"`
-	Tags             []string
-	OutputType       string `json:",omitempty" yaml:",omitempty"`
-	UseDict          *bool  `json:",omitempty" yaml:",omitempty"`
-	DictURL          string
-	Transformer      string         `json:",omitempty" yaml:",omitempty"`
-	DataStore        string         `json:",omitempty" yaml:",omitempty"`
-	Modified         *Modified      `json:",omitempty" yaml:",omitempty"`
-	Stream           *config.Stream `json:",omitempty" yaml:",omitempty"`
+	ID    string
+	Dir   string
+	URL   string
+	Debug bool
+
+	Location string `json:",omitempty" yaml:",omitempty"`
+	Tags     []string
+
+	OutputType string `json:",omitempty" yaml:",omitempty"` // Deprecated - we can infer output types from TF graph
+	UseDict    *bool  `json:",omitempty" yaml:",omitempty"`
+	DictURL    string // Deprecated - we usually extract the dictionary/vocabulary from TF graph
+
+	Transformer string `json:",omitempty" yaml:",omitempty"`
+	DataStore   string `json:",omitempty" yaml:",omitempty"`
+
+	Modified *Modified      `json:",omitempty" yaml:",omitempty"`
+	Stream   *config.Stream `json:",omitempty" yaml:",omitempty"`
+
 	shared.MetaInput `json:",omitempty" yaml:",inline"`
 	DictMeta         DictionaryMeta
-	Test             TestPayload `json:",omitempty" yaml:",omitempty"`
+
+	Test TestPayload `json:",omitempty" yaml:",omitempty"`
 }
 
 type TestPayload struct {

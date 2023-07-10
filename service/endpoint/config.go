@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io/ioutil"
+	"net/http"
 
 	"github.com/pkg/errors"
 	"github.com/viant/afs"
@@ -12,8 +13,6 @@ import (
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/toolbox"
 	"gopkg.in/yaml.v2"
-
-	"net/http"
 )
 
 const (
@@ -24,10 +23,11 @@ const (
 type Config struct {
 	config.ModelList      `json:",omitempty" yaml:",inline"`
 	sconfig.DatastoreList `json:",omitempty" yaml:",inline"`
-	Endpoint              econfig.Endpoint
-	EnableMemProf         bool
-	EnableCPUProf         bool
-	AllowedSubnet         []string `json:",omitempty" yaml:",omitempty"`
+
+	Endpoint      econfig.Endpoint
+	EnableMemProf bool
+	EnableCPUProf bool
+	AllowedSubnet []string `json:",omitempty" yaml:",omitempty"`
 }
 
 // Init initialise config

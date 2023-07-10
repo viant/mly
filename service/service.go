@@ -33,6 +33,7 @@ import (
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/mly/shared/datastore"
+	"github.com/viant/mly/shared/semaph"
 	sstat "github.com/viant/mly/shared/stat"
 	"github.com/viant/mly/shared/transfer"
 	tlog "github.com/viant/tapper/log"
@@ -42,29 +43,42 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Service represents ml service
 type Service struct {
-	mux             sync.RWMutex
-	fs              afs.Service
-	evaluator       *tfmodel.Evaluator
-	signature       *domain.Signature
-	dictionary      *common.Dictionary
-	inputs          map[string]*domain.Input
-	useDatastore    bool
-	datastore       datastore.Storer
-	transformer     domain.Transformer
-	newStorable     func() common.Storable
-	config          *config.Model
+	config *config.Model
+	closed int32
+
+	// TODO how does this interact with Service.inputs
+	inputProvider *gtly.Provider
+
+	// reload
+	ReloadOK int32
+	fs       afs.Service
+	mux      sync.RWMutex
+
+	// model
+	sema       *semaph.Semaph // prevents potentially explosive thread generation due to concurrent requests
+	evaluator  *tfmodel.Evaluator
+	signature  *domain.Signature
+	dictionary *common.Dictionary
+	inputs     map[string]*domain.Input
+
+	// caching
+	useDatastore bool
+	datastore    datastore.Storer
+
+	// outputs
+	transformer domain.Transformer
+	newStorable func() common.Storable
+
+	// metrics
 	serviceMetric   *gmetric.Operation
 	evaluatorMetric *gmetric.Operation
-	closed          int32
-	ReloadOK        int32
-	inputProvider   *gtly.Provider
-	logger          *tlog.Logger
-	msgProvider     *msg.Provider
+
+	// logging
+	logger      *tlog.Logger
+	msgProvider *msg.Provider
 }
 
-// Close closes service
 func (s *Service) Close() error {
 	if !atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
 		return fmt.Errorf("already closed")
@@ -75,17 +89,14 @@ func (s *Service) Close() error {
 	return s.evaluator.Close()
 }
 
-// Config returns service config
 func (s *Service) Config() *config.Model {
 	return s.config
 }
 
-// Dictionary returns service dictionary
 func (s *Service) Dictionary() *common.Dictionary {
 	return s.dictionary
 }
 
-// Do handles service request
 func (s *Service) Do(ctx context.Context, request *Request, response *Response) error {
 	err := s.do(ctx, request, response)
 	if err != nil {
@@ -116,6 +127,12 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 		// only captures missing fields
 		stats.Append(stat.Invalid)
 		return clienterr.Wrap(fmt.Errorf("%w, body: %s", err, request.Body))
+	}
+
+	if err != nil {
+		stats.Append(err)
+		log.Printf("[%v do] limiter error:(%+v) request:(%+v)", s.config.ID, err, request)
+		return err
 	}
 
 	stats.Append(stat.Evaluate)
@@ -397,7 +414,7 @@ func (s *Service) isModified(snapshot *config.Modified) bool {
 	return !(modified.Max.Equal(snapshot.Max) && modified.Min.Equal(snapshot.Min))
 }
 
-// NewRequest creates a new request
+// NewRequest should be used for Do()
 func (s *Service) NewRequest() *Request {
 	return &Request{
 		inputs:   s.inputs,
@@ -632,8 +649,7 @@ func (s *Service) loadDictionary(ctx context.Context, URL string) (*common.Dicti
 }
 
 // New creates a service
-func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, datastores map[string]*datastore.Service, options ...Option) (*Service, error) {
-
+func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, sema *semaph.Semaph, datastores map[string]*datastore.Service, options ...Option) (*Service, error) {
 	if metrics == nil {
 		metrics = gmetric.New()
 	}
@@ -648,6 +664,7 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 		evaluatorMetric: metrics.MultiOperationCounter(location, cfg.ID+"Eval", cfg.ID+" evaluator performance", time.Microsecond, time.Minute, 2, sstat.NewService()),
 		useDatastore:    cfg.UseDictionary() && cfg.DataStore != "",
 		inputs:          make(map[string]*domain.Input),
+		sema:            sema,
 	}
 
 	for _, opt := range options {
