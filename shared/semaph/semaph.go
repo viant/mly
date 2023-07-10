@@ -1,6 +1,7 @@
 package semaph
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
@@ -25,34 +26,53 @@ func NewSemaph(max int32) *Semaph {
 
 // Acquire will block if there are no more "tickets" left; otherwise will decrement number of tickets and continue.
 // Caller must call Release() later.
-// TODO How to incorporate Context?
-func (s *Semaph) Acquire() {
+func (s *Semaph) Acquire(ctx context.Context) error {
 	s.l.Lock()
-	defer s.l.Unlock()
 
+	c := make(chan bool, 1)
 	for s.r <= 0 {
-		// this should unlock
-		s.c.Wait()
-		// should've slept and locked
+		go func() {
+			// this should unlock
+			s.c.Wait()
+			c <- true
+		}()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c:
+			// should've slept and locked
+		}
 	}
 
+	defer s.l.Unlock()
 	s.r -= 1
+	return nil
 }
 
-func (s *Semaph) acquireDebug(f func(n int32) string) {
+func (s *Semaph) acquireDebug(ctx context.Context, f func(n int32) string) error {
 	s.l.Lock()
-	defer s.l.Unlock()
 
 	fmt.Printf("acquiring %s", f(s.r))
 
+	c := make(chan bool, 1)
 	for s.r <= 0 {
-		// this should unlock
-		s.c.Wait()
-		// should've slept and locked
-		fmt.Printf("waited %s", f(s.r))
+		go func() {
+			s.c.Wait()
+			c <- true
+		}()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c:
+			fmt.Printf("waited %s", f(s.r))
+		}
 	}
 
+	defer s.l.Unlock()
 	s.r -= 1
+	return nil
 }
 
 // Release will free up a "ticket", and if there were any waiting goroutines, will Signal() (one of) them.

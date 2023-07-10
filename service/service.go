@@ -244,10 +244,16 @@ func (s *Service) incrementPending(startTime time.Time) func() {
 }
 
 func (s *Service) evaluate(ctx context.Context, request *Request) ([]interface{}, error) {
+	err := s.sema.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	startTime := time.Now()
 	onDone := s.evaluatorMetric.Begin(startTime)
 	stats := sstat.NewValues()
 	defer func() {
+		s.sema.Release()
 		onDone(time.Now(), stats.Values()...)
 	}()
 

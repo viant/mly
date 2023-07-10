@@ -1,9 +1,11 @@
 package semaph
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -26,12 +28,14 @@ func TestCore(t *testing.T) {
 	dones := make([]bool, numWaiters)
 	var doneL bool
 
+	bctx := context.Background()
+
 	// since semaphore size is 2 and num workers is 3, we should have 1 worker block
 	for x := 1; x <= numWaiters; x++ {
 		go func(id int, marker *bool) {
 			waitAcq.Done()
 			fmt.Printf("i%d acquiring\n", id)
-			s.Acquire()
+			s.Acquire(bctx)
 			defer s.Release()
 			waitAcqd.Done()
 
@@ -45,28 +49,28 @@ func TestCore(t *testing.T) {
 	}
 
 	fmt.Printf("m0 wait for semaphores to be acquired by goroutines\n")
-
 	waitAcq.Wait()
-	fmt.Printf("m0 unlock as enough goroutines should have started\n")
+	fmt.Printf("m0 goroutines should have acquired\n")
 
 	waitAcqd.Wait()
-	fmt.Printf("m0 goroutines should have acquired\n")
 
 	// prevent error from calling wg.Done() too many times
 	waitAcqd.Add(numWaiters - semaSize)
 
 	assert.Equal(t, s.r, int32(0), "the sempahore should not be available")
+
+	fmt.Printf("m0 unlock as enough goroutines should have started\n")
 	ol.Unlock()
 	fmt.Printf("m0 unlocked\n")
 
-	s.Acquire()
+	s.Acquire(bctx)
 	fmt.Printf("m0 acquire proceeded since a goroutine waiting on the lock finished\n")
 
 	fl := new(sync.WaitGroup)
 	fl.Add(1)
 	go func() {
 		fmt.Printf("iL wait for acquire might need to wait for prior 2 goroutines\n")
-		s.Acquire()
+		s.Acquire(bctx)
 		defer s.Release()
 
 		assert.Equal(t, s.r, int32(0), "main and latest goroutine should have locked semaphore")
@@ -102,13 +106,13 @@ func TestOrdering(t *testing.T) {
 	wgd := new(sync.WaitGroup)
 	wgd.Add(tests)
 
-	s.Acquire()
+	s.Acquire(context.Background())
 	for i := 1; i < tests+1; i += 1 {
 		ii := i
 		go func() {
 			wgs.Done()
 			fmt.Printf("%d-acquire\n", ii)
-			s.Acquire()
+			s.Acquire(context.Background())
 			defer s.Release()
 			fmt.Printf("%d-done\n", ii)
 			wgd.Done()
@@ -176,7 +180,7 @@ func TestBurst(t *testing.T) {
 			}
 			semaLock.Unlock()
 
-			s.acquireDebug(func(n int32) string {
+			s.acquireDebug(context.Background(), func(n int32) string {
 				return fmt.Sprintf("%d, %d\n", ii, n)
 			})
 			wgs.Done()
@@ -198,5 +202,18 @@ func TestBurst(t *testing.T) {
 
 	fmt.Printf("maxLockWait:%d maxSemaAcq:%d\n", maxLockWait, maxSemaAcq)
 	assert.True(t, maxLockWait > gomaxthreads, "did not check if 10000+ goroutines locked trigger thread crash")
+}
 
+func TestCtx(t *testing.T) {
+	s := NewSemaph(2)
+
+	bctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+
+	s.Acquire(bctx)
+	s.Acquire(bctx)
+	err := s.Acquire(ctx)
+
+	assert.NotNil(t, err)
 }
