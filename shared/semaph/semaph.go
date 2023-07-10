@@ -1,17 +1,20 @@
 package semaph
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 type Semaph struct {
 	l   sync.Mutex
 	c   *sync.Cond
-	i   int32
+	r   int32 // i.e. remaining tickets
 	max int32
 }
 
 func NewSemaph(max int32) *Semaph {
 	s := new(Semaph)
-	s.i = max
+	s.r = max
 	s.max = max
 
 	s.l = sync.Mutex{}
@@ -27,25 +30,52 @@ func (s *Semaph) Acquire() {
 	s.l.Lock()
 	defer s.l.Unlock()
 
-	for s.i <= 0 {
+	for s.r <= 0 {
 		// this should unlock
 		s.c.Wait()
 		// should've slept and locked
 	}
 
-	s.i -= 1
+	s.r -= 1
+}
+
+func (s *Semaph) acquireDebug(f func(n int32) string) {
+	s.l.Lock()
+	defer s.l.Unlock()
+
+	fmt.Printf("acquiring %s", f(s.r))
+
+	for s.r <= 0 {
+		// this should unlock
+		s.c.Wait()
+		// should've slept and locked
+		fmt.Printf("waited %s", f(s.r))
+	}
+
+	s.r -= 1
 }
 
 // Release will free up a "ticket", and if there were any waiting goroutines, will Signal() (one of) them.
 func (s *Semaph) Release() {
 	s.l.Lock()
-	defer s.l.Unlock()
 
-	if s.i == 0 {
+	if s.r < s.max {
+		s.r += 1
 		s.c.Signal()
 	}
 
-	if s.i < s.max {
-		s.i += 1
+	s.l.Unlock()
+}
+
+func (s *Semaph) releaseDebug(f func(n int32) string) {
+	s.l.Lock()
+
+	fmt.Printf("%s", f(s.r))
+
+	if s.r < s.max {
+		s.r += 1
+		s.c.Signal()
 	}
+
+	s.l.Unlock()
 }
