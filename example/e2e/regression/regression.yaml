@@ -18,7 +18,7 @@ pipeline:
 
     subPath: 'cases/${index}_*'
 
-    range: 1..005
+    range: 1..006
     template:
       checkSkip:
         action: nop
