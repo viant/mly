@@ -128,6 +128,11 @@ The server accepts configuration with the following options:
   - `KeyFields`: optional list of fields used to generate caching key (by default, all model inputs, sorted alphabetically)
   - `DataStore`: optional name of datastore cache
   - `Transformer`: optional name of model output transformer
+  - `Test`: optional enables a client request to send to self on start up
+    * `Test`: boolean if `true`, a client will generate a non-batch request with random values based on the model input signature
+    * `Single`: `map[string]interface{}` if present, will use the provided values for certain input keys, otherwise randomly generated based on model input signature
+    * `SingleBatch`: boolean if `true`, a client will generate a batch request with random values based on the model input signature; if `Single` is set, values will be used for provided keys
+    * `Batch`: `map[string][]interface{}`: if present, will be used to generate a batch of requests
     
 * `Connection` : optional list of external Aerospike connections
   - `ID`: required connection ID
