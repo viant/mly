@@ -14,7 +14,6 @@ pipeline:
 
   start:
     action: process:start
-    sleepTimeMs: 5000
     target: $target
     directory: /tmp/e2e
     checkError: true
@@ -24,4 +23,11 @@ pipeline:
       DEBUG: 'true'
       DYLD_LIBRARY_PATH: /usr/local/lib
       LD_LIBRARY_PATH: /usr/local/lib
+  
+  waitForBoot:
+    action: exec:run
+    target: $target
+    checkError: true
+    commands:
+      - bash ${appPath}/example/e2e/check-port.sh localhost:8086 30
     
