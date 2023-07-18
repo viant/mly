@@ -143,6 +143,11 @@ func (s *Service) do(ctx context.Context, request *Request, response *Response) 
 		return err
 	}
 
+	err = ctx.Err()
+	if err != nil {
+		log.Printf("[%v do] server context Err():%v", s.config.ID, err)
+	}
+
 	return s.buildResponse(ctx, request, response, tensorValues)
 }
 
@@ -263,6 +268,7 @@ func (s *Service) evaluate(ctx context.Context, request *Request) ([]interface{}
 
 	result, err := evaluator.Evaluate(request.Feeds)
 	if err != nil {
+		// this branch is logged by the caller
 		stats.Append(err)
 		return nil, err
 	}

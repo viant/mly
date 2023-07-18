@@ -21,15 +21,10 @@ type Handler struct {
 	pool        *buffer.Pool
 }
 
-//NewContext creates a new context
-func (h *Handler) NewContext() (context.Context, context.CancelFunc) {
-	ctx := context.Background()
-	return context.WithTimeout(ctx, h.maxDuration)
-}
-
 //ServeHTTP serve HTTP
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Request) {
-	ctx, cancel := h.NewContext()
+	ctx := httpRequest.Context()
+	ctx, cancel := context.WithTimeout(ctx, h.maxDuration)
 	defer cancel()
 
 	isDebug := h.service.config.Debug

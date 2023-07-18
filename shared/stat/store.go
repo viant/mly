@@ -10,6 +10,8 @@ func (p store) Keys() []string {
 		NoSuchKey,
 		Timeout,
 		Down,
+		Canceled,
+		DeadlineExceeded,
 	}
 }
 
@@ -28,6 +30,10 @@ func (p store) Map(value interface{}) int {
 			return 2
 		case Down:
 			return 3
+		case Canceled:
+			return 4
+		case DeadlineExceeded:
+			return 5
 		}
 	}
 	return -1

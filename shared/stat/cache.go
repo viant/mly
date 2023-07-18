@@ -11,6 +11,9 @@ const (
 	CacheCollision = "collision"
 	CacheHit       = "cacheHit"
 	CacheExpired   = "expired"
+	// Context errors
+	Canceled         = "canceled"
+	DeadlineExceeded = "deadlineExceeded"
 	// Aerospike Errors
 	Timeout = "timeout"
 	Down    = "down"
@@ -37,6 +40,7 @@ func (p cache) Map(value interface{}) int {
 	if value == nil {
 		return -1
 	}
+
 	switch val := value.(type) {
 	case error:
 		return 0

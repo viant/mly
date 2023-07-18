@@ -15,6 +15,8 @@ type Options struct {
 	Storable   string `short:"s" long:"storable"`
 	PayloadStr string `short:"a" long:"payload"`
 	Format     string `short:"f" long:"format" choice:"mly" choice:"json"`
+	TimeoutUs  int    `short:"t" long:"timeout"`
+	Metrics    bool   `long:"metrics"`
 }
 
 type C uint8

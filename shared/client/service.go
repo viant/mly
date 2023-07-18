@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -116,8 +117,15 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	if s.Config.Debug {
 		fmt.Printf("[%v] response.Body: %s, %v\n", s.Config.Model, body, err)
 	}
+
 	if err != nil {
-		stats.Append(err)
+		if errors.Is(err, context.Canceled) {
+			stats.Append(stat.Canceled)
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			stats.Append(stat.DeadlineExceeded)
+		} else {
+			stats.Append(err)
+		}
 		return err
 	}
 

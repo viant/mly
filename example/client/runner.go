@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/endpoint/checker"
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/mly/shared/common/storable"
@@ -29,7 +31,9 @@ func RunWithOptions(options *Options) error {
 		fmt.Printf("payload:%v\n", pl)
 	}
 
-	cli, err := client.New(options.Model, options.Hosts(), client.WithDebug(options.Debug))
+	gm := gmetric.New()
+
+	cli, err := client.New(options.Model, options.Hosts(), client.WithDebug(options.Debug), client.WithGmetrics(gm))
 	if err != nil {
 		return err
 	}
@@ -56,9 +60,24 @@ func RunWithOptions(options *Options) error {
 
 	response.Data = maker()
 
-	err = cli.Run(context.Background(), message, response)
-	if err != nil {
+	ctx := context.Background()
+	cancel := func() {}
+	if options.TimeoutUs > 0 {
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(options.TimeoutUs)*time.Microsecond)
+	}
+
+	err = cli.Run(ctx, message, response)
+
+	if err != nil && !options.Metrics {
 		return err
+	}
+
+	cancel()
+
+	if options.Metrics {
+		ctrs := gm.OperationCounters()
+		toolbox.Dump(ctrs)
+		return nil
 	}
 
 	toolbox.Dump(response)
