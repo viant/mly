@@ -69,6 +69,7 @@ func RunWithOptions(options *Options) error {
 	err = cli.Run(ctx, message, response)
 
 	if err != nil && !options.Metrics {
+		cancel()
 		return err
 	}
 

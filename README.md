@@ -42,10 +42,8 @@ Endpoint:
 Models:
   - ID: ml0
     URL: gs://modelBucket/Ml0ModelFolder
-    OutputType: float32
   - ID: mlx
     URL: gs://modelBucket/MlXModelFolder
-    OutputType: float32
 ```
 
 2. Start the example server (in the background) with `go run ./example/server -c config.yaml`.
@@ -90,16 +88,15 @@ Endpoint:
   Port: 8080
 
 Models:
-  - ID: mlv
+  - ID: mlx
     URL: s3://myBucket/myModelX
-    OutputType: float32
     Datastore: mlxCache
 
 Datastores:
   - ID: mlxCache
     Connection: local
     Namespace: udb
-    Dataset: mlvX
+    Dataset: mlX
 
 Connections:
   - ID: local
@@ -117,44 +114,58 @@ Once a client detects a change in dictionary hash code, it automatically initiat
 ### Server
 
 The server accepts configuration with the following options:
+See `service/config/model.go` for types.
 
 * `Models` : list of models
-  - `ID`: required model ID
-  - `URL`: required model location  
+  - `ID`: `string` - required - model ID.
+  - `Debug`: `bool` - optional - enables further output and debugging.
+  - `Location`: `string` - optional - path the model will be copied to.
+  - `Dir`: `string` - optional - if `Location` is not provided, will use this directory after `os.TempDir()` and `ID` as `Location`, ignored if `Location` is provided.
+  - `URL`: `string` - required - model location source.
     * to use S3, set environment variable `AWS_SDK_LOAD_CONFIG=true`
     * to use GCS, set environment variable `GOOGLE_APPLICATION_CREDENTIALS=true`
-  - `Tags`: optional model tags, default "serve"
-  - `UseDict`: optional flag to use dictionary/caching, default `true`
-  - `KeyFields`: optional list of fields used to generate caching key (by default, all model inputs, sorted alphabetically)
-  - `DataStore`: optional name of datastore cache
-  - `Transformer`: optional name of model output transformer
-  - `Test`: optional enables a client request to send to self on start up
-    * `Test`: boolean if `true`, a client will generate a non-batch request with random values based on the model input signature
-    * `Single`: `map[string]interface{}` if present, will use the provided values for certain input keys, otherwise randomly generated based on model input signature
-    * `SingleBatch`: boolean if `true`, a client will generate a batch request with random values based on the model input signature; if `Single` is set, values will be used for provided keys
-    * `Batch`: `map[string][]interface{}`: if present, will be used to generate a batch of requests
+  - `Tags`: `[]string` - optional - model tags, default "serve".
+  - `UseDict`: `bool` - optional - enables cache key space reduction, default `true`.
+  - `DictURL`: `string` - deprecated, optional - URL that has dictionary; this is no longer supported and will be removed.
+  - `Inputs`: optional - used to further provide or define inputs, a list of `shared.Field`.
+    * `Name`: `string` - required - input name, only required if an entry is provided.
+    * `Index`: `int` - optional - used to maintain cache key ordering.
+    * `DataType`: `string` - optional - will be extracted from the model.
+    * `Auxiliary`: `bool` - optional - the input is permitted to be provided in an evaluation request.
+    * `Wildcard`: `bool` - optional - if enabled this input will not have a vocabulary for lookup.
+    * `Precision`: `int` - optional - if the input is a float type and dictionary is enabled, this can be used to round the value to a lower precision which can improve cache hit rates.
+  - `KeyFields`: `[]string` - deprecated, optional - list of fields used to generate caching key (by default, all model inputs, sorted alphabetically). Deprecated, no longer used; all inputs are used to generate a cache key.
+  - `Auxiliary`: `[]string` - deprecated, optional - list of additional fields that are acceptable for eval server call. Deprecated, use `Field.Auxiliary`.
+  - `Outputs`: `[]shared.Field` - deprecated, optional - model outputs are automatically pulled from the model.
+  - `DataStore`: `string` - optional - name of Datastore to cache, should match `Datastores[].ID`.
+  - `Transformer`: `string` - optional - name of model output transformer.
+  - `Test`: optional - enables a client request to send to self on start up.
+    * `Test`: `bool` - if `true`, a client will generate a non-batch request with random values based on the model input signature
+    * `Single`: `map[string]interface{}` - if present, will use the provided values for certain input keys, otherwise randomly generated based on model input signature
+    * `SingleBatch`: `bool` - if `true`, a client will generate a batch request with random values based on the model input signature; if `Single` is set, values will be used for provided keys
+    * `Batch`: `map[string][]interface{}` - if present, will be used to generate a batch of requests
     
-* `Connection` : optional list of external Aerospike connections
-  - `ID`: required connection ID
-  - `Hostnames`: required Aerospike hostnames
+* `Connection`: optional - list of external Aerospike connections.
+  - `ID`: `string` - required - connection ID
+  - `Hostnames`: `string` - required - Aerospike hostnames
 
 * `Datastores` : list of datastore caches
-  - `ID`: required datastore ID (to be matched with `Model.DataStore`)
-  - `Connection`: optional connection ID
-  - `Namespace`: optional Aerospike namespace
-  - `Dataset`: optional Aerospike dataset 
-  - `Storable`: name of registered `storable` provider
-  - `Cache`: optional in-memory cache setting
-      * `SizeMB`: optional cache size in MB
+  - `ID`: `string` - required - datastore ID (to be matched with `Models[].DataStores[].ID`)
+  - `Connection`: `string` - optional - connection ID
+  - `Namespace`: `string` - optional - Aerospike namespace
+  - `Dataset`: `string` - optional - Aerospike dataset 
+  - `Storable`: `string` - optional - name of registered `storable` provider
+  - `Cache`: optional - in-memory cache setting
+    * `SizeMB`: `int` - optional - cache size in MB
 
 * `Endpoint`: some special administrative options
-  - `Port`: used in `addr` for `http.Server`, default `8080`
-  - `ReadTimeoutMs`, `WriteTimeoutMs` - additional settings for `http.Server`, default `5000` for both
-  - `MaxHeaderBytes` - additional settings for `http.Server`, default `8192` (`8 * 1024`)
-  - `WriteTimeout` - maximum request timeout
-  - `PoolMaxSize`, `BufferSize`: controls implementation of `net/http/httputil`, default `512` and `131072` (`128 * 1024`), respectively
+  - `Port`: `int` - optional - used in `addr` for `http.Server`, default `8080`.
+  - `ReadTimeoutMs`, `WriteTimeoutMs`: `int` - optional - additional settings for `http.Server`, default `5000` for both.
+  - `MaxHeaderBytes`: `int` - optional - additional settings for `http.Server`, default `8192` (`8 * 1024`).
+  - `WriteTimeout`: `int` - optional - maximum request timeout.
+  - `PoolMaxSize`, `BufferSize`: `int` - optional - controls implementation of `net/http/httputil`, default `512` and `131072` (`128 * 1024`), respectively.
 
-* `EnableMemProf`: enables endpoint for memory profiling
+* `EnableMemProf`: `bool` - optional - enables endpoint for memory profiling.
 
 ### Client
  
@@ -288,13 +299,11 @@ Endpoint:
 Models:
   - ID: ml0
     URL: gs://modelBucket/Ml0ModelFolder
-    OutputType: float32
   - ID: mlx
     URL: gs://modelBucket/MlXModelFolder
-    OutputType: float32
 ```
 
-The endpoint will provide a response like:
+The `/v1/api/health` endpoint will provide a response like:
 
 ```
 {
@@ -345,4 +354,3 @@ all compatible with Apache License, Version 2. Please see individual files for d
 
 **Initial Author:** Adrian Witas
 **Current Author:** David Choi
-

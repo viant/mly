@@ -5,6 +5,7 @@ models:
   - id: sli
     url: ${appPath}/example/model/string_lookups_int_model
     useDict: true
+    debug: false
     datastore: sli
     inputs:
       - name: sa
@@ -17,7 +18,7 @@ models:
   - id: slf
     url: ${appPath}/example/model/string_lookups_float_model
     useDict: true
-    debug: true
+    debug: false
     datastore: slf
     transformer: slft
     inputs:
@@ -28,9 +29,17 @@ models:
     test:
       singleBatch: true
 
+  - id: fli
+    url: ${appPath}/example/model/float_input_int_model
+    useDict: true
+    inputs:
+      - name: fl
+        precision: 4
+
   - id: vec
     url: ${appPath}/example/model/vectorization_int_model
     useDict: true
+    debug: false
     datastore: vec
     inputs:
       - name: tv
@@ -44,6 +53,7 @@ models:
   - id: ll
     url: ${appPath}/example/model/broken_case_v0_5_0_model
     useDict: false
+    debug: false
     inputs:
       - name: lookuplayer_input
     test:
@@ -52,8 +62,14 @@ models:
   - id: ko
     url: ${appPath}/example/model/keyed_out_model
     useDict: false
-    inputs:
-      - name: i
+    debug: false
+    test:
+      singleBatch: true
+
+  - id: slow
+    url: ${appPath}/example/model/slow_model
+    useDict: false
+    debug: false
     test:
       singleBatch: true
 

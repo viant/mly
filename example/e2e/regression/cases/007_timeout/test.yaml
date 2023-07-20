@@ -1,0 +1,18 @@
+init:
+  parentPath: $parent.path
+
+pipeline:
+  test:
+    action: exec:run
+    target: $target
+    checkError: true
+    commands:
+      - /tmp/e2e/mlyc --metrics -t 10 -m slow -a 'x|float32:0.5;y|float32:0.5'
+
+  assertMetrics:
+    action: validator:assert
+    init:
+      actual: $AsJSON($test.Cmd[0].Stdout)
+    actual: $actual
+    expect: $LoadJSON('${parentPath}/metrics.json')
+

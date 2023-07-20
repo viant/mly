@@ -37,6 +37,7 @@ func (c *CliPayload) SetBatch(msg *client.Message) {
 	}
 }
 
+// Bind delegates types to appropriate client.Message method.
 func (c *CliPayload) Bind(k string, value interface{}, msg *client.Message) error {
 	if c.Batch > 0 {
 		switch v := value.(type) {
