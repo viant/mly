@@ -1,24 +1,28 @@
 package shared
 
-import "reflect"
+import (
+	"reflect"
+)
 
 type (
 	Field struct {
-		Name      string
-		Index     int
-		Wildcard  bool   `json:",omitempty" yaml:",omitempty"`
-		Layer     string `json:",omitempty" yaml:",omitempty"`
-		DataType  string `json:",omitempty" yaml:",omitempty"`
-		rawType   reflect.Type
+		Name     string
+		Index    int
+		DataType string `json:",omitempty" yaml:",omitempty"`
+
 		Auxiliary bool `json:",omitempty" yaml:",omitempty"`
+		Wildcard  bool `json:",omitempty" yaml:",omitempty"`
+		Precision int  `json:",omitempty" yaml:",omitempty"`
+
+		rawType reflect.Type
 	}
 
 	Fields []*Field
 
 	MetaInput struct {
 		Inputs    []*Field
-		KeyFields []string `json:",omitempty" yaml:",omitempty"`
-		Auxiliary []string `json:",omitempty" yaml:",omitempty"`
+		KeyFields []string `json:",omitempty" yaml:",omitempty"` // Deprecated: use Field.Wildcard
+		Auxiliary []string `json:",omitempty" yaml:",omitempty"` // Deprecated: use Field.Auxiliary
 		Outputs   []*Field `json:",omitempty" yaml:",omitempty"`
 	}
 )

@@ -7,14 +7,14 @@ import (
 
 const bufferSize = 64 * 1024
 
-//Messages represent a message
+// Messages represent a message
 type Messages interface {
 	Borrow() *Message
 }
 
 type messages struct {
 	pool    sync.Pool
-	nweDict func() *Dictionary
+	newDict func() *Dictionary
 }
 
 func (p *messages) Borrow() *Message {
@@ -34,7 +34,7 @@ func (p *messages) Borrow() *Message {
 	msg.multiKeys = nil
 	msg.transient = nil
 	msg.cacheHits = nil
-	msg.dictionary = p.nweDict()
+	msg.dictionary = p.newDict()
 	msg.mux.Unlock()
 	return msg
 }
@@ -54,7 +54,7 @@ func NewMessages(newDict func() *Dictionary) Messages {
 		keysLen = dict.KeysLen()
 	}
 	return &messages{
-		nweDict: newDict,
+		newDict: newDict,
 		pool: sync.Pool{
 			New: func() interface{} {
 				return &Message{

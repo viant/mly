@@ -7,21 +7,20 @@ pipeline:
     target: $target
     checkError: true
     commands:
-      - /tmp/e2e/mlyc -m=vec -a 'tv:a b c;sl:a;aux:1'
-      - /tmp/e2e/mlyc -m=vec -a 'tv:a b c;sl:a;aux:1'
+      - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.0005;sl:a'
+      - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.0008;sl:a'
 
   assert:
     action: validator:assert
     init:
       actual: $AsJSON($test.Cmd[0].Stdout)
-      expect: expect
     actual: $actual
-    expect: $LoadJSON('${parentPath}/${expect}.json')
+    expect: $LoadJSON('${parentPath}/expect.json')
 
   assertCache:
     action: validator:assert
     init:
       actual: $AsJSON($test.Cmd[1].Stdout)
-      expect: expect-cache
     actual: $actual
-    expect: $LoadJSON('${parentPath}/${expect}.json')
+    expect: $LoadJSON('${parentPath}/expect-cache.json')
+

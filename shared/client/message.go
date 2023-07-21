@@ -22,7 +22,7 @@ import (
 //    (*Message).FloatKey(string, float32)
 // Batch mode is initiated by called (*Message).SetBatchSize() to a value greater than 0.
 // For batch mode, the JSON payload is generated when (*Message).end() is called.
-// Batch mode functions include (the type is plural):
+// Batch mode functions include (the type name is plural):
 //    (*Message).StringsKey(string, []string)
 //    (*Message).IntsKey(string, []int)
 //    (*Message).FloatsKey(string, []float32)
@@ -30,24 +30,30 @@ import (
 // The resulting JSON will have property keys that are set based on the model, and two optional keys, "batch_size" and "cache_key".
 // Depending on if single or batch mode, the property values will be scalars or arrays.
 // See service.Request for server-side perspective.
+// TODO separate out single and batch sized request to their respective calls endpoints; the abstracted polymorphism currently is more
+// painful than convenient.
 type (
 	Message struct {
+		mux  sync.RWMutex // locks pool
+		pool *messages
+
 		batchSize int
-		keyIndex  int
-		buf       []byte // contains the JSON message as it is built
-		index     int
-		mux       sync.RWMutex
-		pool      *messages
-		keys      []string
-		key       string
-		keyLock   sync.Mutex
-		buffer    *bytes.Buffer // used to build cache key
+
+		buf   []byte // contains the JSON message as it is built
+		index int
+
+		buffer *bytes.Buffer // used to build cache key
+
+		keys []string
+		key  string // memoize join of keys
 
 		// used to represent multi-row requests, with batchSize > 0
-		multiKeys  [][]string
-		multiKey   []string
-		transient  []*transient
-		cacheHits  []bool
+		keyLock   sync.Mutex // locks multiKeys
+		multiKeys [][]string
+		multiKey  []string // memoize keys
+		transient []*transient
+
+		cacheHits  []bool // in multi-row requests, indicates if cache has a value ofr the key
 		dictionary *Dictionary
 	}
 
@@ -140,7 +146,7 @@ func (m *Message) end() error {
 
 // StringKey sets key/value pair
 func (m *Message) StringKey(key, value string) {
-	m.ensureMode("Strings")
+	m.panicIfBatch("Strings")
 	if key, index := m.dictionary.lookupString(key, value); index != unknownKeyField {
 		m.keys[index] = key
 	}
@@ -151,8 +157,8 @@ func (m *Message) StringKey(key, value string) {
 	m.appendString(`",`)
 }
 
-// ensureMode ensure that if multi keys are use no single message is allowed
-func (m *Message) ensureMode(typeName string) {
+// panicIfBatch ensure that if multi keys are use no single message is allowed
+func (m *Message) panicIfBatch(typeName string) {
 	if m.batchSize > 0 {
 		panic(fmt.Sprintf("use %vKey", typeName))
 	}
@@ -162,7 +168,7 @@ func (m *Message) ensureMode(typeName string) {
 func (m *Message) StringsKey(key string, values []string) {
 	m.ensureMultiKeys(len(values))
 	m.transient = append(m.transient, &transient{name: key, values: values, kind: reflect.String})
-	var index int
+	var index fieldOffset
 	var keyValue string
 	for i, value := range values {
 		if len(m.multiKeys[i]) == 0 {
@@ -182,7 +188,7 @@ func (m *Message) IntsKey(key string, values []int) {
 	m.ensureMultiKeys(len(values))
 	m.transient = append(m.transient, &transient{name: key, values: values, kind: reflect.Int64})
 
-	var index int
+	var index fieldOffset
 	var intKeyValue int
 	var keyValue string
 	for i, value := range values {
@@ -199,7 +205,10 @@ func (m *Message) IntsKey(key string, values []int) {
 	m.expandKeysIfNeeds(len(values), index, keyValue)
 }
 
-func (m *Message) expandKeysIfNeeds(valuesLen int, index int, keyValue string) {
+// since messages supports batchSize > 1 while valuesLen == 1, in that case copy the value
+// to fill out the cache keys such that all multiKeys[0 <= i < batchSize] contains
+// the copy of the value
+func (m *Message) expandKeysIfNeeds(valuesLen int, index fieldOffset, keyValue string) {
 	if index < 0 {
 		return
 	}
@@ -219,7 +228,7 @@ func (m *Message) expandKeysIfNeeds(valuesLen int, index int, keyValue string) {
 
 // IntKey sets key/value pair
 func (m *Message) IntKey(key string, value int) {
-	m.ensureMode("Ints")
+	m.panicIfBatch("Ints")
 	if key, index := m.dictionary.lookupInt(key, value); index != unknownKeyField {
 		m.keys[index] = strconv.Itoa(key)
 	}
@@ -236,9 +245,9 @@ func (m *Message) intKey(key string, value int) {
 
 // FloatKey sets key/value pair
 func (m *Message) FloatKey(key string, value float32) {
-	m.ensureMode("Floats")
-	if key, index := m.dictionary.lookupFloat(key, value); index != unknownKeyField {
-		m.keys[index] = strconv.FormatFloat(float64(key), 'f', 10, 32)
+	m.panicIfBatch("Floats")
+	if key, prec, index := m.dictionary.reduceFloat(key, value); index != unknownKeyField {
+		m.keys[index] = strconv.FormatFloat(float64(key), 'f', prec, 32)
 	}
 	m.appendByte('"')
 	m.appendString(key)
@@ -251,39 +260,36 @@ func (m *Message) FloatKey(key string, value float32) {
 func (m *Message) FloatsKey(key string, values []float32) {
 	m.ensureMultiKeys(len(values))
 	m.transient = append(m.transient, &transient{name: key, values: values, kind: reflect.Float32})
-	var index int
+
+	var index fieldOffset
+	var prec int
 	var floatKeyValue float32
 	var keyValue string
 	for i, value := range values {
 		if len(m.multiKeys[i]) == 0 {
 			m.multiKeys[i] = make([]string, m.dictionary.inputSize())
 		}
-		if floatKeyValue, index = m.dictionary.lookupFloat(key, value); index != unknownKeyField {
-			keyValue = strconv.FormatFloat(float64(floatKeyValue), 'f', 10, 32)
+
+		if floatKeyValue, prec, index = m.dictionary.reduceFloat(key, value); index != unknownKeyField {
+			keyValue = strconv.FormatFloat(float64(floatKeyValue), 'f', prec, 32)
 			m.multiKeys[i][index] = keyValue
 		}
 	}
+
 	m.expandKeysIfNeeds(len(values), index, keyValue)
 }
 
-// FloatsKey sets key/values pair
 func (m *Message) floatsKey(key string, values []float32) {
 	m.appendByte('"')
 	m.appendString(key)
-	m.appendString(`":`)
+	m.appendString(`":[`)
 	for i, item := range values {
 		if i > 0 {
 			m.appendByte(',')
 		}
 		m.appendFloat(item, 32)
 	}
-	m.appendString(`,`)
-}
-
-func (m *Message) quotedString(s string) {
-	m.appendByte('"')
-	m.appendString(s)
-	m.appendByte('"')
+	m.appendString(`],`)
 }
 
 func (m *Message) appendBytes(bs []byte) {

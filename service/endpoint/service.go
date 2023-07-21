@@ -82,11 +82,16 @@ func (s *Service) SelfTest() error {
 
 	errs := make([]error, 0)
 	errHandler := make(chan error, 2)
+	defer close(errHandler)
+
+	errc := sync.WaitGroup{}
+	errc.Add(1)
 
 	go func() {
 		for {
 			e := <-errHandler
 			if e == nil {
+				errc.Done()
 				return
 			}
 
@@ -118,7 +123,7 @@ func (s *Service) SelfTest() error {
 
 	// should stop goroutine
 	errHandler <- nil
-	defer close(errHandler)
+	errc.Wait()
 
 	var err error
 	if len(errs) > 0 {

@@ -16,6 +16,7 @@ import (
 	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/tapper/config"
+	"github.com/viant/tapper/io"
 	"github.com/viant/tapper/log"
 	"github.com/viant/tapper/msg"
 	"github.com/viant/tapper/msg/json"
@@ -98,10 +99,13 @@ func discoverLayers(options *Options, model *tf.SavedModel, fs afs.Service) erro
 			exportables = append(exportables, candidate.Name())
 		}
 	}
+
 	dictionary, err := layers.DiscoverDictionary(model.Session, model.Graph, exportables)
 	if err != nil {
 		return err
 	}
+
+	dictionary.UpdateHash()
 
 	logger, err := log.New(&config.Stream{URL: options.DestURL}, "myID", afs.New())
 	if err != nil {
@@ -110,11 +114,17 @@ func discoverLayers(options *Options, model *tf.SavedModel, fs afs.Service) erro
 
 	provider := msg.NewProvider(100*1024*1024, 1, json.New)
 	aMessage := provider.NewMessage()
-	dictLayers := common.Layers(dictionary.Layers)
-
 	aMessage.PutInt("Hash", dictionary.Hash)
-	aMessage.PutObjects("Layers", dictLayers.Encoders())
+	aMessage.PutObjects("Layers", toEncoders(dictionary.Layers))
 	logger.Log(aMessage)
 	aMessage.Free()
 	return logger.Close()
+}
+
+func toEncoders(l []common.Layer) []io.Encoder {
+	var layers = make([]io.Encoder, len(l))
+	for i := range l {
+		layers[i] = &l[i]
+	}
+	return layers
 }

@@ -14,25 +14,30 @@ import (
 // Model represents model config
 type Model struct {
 	ID    string
-	Dir   string
-	URL   string
 	Debug bool
 
 	Location string `json:",omitempty" yaml:",omitempty"`
-	Tags     []string
+	Dir      string
+	URL      string
 
-	OutputType string `json:",omitempty" yaml:",omitempty"` // Deprecated - we can infer output types from TF graph
-	UseDict    *bool  `json:",omitempty" yaml:",omitempty"`
-	DictURL    string // Deprecated - we usually extract the dictionary/vocabulary from TF graph
+	Tags []string
 
-	Transformer string `json:",omitempty" yaml:",omitempty"`
-	DataStore   string `json:",omitempty" yaml:",omitempty"`
-
-	Modified *Modified      `json:",omitempty" yaml:",omitempty"`
-	Stream   *config.Stream `json:",omitempty" yaml:",omitempty"`
-
+	// IO and caching
+	UseDict          *bool  `json:",omitempty" yaml:",omitempty"`
+	DictURL          string // Deprecated: we usually extract the dictionary/vocabulary from TF graph
 	shared.MetaInput `json:",omitempty" yaml:",inline"`
-	DictMeta         DictionaryMeta
+	OutputType       string `json:",omitempty" yaml:",omitempty"` // Deprecated: we can infer output types from TF graph
+	Transformer      string `json:",omitempty" yaml:",omitempty"`
+
+	// caching
+	DataStore string `json:",omitempty" yaml:",omitempty"`
+
+	// logging
+	Stream *config.Stream `json:",omitempty" yaml:",omitempty"`
+
+	// for health and monitoring
+	Modified *Modified `json:",omitempty" yaml:",omitempty"`
+	DictMeta DictionaryMeta
 
 	Test TestPayload `json:",omitempty" yaml:",omitempty"`
 }

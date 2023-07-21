@@ -1,4 +1,4 @@
-package service
+package request
 
 import (
 	"fmt"
@@ -21,7 +21,16 @@ type Request struct {
 	Feeds    []interface{}
 	inputs   map[string]*domain.Input
 	supplied map[string]struct{}
-	input    *transfer.Input
+	Input    *transfer.Input
+}
+
+func NewRequest(keyLen int, inputs map[string]*domain.Input) *Request {
+	return &Request{
+		inputs:   inputs,
+		Feeds:    make([]interface{}, keyLen),
+		Input:    &transfer.Input{},
+		supplied: make(map[string]struct{}, keyLen),
+	}
 }
 
 // Put is used when constructing a request NOT using gojay.
@@ -86,8 +95,8 @@ func (r *Request) Put(key string, value string) error {
 // If the key "batch_size" is provided, then the keys' values should be an array of scalars; otherwise, the keys' values can be a single scalar.
 // The key "cache_key" is used for caching, and should be an array of strings if "batch_size" is provided.
 func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
-	if r.input == nil {
-		r.input = &transfer.Input{}
+	if r.Input == nil {
+		r.Input = &transfer.Input{}
 	}
 
 	if r.supplied == nil {
@@ -96,16 +105,16 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 
 	switch key {
 	case common.BatchSizeKey:
-		return dec.Int(&r.input.BatchSize)
+		return dec.Int(&r.Input.BatchSize)
 	case common.CacheKey:
-		if r.input.BatchMode() {
-			return dec.DecodeArray(&r.input.Keys)
+		if r.Input.BatchMode() {
+			return dec.DecodeArray(&r.Input.Keys)
 		}
 		var k string
 		if err := dec.String(&k); err != nil {
 			return err
 		}
-		if err := r.input.Keys.Set(k); err != nil {
+		if err := r.Input.Keys.Set(k); err != nil {
 			return err
 		}
 	default:
@@ -115,17 +124,17 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 		}
 
 		r.supplied[key] = exists
-		inputValue, err := r.input.SetAt(input.Index, input.Name, input.Type.Kind())
+		inputValue, err := r.Input.SetAt(input.Index, input.Name, input.Type.Kind())
 		if err != nil {
 			return err
 		}
 
-		if r.input.BatchMode() {
+		if r.Input.BatchMode() {
 			if err := dec.DecodeArray(inputValue); err != nil {
 				return err
 			}
 			if !input.Auxiliary {
-				r.Feeds[input.Index] = inputValue.Feed(r.input.BatchSize)
+				r.Feeds[input.Index] = inputValue.Feed(r.Input.BatchSize)
 			}
 			return nil
 		}

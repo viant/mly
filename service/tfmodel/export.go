@@ -11,7 +11,7 @@ const (
 	operationExportTemplate = "%s_lookup_index_table_lookup_table_export_values/LookupTableExportV2"
 )
 
-//Export run model export, or error
+// Export attempts to pull the embedded lookup table from the Tensorflow graph.
 func Export(session *tf.Session, graph *tf.Graph, name string) (interface{}, error) {
 	operationName := name
 	if !strings.HasSuffix(name, "/LookupTableExportV2") {
@@ -20,15 +20,16 @@ func Export(session *tf.Session, graph *tf.Graph, name string) (interface{}, err
 			return nil, fmt.Errorf("failed to match operation for %v", name)
 		}
 	}
+
 	expOperation := graph.Operation(operationName)
 	if expOperation == nil {
-		if expOperation == nil {
-			return nil, fmt.Errorf("failed to lookup RunExport operation: %v", operationName)
-		}
+		return nil, fmt.Errorf("failed to lookup RunExport operation: %v", operationName)
 	}
+
 	return RunExport(session, expOperation)
 }
 
+// MatchOperation will attempt to locate an LookupTableExportV2 operation that is associated to the provided name.
 func MatchOperation(graph *tf.Graph, name string) string {
 	for _, candidate := range graph.Operations() {
 		if strings.HasPrefix(candidate.Name(), name+"_") && strings.HasSuffix(candidate.Name(), "LookupTableExportV2") {
@@ -36,6 +37,7 @@ func MatchOperation(graph *tf.Graph, name string) string {
 		}
 	}
 
+	// dump all operations if no match
 	for _, candidate := range graph.Operations() {
 		fmt.Printf(" - %s\n", candidate.Name())
 	}

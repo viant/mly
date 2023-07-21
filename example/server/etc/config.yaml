@@ -32,6 +32,7 @@ models:
   - id: fli
     url: ${appPath}/example/model/float_input_int_model
     useDict: true
+    datastore: fli
     inputs:
       - name: fl
         precision: 4
@@ -86,15 +87,20 @@ datastores:
     dataset: sli
     timeToLiveMs: 30000
 
-  - id: vec
-    connection: localL1
-    namespace: test
-    dataset: vec
-    timeToLiveMs: 30000
-
   - id: slf
     connection: localL1
     namespace: test
     dataset: slf
     timeToLiveMs: 30000
 
+  - id: vec
+    connection: localL1
+    namespace: test
+    dataset: vec
+    timeToLiveMs: 30000
+
+  - id: fli
+    connection: localL1
+    namespace: test
+    dataset: fli
+    timeToLiveMs: 30000

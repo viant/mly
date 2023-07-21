@@ -137,6 +137,7 @@ func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 	for k, vs := range testData {
 		switch at := vs.(type) {
 		case []float32:
+			fmt.Printf("%+v\n", at)
 			msg.FloatsKey(k, at)
 		case []float64:
 			rat := make([]float32, len(at))
@@ -193,7 +194,7 @@ func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 	err = cli.Run(ctx, msg, resp)
 
 	if err != nil {
-		return fmt.Errorf("%s:Run():%v", modelID, err)
+		return fmt.Errorf("%s:Run():%w", modelID, err)
 	}
 
 	return nil

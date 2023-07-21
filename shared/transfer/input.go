@@ -8,7 +8,7 @@ type Input struct {
 	BatchSize int
 	Keys      Strings
 	Values
-	Unmapped Values //values that are not part of an input
+	Unmapped Values // values that are not part of an input
 }
 
 func (i *Input) BatchMode() bool {

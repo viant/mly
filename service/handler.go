@@ -13,6 +13,7 @@ import (
 	"github.com/francoispqt/gojay"
 	"github.com/viant/mly/service/buffer"
 	"github.com/viant/mly/service/clienterr"
+	"github.com/viant/mly/service/request"
 )
 
 type Handler struct {
@@ -21,7 +22,6 @@ type Handler struct {
 	pool        *buffer.Pool
 }
 
-//ServeHTTP serve HTTP
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Request) {
 	ctx := httpRequest.Context()
 	ctx, cancel := context.WithTimeout(ctx, h.maxDuration)
@@ -91,7 +91,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	}
 }
 
-func (h *Handler) buildRequestFromQuery(httpRequest *http.Request, request *Request) error {
+func (h *Handler) buildRequestFromQuery(httpRequest *http.Request, request *request.Request) error {
 	err := httpRequest.ParseForm()
 	if err != nil {
 		return fmt.Errorf("failed to parse get request: %w", err)
@@ -105,7 +105,7 @@ func (h *Handler) buildRequestFromQuery(httpRequest *http.Request, request *Requ
 	return nil
 }
 
-func (h *Handler) handleAppRequest(ctx context.Context, writer io.Writer, request *Request, response *Response) error {
+func (h *Handler) handleAppRequest(ctx context.Context, writer io.Writer, request *request.Request, response *Response) error {
 	if err := h.service.Do(ctx, request, response); err != nil {
 		response.SetError(err)
 		return err

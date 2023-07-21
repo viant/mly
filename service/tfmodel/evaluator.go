@@ -57,6 +57,7 @@ func NewEvaluator(signature *domain.Signature, session *tf.Session) *Evaluator {
 	for _, output := range signature.Outputs {
 		fetches = append(fetches, output.Output(output.Index))
 	}
+
 	return &Evaluator{
 		Signature: *signature,
 		session:   session,

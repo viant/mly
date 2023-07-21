@@ -47,7 +47,7 @@ type Service struct {
 	httpClient         http.Client
 }
 
-//NewMessage returns a new message
+// NewMessage returns a new message
 func (s *Service) NewMessage() *Message {
 	message := s.messages.Borrow()
 	message.start()
@@ -68,7 +68,7 @@ func (s *Service) dictionary() *Dictionary {
 	return dict
 }
 
-//Run run model prediction
+// Run run model prediction
 func (s *Service) Run(ctx context.Context, input interface{}, response *Response) error {
 	onDone := s.counter.Begin(time.Now())
 	stats := stat.NewValues()
@@ -94,7 +94,11 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		}
 	}
 
-	if s.Config.Debug {
+	isDebug := s.Config.Debug
+
+	var modelName string
+	if isDebug {
+		modelName = s.Config.Model
 		s.reportBatch(cachedCount, cached)
 	}
 
@@ -103,19 +107,20 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		return s.handleResponse(ctx, response.Data, cached, cachable)
 	}
 
-	data, err := NewReader(input)
+	data, err := Marshal(input, modelName)
 	if err != nil {
 		return err
 	}
 
 	stats.Append(stat.NoSuchKey)
-	if s.Config.Debug {
-		fmt.Printf("[%v] request: %s\n", s.Config.Model, strings.Trim(string(data), " \n"))
+	if isDebug {
+		fmt.Printf("[%s] request: %s\n", modelName, strings.Trim(string(data), " \n"))
 	}
 
 	body, err := s.postRequest(ctx, data)
-	if s.Config.Debug {
-		fmt.Printf("[%v] response.Body: %s, %v\n", s.Config.Model, body, err)
+	if isDebug {
+		fmt.Printf("[%s] response.Body:%s\n", modelName, body)
+		fmt.Printf("[%s] error:%s\n", modelName, err)
 	}
 
 	if err != nil {
@@ -126,6 +131,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		} else {
 			stats.Append(err)
 		}
+
 		return err
 	}
 
@@ -134,8 +140,8 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		return fmt.Errorf("failed to unmarshal: '%s'; due to %w", body, err)
 	}
 
-	if s.Config.Debug {
-		fmt.Printf("[%v] response.Data: %s, %v\n", s.Config.Model, response.Data, err)
+	if isDebug {
+		fmt.Printf("[%v] response.Data: %s, %v\n", modelName, response.Data, err)
 	}
 
 	if response.Status != common.StatusOK {
@@ -511,27 +517,31 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 		if err != nil {
 			return nil, err
 		}
+
 		response, err := s.httpClient.Do(request)
 		if err != nil {
 			postErr = err
 			continue
 		}
 
+		var data []byte
+		if response.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("invalid response: %v, %s", response.StatusCode, data)
+		}
+
 		if response.Body != nil {
-			data, err := io.ReadAll(response.Body)
+			data, err = io.ReadAll(response.Body)
 			_ = response.Body.Close()
-			if response.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("invalid response: %v, %s", response.StatusCode, data)
-			}
 
 			if err != nil {
 				postErr = err
 				continue
 			}
+
 			return data, nil
 		}
-
 	}
+
 	return nil, postErr
 }
 
@@ -638,5 +648,43 @@ func (s *Service) reportBatch(count int, cached []interface{}) {
 			continue
 		}
 		log.Printf("[%s] cached[%v] %+v", s.Model, i, v)
+	}
+}
+
+func Marshal(data interface{}, id string) ([]byte, error) {
+	if data == nil {
+		return nil, fmt.Errorf("data was nil")
+	}
+	switch val := data.(type) {
+	case *Message:
+		if !val.isValid() {
+			return nil, fmt.Errorf("invalid message: has been already sent before")
+		}
+		if err := val.end(); err != nil {
+			return nil, fmt.Errorf("failed create message reader: %v", err)
+		}
+
+		if id != "" {
+			fmt.Printf("[%s Marshal] Message\n", id)
+		}
+		return val.Bytes(), nil
+	case gojay.MarshalerJSONObject:
+		data, err := gojay.Marshal(val)
+		if err != nil {
+			return nil, err
+		}
+		if id != "" {
+			fmt.Printf("[%s Marshal] gojay\n", id)
+		}
+		return data, nil
+	default:
+		data, err := json.Marshal(val)
+		if err != nil {
+			return nil, err
+		}
+		if id != "" {
+			fmt.Printf("[%s json] gojay\n", id)
+		}
+		return data, nil
 	}
 }
