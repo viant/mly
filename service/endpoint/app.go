@@ -10,15 +10,41 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
-//RunAppWithConfig run application
-func RunAppWithConfig(Version string, args []string, configProvider func(options *Options) (*Config, error)) {
-	err := RunAppWithConfigError(Version, args, configProvider)
+type configProvider func(*Options) (*Config, error)
+
+// Deprecated: use RunAppError
+func RunApp(version string, args []string, wg *sync.WaitGroup) {
+	err := RunAppError(version, args, wg)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func RunAppWithConfigError(Version string, args []string, configProvider func(options *Options) (*Config, error)) error {
+func RunAppError(version string, args []string, wg *sync.WaitGroup) error {
+	return RunAppWithConfigWaitError(version, args, func(o *Options) (*Config, error) {
+		ctx := context.Background()
+		return NewConfigFromURL(ctx, o.ConfigURL)
+	}, wg)
+}
+
+// Deprecated: use RunAppErrorWithConfigError
+func RunAppWithConfig(version string, args []string, cp configProvider) {
+	err := RunAppWithConfigError(version, args, cp)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func RunAppWithConfigError(version string, args []string, cp configProvider) error {
+	return RunAppWithConfigWaitError(version, args, cp, nil)
+}
+
+// RunAppWithConfigWaitError is the full options versions.
+/// version is printed if provided in the options.
+// TODO auto-determine version.
+// cp is a function that can provide a configuration file.
+// wg.Done() will be called once, when the server is finished booting up.
+func RunAppWithConfigWaitError(version string, args []string, cp configProvider, wg *sync.WaitGroup) error {
 	options := &Options{}
 	_, err := flags.ParseArgs(options, args)
 	if err != nil {
@@ -28,47 +54,13 @@ func RunAppWithConfigError(Version string, args []string, configProvider func(op
 		return nil
 	}
 	if options.Version {
-		log.Printf("Mly: Version: %v\n", Version)
+		log.Printf("Mly: Version: %v\n", version)
 		return nil
 	}
-	config, err := configProvider(options)
+	config, err := cp(options)
 	if err != nil {
 		return err
 	}
-	return runApp(config, nil)
-}
-
-//RunApp run application
-func RunApp(Version string, args []string, wg *sync.WaitGroup) {
-	err := RunAppError(Version, args, wg)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func RunAppError(Version string, args []string, wg *sync.WaitGroup) error {
-	options := &Options{}
-	_, err := flags.ParseArgs(options, args)
-	if err != nil {
-		return nil
-	}
-
-	if IsHelpOption(args) {
-		return nil
-	}
-
-	if options.Version {
-		log.Printf("Mly: Version: %v\n", Version)
-		return nil
-	}
-
-	ctx := context.Background()
-	config, err := NewConfigFromURL(ctx, options.ConfigURL)
-	if err != nil {
-		return nil
-	}
-	config.Init()
-
 	return runApp(config, wg)
 }
 
@@ -82,9 +74,6 @@ func runApp(config *Config, wg *sync.WaitGroup) error {
 	srv, err := New(config)
 	if err != nil {
 		return err
-	}
-	if wg != nil {
-		wg.Done()
 	}
 
 	server := make(chan error)
@@ -113,6 +102,10 @@ func runApp(config *Config, wg *sync.WaitGroup) error {
 	}
 
 	log.Printf("self start test done, startup full time: %s", time.Now().Sub(start))
+
+	if wg != nil {
+		wg.Done()
+	}
 
 	return <-server
 }

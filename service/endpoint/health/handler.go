@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+
+	"github.com/viant/mly/service"
+	"github.com/viant/mly/service/config"
 )
 
 type HealthHandler struct {
@@ -24,6 +27,12 @@ func (h *HealthHandler) RegisterHealthPoint(name string, isOkPtr *int32) {
 	h.healths[name] = isOkPtr
 }
 
+// implements Hook
+func (h *HealthHandler) Hook(model *config.Model, modelSrv *service.Service) {
+	h.RegisterHealthPoint(model.ID, &modelSrv.ReloadOK)
+}
+
+// implements http.Handler
 func (h *HealthHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	JSON, _ := json.Marshal(h.healths)
 	writer.Header().Set("Content-Type", "application/json")

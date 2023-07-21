@@ -7,7 +7,7 @@ import (
 )
 
 type Semaph struct {
-	l   sync.Mutex
+	l   sync.Mutex // locks for modifying r
 	c   *sync.Cond
 	r   int32 // i.e. remaining tickets
 	max int32
@@ -24,24 +24,37 @@ func NewSemaph(max int32) *Semaph {
 	return s
 }
 
+func (s *Semaph) R() int32 {
+	return s.r
+}
+
 // Acquire will block if there are no more "tickets" left; otherwise will decrement number of tickets and continue.
 // Caller must call Release() later.
 func (s *Semaph) Acquire(ctx context.Context) error {
 	s.l.Lock()
 
 	c := make(chan bool, 1)
+
 	for s.r <= 0 {
-		go func() {
+		canceled := false
+		go func(cc *bool) {
 			// this should unlock
 			s.c.Wait()
+			// this would lock
+			if *cc {
+				defer s.l.Unlock()
+			}
 			c <- true
-		}()
+		}(&canceled)
 
 		select {
 		case <-ctx.Done():
+			// this may still incur the Wait call completing
+			canceled = true
 			return ctx.Err()
 		case <-c:
 			// should've slept and locked
+			// but we can wait again due to s.r == 0
 		}
 	}
 
@@ -57,13 +70,19 @@ func (s *Semaph) acquireDebug(ctx context.Context, f func(n int32) string) error
 
 	c := make(chan bool, 1)
 	for s.r <= 0 {
-		go func() {
+		canceled := false
+		go func(cc *bool) {
 			s.c.Wait()
+			if *cc {
+				defer s.l.Unlock()
+			}
 			c <- true
-		}()
+		}(&canceled)
 
 		select {
 		case <-ctx.Done():
+			fmt.Printf("canceled %s", f(s.r))
+			canceled = true
 			return ctx.Err()
 		case <-c:
 			fmt.Printf("waited %s", f(s.r))

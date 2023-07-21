@@ -94,6 +94,10 @@ func (s *Service) Dictionary() *common.Dictionary {
 	return s.dictionary
 }
 
+func (s *Service) Sema() *semaph.Semaph {
+	return s.sema
+}
+
 func (s *Service) Do(ctx context.Context, request *request.Request, response *Response) error {
 	err := s.do(ctx, request, response)
 	if err != nil {
@@ -108,11 +112,11 @@ func (s *Service) Do(ctx context.Context, request *request.Request, response *Re
 func (s *Service) do(ctx context.Context, request *request.Request, response *Response) error {
 	startTime := time.Now()
 	onDone := s.serviceMetric.Begin(startTime)
+	onPendingDone := incrementPending(s.serviceMetric, startTime)
 	stats := sstat.NewValues()
-	onDoneDecrement := s.incrementPending(startTime)
 	defer func() {
 		onDone(time.Now(), stats.Values()...)
-		onDoneDecrement()
+		onPendingDone()
 	}()
 
 	err := request.Validate()
@@ -132,13 +136,14 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 		return err
 	}
 
-	stats.Append(stat.Evaluate)
 	tensorValues, err := s.evaluate(ctx, request)
 	if err != nil {
 		stats.Append(err)
 		log.Printf("[%v do] eval error:(%+v) request:(%+v)", s.config.ID, err, request)
 		return err
 	}
+
+	stats.Append(stat.Evaluate)
 
 	err = ctx.Err()
 	if err != nil {
@@ -233,15 +238,17 @@ func (s *Service) buildResponse(ctx context.Context, request *request.Request, r
 	return nil
 }
 
-func (s *Service) incrementPending(startTime time.Time) func() {
-	s.serviceMetric.IncrementValue(stat.Pending)
-	recentCounter := s.serviceMetric.Recent[s.serviceMetric.Index(startTime)]
-	recentCounter.IncrementValue(stat.Pending)
+func incrementPending(metric *gmetric.Operation, startTime time.Time) func() {
+	metric.IncrementValue(sstat.Pending)
+
+	index := metric.Index(startTime)
+	recentCounter := metric.Recent[index]
+	recentCounter.IncrementValue(sstat.Pending)
 
 	return func() {
-		s.serviceMetric.DecrementValue(stat.Pending)
-		recentCounter := s.serviceMetric.Recent[s.serviceMetric.Index(startTime)]
-		recentCounter.DecrementValue(stat.Pending)
+		metric.DecrementValue(sstat.Pending)
+		recentCounter := metric.Recent[index]
+		recentCounter.DecrementValue(sstat.Pending)
 	}
 }
 
@@ -250,13 +257,15 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	if err != nil {
 		return nil, err
 	}
+	defer s.sema.Release()
 
 	startTime := time.Now()
 	onDone := s.evaluatorMetric.Begin(startTime)
+	onPendingDone := incrementPending(s.evaluatorMetric, startTime)
 	stats := sstat.NewValues()
 	defer func() {
-		s.sema.Release()
 		onDone(time.Now(), stats.Values()...)
+		onPendingDone()
 	}()
 
 	s.mux.RLock()

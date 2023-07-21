@@ -6,10 +6,13 @@ import (
 
 type service struct{}
 
+const Pending = "pending"
+
 func (p service) Keys() []string {
 	return []string{
 		ErrorKey,
 		Timeout,
+		Pending,
 	}
 }
 
@@ -24,6 +27,8 @@ func (p service) Map(value interface{}) int {
 		switch val {
 		case Timeout:
 			return 1
+		case Pending:
+			return 2
 		}
 	}
 	return -1

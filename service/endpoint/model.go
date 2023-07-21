@@ -12,15 +12,19 @@ import (
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service"
 	"github.com/viant/mly/service/buffer"
+	"github.com/viant/mly/service/config"
 	serviceConfig "github.com/viant/mly/service/config"
-	"github.com/viant/mly/service/endpoint/health"
 	"github.com/viant/mly/service/endpoint/meta"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
 	"github.com/viant/mly/shared/semaph"
 )
 
-func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.Service, healthHandler *health.HealthHandler, metrics *gmetric.Service) error {
+type Hook interface {
+	Hook(*config.Model, *service.Service)
+}
+
+func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.Service, hooks []Hook, metrics *gmetric.Service) error {
 	pool := buffer.New(config.Endpoint.PoolMaxSize, config.Endpoint.BufferSize)
 	fs := afs.New()
 	handlerTimeout := config.Endpoint.WriteTimeout - time.Millisecond
@@ -54,7 +58,9 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 				lock.Lock()
 				defer lock.Unlock()
 
-				healthHandler.RegisterHealthPoint(model.ID, &modelSrv.ReloadOK)
+				for _, hook := range hooks {
+					hook.Hook(model, modelSrv)
+				}
 
 				mux.Handle(fmt.Sprintf(common.ModelURI, model.ID), handler)
 

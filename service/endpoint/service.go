@@ -28,6 +28,7 @@ import (
 )
 
 const healthURI = "/v1/api/health"
+const statsURI = "/v1/api/stats"
 
 //Service represents http bridge
 type Service struct {
@@ -71,12 +72,10 @@ func (s *Service) SelfTest() error {
 	numModels := len(s.config.ModelList.Models)
 	waitGroup.Add(numModels)
 
-	host := [1]*client.Host{&client.Host{
+	hosts := []*client.Host{&client.Host{
 		Name: "localhost",
 		Port: s.config.Endpoint.Port,
 	}}
-
-	hosts := host[:]
 
 	timeout := time.Duration(s.config.Endpoint.ReadTimeoutMs) * time.Millisecond
 
@@ -178,6 +177,9 @@ func New(cfg *Config) (*Service, error) {
 	healthHandler := health.NewHealthHandler()
 	am.Handle(healthURI, healthHandler)
 
+	statsHandler := health.NewStatsHandler()
+	am.Handle(statsURI, statsHandler)
+
 	metrics := gmetric.New()
 	metricHandler := gmetric.NewHandler(common.MetricURI, metrics)
 	mux.Handle(common.MetricURI, metricHandler)
@@ -192,7 +194,12 @@ func New(cfg *Config) (*Service, error) {
 		ds.ServerDeprecatedFuncAnnouncement()
 	}
 
-	err = Build(mux, cfg, datastores, healthHandler, metrics)
+	hooks := []Hook{
+		healthHandler,
+		statsHandler,
+	}
+
+	err = Build(mux, cfg, datastores, hooks, metrics)
 	if err != nil {
 		return nil, err
 	}

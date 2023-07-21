@@ -51,6 +51,8 @@ if __name__ == '__main__':
 
     ap.add_argument('--no-slow', action='store_true', help='for testing thread limit')
     ap.add_argument('--slow-repeat', type=int, default=10, help='looping math operations for slow model')
+    ap.add_argument('--slow-depth', type=int, default=4096)
+    ap.add_argument('--slow-depth-exp', type=int, default=2)
 
     pa, _ = ap.parse_known_args()
 
@@ -231,36 +233,36 @@ if __name__ == '__main__':
         model_test_save(test_tf_tensor, ko_model)
 
     if not pa.no_slow:
-        repeat_depth = (1024 * 4) ** 2
+        repeat_depth = pa.slow_depth ** pa.slow_depth_exp
 
-        r = Lambda(lambda t: tf.repeat(t, repeat_depth, axis=-1), name='repeater')
-        d = Lambda(lambda d: tf.divide(d['x'], d['y']), name='divider')
-        m = Lambda(lambda m: tf.multiply(m['x'], m['y']), name='multiplier')
-        s = Lambda(lambda t: tf.expand_dims(tf.math.reduce_sum(t, axis=-1), axis=-1), name='summer')
+        r = lambda i: Lambda(lambda t: tf.repeat(t, repeat_depth, axis=-1), name=f'repeater_{i}')
+        d = lambda i: Lambda(lambda d: tf.divide(d['x'], d['y']), name=f'divider_{i}')
+        m = lambda i: Lambda(lambda m: tf.multiply(m['x'], m['y']), name=f'multiplier_{i}')
+        s = lambda i: Lambda(lambda t: tf.expand_dims(tf.math.reduce_sum(t, axis=-1), axis=-1), name=f'summer_{i}')
 
         i_x = tf.keras.layers.Input(name='x', shape=(1,), dtype=tf.float32)
         i_y = tf.keras.layers.Input(name='y', shape=(1,), dtype=tf.float32)
 
-        rx = r(i_x)
-        ry = r(i_y)
+        rx = r('x')(i_x)
+        ry = r('y')(i_y)
         # rx / ry
-        o = d(dict(x=rx, y=ry))
+        o = d('d0')(dict(x=rx, y=ry))
 
         for i in range(pa.slow_repeat):
             # rx^2 / ry
-            o = m(dict(x=o, y=rx))
+            o = m(f'm0_{i}')(dict(x=o, y=rx))
             # sum(rx^2/ry)
-            so = s(o)
+            so = s(f's0_{i}')(o)
             # rx^2 * sum(rx^2/ry) / ry
-            o = m(dict(x=o, y=so))
+            o = m(f'm1_{i}')(dict(x=o, y=so))
             # rx^2 * sum(rx^2/ry) / ry^2
-            o = d(dict(x=o, y=ry))
+            o = d(f'd1_{i}')(dict(x=o, y=ry))
             # sum(rx^2 * sum(rx^2/ry) / ry^2)
-            so = s(o)
+            so = s(f's1_{i}')(o)
             # [rx^2 * sum(rx^2/ry)] / [ry^2 * sum(rx^2 * sum(rx^2/ry) / ry^2)]
-            o = d(dict(x=o, y=so))
+            o = d(f'd2_{i}')(dict(x=o, y=so))
 
-        o = s(o)
+        o = s(f's2')(o)
         o = Lambda(lambda t: t, name='output')(o)
 
         slow_model = Model(inputs=[i_x, i_y], outputs=[o], name='slow')

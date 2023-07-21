@@ -7,7 +7,6 @@ import (
 
 const (
 	Evaluate = "eval"
-	Pending  = "pending"
 	Invalid  = "invalid"
 )
 
@@ -18,7 +17,7 @@ func (p provider) Keys() []string {
 	return []string{
 		stat.ErrorKey,
 		Evaluate,
-		Pending,
+		stat.Pending,
 		stat.Timeout,
 		Invalid,
 	}
@@ -36,7 +35,7 @@ func (p provider) Map(value interface{}) int {
 		switch val {
 		case Evaluate:
 			return 1
-		case Pending:
+		case stat.Pending:
 			return 2
 		case stat.Timeout:
 			return 3
