@@ -281,11 +281,12 @@ func (s *Service) init(options []Option) error {
 func (s *Service) initHTTPClient() error {
 	host, _ := s.getHost()
 	var tslConfig *tls.Config
-	if host.IsSecurePort() {
+	if host != nil && host.IsSecurePort() {
 		cert, err := getCertPool()
 		if err != nil {
 			return fmt.Errorf("failed to create certificate: %v", err)
 		}
+
 		tslConfig = &tls.Config{
 			RootCAs: cert,
 		}
@@ -294,12 +295,14 @@ func (s *Service) initHTTPClient() error {
 	http2Transport := &http2.Transport{
 		TLSClientConfig: tslConfig,
 	}
-	if !host.IsSecurePort() {
+
+	if host == nil || !host.IsSecurePort() {
 		http2Transport.AllowHTTP = true
 		http2Transport.DialTLS = func(network, addr string, cfg *tls.Config) (net.Conn, error) {
 			return net.Dial(network, addr)
 		}
 	}
+
 	s.httpClient.Transport = http2Transport
 	return nil
 }

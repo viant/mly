@@ -37,6 +37,15 @@ func (s *mlyS) Stats() string {
 	stp := s.getStats("Perf")
 	ste := s.getStats("Eval")
 
+	var pErr, eErr string
+	if len(stp.Counters) > 0 {
+		pErr = "noPerf"
+	}
+
+	if len(ste.Counters) > 0 {
+		eErr = "noEval"
+	}
+
 	var perfPending, eval int
 	for _, c := range stp.Counters {
 		if c.Value == "pending" {
@@ -64,7 +73,7 @@ func (s *mlyS) Stats() string {
 
 	}
 
-	return fmt.Sprintf("perfPending:%d evalPending:%d eval:%d", perfPending, evalPending, eval)
+	return fmt.Sprintf("(%s,%s) perfPending:%d evalPending:%d eval:%d", pErr, eErr, perfPending, evalPending, eval)
 }
 
 func (a *mlyS) getStats(suffix string) *stats {
@@ -81,9 +90,15 @@ func (a *mlyS) getStats(suffix string) *stats {
 }
 
 type mlyC struct {
-	hosts   []*client.Host
+	pool    *sync.Pool
+	cli     *client.Service
 	timeout time.Duration
 	sent    uint64
+}
+
+type either struct {
+	o *client.Service
+	e error
 }
 
 type modelResp struct {
@@ -91,10 +106,16 @@ type modelResp struct {
 }
 
 func (c *mlyC) Do() error {
-	cli, err := client.New("slow", c.hosts, client.WithDebug(false))
+	var err error
+
+	eo := c.pool.Get().(*either)
+	cli := eo.o
+	err = eo.e
 	if err != nil {
 		return err
 	}
+
+	defer c.pool.Put(eo)
 
 	msg := cli.NewMessage()
 	defer msg.Release()
@@ -135,30 +156,47 @@ func main() {
 			log.Printf("%d", config.Endpoint.MaxEvaluatorConcurrency)
 			return config, err
 		}, srvWait)
+
+		log.Printf("%v", serverErr)
 	}()
 
 	srvWait.Wait()
 
 	smasher.Run(smasher.TestStruct{
-		Server: func() smasher.Server {
+		Server: func() (smasher.Server, error) {
 			s := &mlyS{
 				cli: &http.Client{
 					Timeout: statD,
 				},
 				metricPath: fmt.Sprintf("http://localhost:%d/v1/api/metric/operation/slow", mlyPort),
 			}
-			return s
+			return s, nil
 		},
-		Client: func() smasher.Client {
+		Client: func() (smasher.Client, error) {
 			c := new(mlyC)
 
-			c.timeout = 5 * time.Second
-			c.hosts = []*client.Host{&client.Host{
+			hosts := []*client.Host{&client.Host{
 				Name: "localhost",
 				Port: mlyPort,
 			}}
 
-			return c
+			c.pool = &sync.Pool{
+				New: func() interface{} {
+					c, e := client.New("slow", hosts, client.WithDebug(false))
+					return &either{c, e}
+				},
+			}
+
+			cli, err := client.New("slow", hosts, client.WithDebug(false))
+			if err != nil {
+				return nil, err
+			}
+
+			c.cli = cli
+			c.timeout = 30 * time.Second
+
+			return c, nil
+
 		},
 	}, 3000, 20000, statD)
 }

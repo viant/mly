@@ -48,17 +48,3 @@ func (s *Lambda) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 }
-
-type NoOp struct{}
-
-func (a *NoOp) Active() uint64 {
-	return 0
-}
-
-func (a *NoOp) MaxActive() uint64 {
-	return 0
-}
-
-func (a *NoOp) Finished() uint64 {
-	return 0
-}

@@ -23,18 +23,24 @@ type (
 	}
 
 	TestStruct struct {
-		Server func() Server
-		Client func() Client
+		Server func() (Server, error)
+		Client func() (Client, error)
 	}
 )
 
-func Run(ts TestStruct, maxDos int32, testCases int, statDur time.Duration) {
-	srv := ts.Server()
+func Run(ts TestStruct, maxDos int32, testCases int, statDur time.Duration) error {
+	srv, err := ts.Server()
+	if err != nil {
+		return err
+	}
 
 	wg := new(sync.WaitGroup)
 	wg.Add(testCases)
 
-	cli := ts.Client()
+	cli, err := ts.Client()
+	if err != nil {
+		return err
+	}
 
 	cliErrs := make([]error, 0)
 	cel := new(sync.Mutex)
@@ -113,4 +119,5 @@ func Run(ts TestStruct, maxDos int32, testCases int, statDur time.Duration) {
 	}
 
 	log.Printf("stats:[%s]", srv.Stats())
+	return nil
 }

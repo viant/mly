@@ -47,14 +47,14 @@ func main() {
 	}()
 
 	smasher.Run(smasher.TestStruct{
-		Server: func() smasher.Server {
-			return ls
+		Server: func() (smasher.Server, error) {
+			return ls, nil
 		},
-		Client: func() smasher.Client {
+		Client: func() (smasher.Client, error) {
 			c := new(cl)
 			c.URL = fmt.Sprintf("http://localhost:%d", port)
 			c.cli = new(http.Client)
-			return c
+			return c, nil
 		},
 	}, -1, 150000, 1*time.Second)
 }
