@@ -24,18 +24,18 @@ func TestReduceFloat32(t *testing.T) {
 	p7d := float64(0.00000005)
 
 	tcs := []tcrf32{
-		tcrf32{1.235, 3, 1.23456, p3d, false},
-		tcrf32{2.001, 3, 2.0009, p3d, false},
+		{1.235, 3, 1.23456, p3d, false},
+		{2.001, 3, 2.0009, p3d, false},
 
-		tcrf32{3.0001, 4, 3.00008, p4d, false},
-		tcrf32{4.9998, 4, 4.99978, p4d, false},
+		{3.0001, 4, 3.00008, p4d, false},
+		{4.9998, 4, 4.99978, p4d, false},
 
-		tcrf32{5.00009, 5, 5.0000949, p5d, false},
+		{5.00009, 5, 5.0000949, p5d, false},
 
 		// on linux intel this and below starts to fail
 		// float32(5.00000949) =~ 5.0000095367
-		tcrf32{5.000009, 6, 5.00000949, p6d, true},
-		tcrf32{5.0000009, 7, 5.000000949, p7d, true},
+		{5.000009, 6, 5.00000949, p6d, true},
+		{5.0000009, 7, 5.000000949, p7d, true},
 	}
 
 	for i, tc := range tcs {

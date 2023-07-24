@@ -11,4 +11,3 @@ type Modified struct {
 func (r *Modified) Span() time.Duration {
 	return r.Min.Sub(r.Min)
 }
-

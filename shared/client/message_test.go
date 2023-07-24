@@ -63,7 +63,7 @@ func makeMessages(fls []fakeLayer) Messages {
 
 func TestMessage_FloatKey(t *testing.T) {
 	msgs := makeMessages([]fakeLayer{
-		fakeLayer{
+		{
 			name:  "ft",
 			fp:    3,
 			typen: "float32",
@@ -80,12 +80,12 @@ func TestMessage_FloatKey(t *testing.T) {
 
 func TestMessage_FloatsKey(t *testing.T) {
 	msgs := makeMessages([]fakeLayer{
-		fakeLayer{
+		{
 			name:  "ft",
 			fp:    3,
 			typen: "float32",
 		},
-		fakeLayer{
+		{
 			name:  "s",
 			typen: "string",
 		},
@@ -110,11 +110,11 @@ func TestMessage_FloatsKey(t *testing.T) {
 
 func TestMessage(t *testing.T) {
 	msgs := makeMessages([]fakeLayer{
-		fakeLayer{
+		{
 			name:  "copied",
 			typen: "string",
 		},
-		fakeLayer{
+		{
 			name:    "multi",
 			strings: []string{"a", "b"},
 			typen:   "string",

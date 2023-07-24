@@ -17,4 +17,3 @@ func GetHostIPv4(hostname string) (string, error) {
 	}
 	return addrs[0], nil
 }
-

@@ -175,7 +175,7 @@ func main() {
 		Client: func() (smasher.Client, error) {
 			c := new(mlyC)
 
-			hosts := []*client.Host{&client.Host{
+			hosts := []*client.Host{{
 				Name: "localhost",
 				Port: mlyPort,
 			}}

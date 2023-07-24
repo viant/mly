@@ -17,4 +17,3 @@ func IsAuthorized(request *http.Request, allowedSubset []string) bool {
 	}
 	return false
 }
-

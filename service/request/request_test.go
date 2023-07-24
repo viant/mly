@@ -11,9 +11,9 @@ import (
 
 func TestDecode(t *testing.T) {
 	modelInputs := []*domain.Input{
-		&domain.Input{Name: "a1", Type: reflect.TypeOf(string(""))},
-		&domain.Input{Name: "a2", Type: reflect.TypeOf(string(""))},
-		&domain.Input{
+		{Name: "a1", Type: reflect.TypeOf(string(""))},
+		{Name: "a2", Type: reflect.TypeOf(string(""))},
+		{
 			Name:      "a3",
 			Auxiliary: true,
 			Type:      reflect.TypeOf(string("")),

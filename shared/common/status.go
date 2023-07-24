@@ -2,9 +2,9 @@ package common
 
 const (
 	//StatusOK response status ok
-	StatusOK     = "ok"
+	StatusOK = "ok"
 	//StatusError represents error status
-	StatusError  = "error"
+	StatusError = "error"
 	//StatusCached represents cache status
 	StatusCached = "cached"
 )

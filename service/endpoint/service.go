@@ -72,7 +72,7 @@ func (s *Service) SelfTest() error {
 	numModels := len(s.config.ModelList.Models)
 	waitGroup.Add(numModels)
 
-	hosts := []*client.Host{&client.Host{
+	hosts := []*client.Host{{
 		Name: "localhost",
 		Port: s.config.Endpoint.Port,
 	}}

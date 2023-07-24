@@ -29,7 +29,7 @@ func Generated(outputs []*shared.Field, batch int, ignoreError bool) func() comm
 		if batch > 0 {
 			dgts := make([]*genType, batch)
 			gts := genTypes(dgts)
-			for i, _ := range gts {
+			for i := range gts {
 				gt := new(genType)
 				gt.s = mapped
 				gt.IgnoreError = ignoreError

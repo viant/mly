@@ -14,7 +14,6 @@ func (c CacheScope) IsL2() bool {
 	return c&CacheScopeL2 != 0
 }
 
-
 const (
 	CacheScopeLocal = CacheScope(1)
 	CacheScopeL1    = CacheScope(2)

@@ -642,7 +642,7 @@ func reconcileIOFromSignature(config *config.Model, signature *domain.Signature)
 		return
 	}
 
-	for ii, _ := range signature.Inputs {
+	for ii := range signature.Inputs {
 		input := &signature.Inputs[ii]
 
 		if input.Type == nil {
