@@ -12,6 +12,13 @@ pipeline:
       request: '@system'
       tasks: '*'
 
+  deps:
+    deps:
+      action: run
+      request: '@deps'
+      tasks: '*'
+
+  build:
     build:
       action: run
       request: '@build'
