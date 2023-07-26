@@ -38,6 +38,12 @@ models:
       - name: fl
         precision: 4
 
+  - id: flinc
+    url: ${appPath}/example/model/float_input_int_model
+    useDict: false
+    debug: false
+    datastore: fli
+
   - id: vec
     url: ${appPath}/example/model/vectorization_int_model
     useDict: true
