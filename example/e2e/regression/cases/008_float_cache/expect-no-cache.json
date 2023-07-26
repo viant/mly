@@ -1,8 +1,9 @@
 {
+  "status": "ok",
   "data": {
     "D": {
       "@numericPrecisionPoint@": 5,
-      "expand": 3.143643
+      "expand": 3.45714
     }
   }
 }

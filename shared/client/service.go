@@ -332,13 +332,16 @@ func (s *Service) loadModelDictionary() error {
 	if err != nil {
 		return fmt.Errorf("failed to load Dictionary: %w", err)
 	}
+
 	if response.Body == nil {
 		return fmt.Errorf("unable to load dictioanry body was empty")
 	}
+
 	data, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read body: %w", err)
 	}
+
 	dict := &common.Dictionary{}
 	if err = json.Unmarshal(data, dict); err != nil {
 		return fmt.Errorf("failed to unmarshal dict: %w", err)

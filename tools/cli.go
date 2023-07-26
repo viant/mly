@@ -81,7 +81,7 @@ func Discover(options *Options) error {
 	case "signature":
 		return DiscoverSignature(writer, signature)
 	case "layers":
-		return discoverLayers(options, model, fs)
+		return discoverLayers(options, model, int64(0), fs)
 	case "config":
 		return DiscoverConfig(options.SourceURL, model, writer)
 	default:
@@ -89,10 +89,13 @@ func Discover(options *Options) error {
 	}
 }
 
-func discoverLayers(options *Options, model *tf.SavedModel, fs afs.Service) error {
+// Deprecated: due to the changing of how hashing works, this is no longer supported or needed.
+// TODO: make a different utility for checking vocabulary extraction.
+func discoverLayers(options *Options, model *tf.SavedModel, fsh int64, fs afs.Service) error {
 	if ok, _ := fs.Exists(context.Background(), options.DestURL); ok {
 		_ = fs.Delete(context.Background(), options.DestURL)
 	}
+
 	var exportables []string
 	for _, candidate := range model.Graph.Operations() {
 		if strings.Contains(candidate.Name(), "LookupTableExportV2") {
@@ -105,7 +108,7 @@ func discoverLayers(options *Options, model *tf.SavedModel, fs afs.Service) erro
 		return err
 	}
 
-	dictionary.UpdateHash()
+	dictionary.UpdateHash(fsh)
 
 	logger, err := log.New(&config.Stream{URL: options.DestURL}, "myID", afs.New())
 	if err != nil {

@@ -139,6 +139,7 @@ func (m *Message) end() error {
 	if len(m.keys) > 0 {
 		m.addCacheKey()
 	}
+
 	m.trim(',')
 	m.appendString("}\n")
 	return nil
@@ -174,6 +175,7 @@ func (m *Message) StringsKey(key string, values []string) {
 		if len(m.multiKeys[i]) == 0 {
 			m.multiKeys[i] = make([]string, m.dictionary.inputSize())
 		}
+
 		if keyValue, index = m.dictionary.lookupString(key, value); index != unknownKeyField {
 			m.multiKeys[i][index] = keyValue
 		}
@@ -246,37 +248,46 @@ func (m *Message) intKey(key string, value int) {
 // FloatKey sets key/value pair
 func (m *Message) FloatKey(key string, value float32) {
 	m.panicIfBatch("Floats")
-	if key, prec, index := m.dictionary.reduceFloat(key, value); index != unknownKeyField {
-		m.keys[index] = strconv.FormatFloat(float64(key), 'f', prec, 32)
+	var newValue float32
+	if rep, prec, index := m.dictionary.reduceFloat(key, value); index != unknownKeyField {
+		newValue = rep
+		m.keys[index] = strconv.FormatFloat(float64(newValue), 'f', prec, 32)
 	}
+
 	m.appendByte('"')
 	m.appendString(key)
 	m.appendString(`":`)
-	m.appendFloat(value, 32)
+	m.appendFloat(newValue, 32)
 	m.appendString(`,`)
 }
 
 // FloatsKey sets key/values pair
 func (m *Message) FloatsKey(key string, values []float32) {
-	m.ensureMultiKeys(len(values))
-	m.transient = append(m.transient, &transient{name: key, values: values, kind: reflect.Float32})
+	vlen := len(values)
+	m.ensureMultiKeys(vlen)
 
 	var index fieldOffset
-	var prec int
-	var floatKeyValue float32
 	var keyValue string
+
+	newValues := make([]float32, vlen)
 	for i, value := range values {
 		if len(m.multiKeys[i]) == 0 {
 			m.multiKeys[i] = make([]string, m.dictionary.inputSize())
 		}
 
-		if floatKeyValue, prec, index = m.dictionary.reduceFloat(key, value); index != unknownKeyField {
-			keyValue = strconv.FormatFloat(float64(floatKeyValue), 'f', prec, 32)
+		newValue, prec, index := m.dictionary.reduceFloat(key, value)
+		newValues[i] = newValue
+
+		if index != unknownKeyField {
+			keyValue = strconv.FormatFloat(float64(newValue), 'f', prec, 32)
 			m.multiKeys[i][index] = keyValue
 		}
 	}
 
-	m.expandKeysIfNeeds(len(values), index, keyValue)
+	// for floats, the values need to be modified before being sent to the server
+	m.transient = append(m.transient, &transient{name: key, values: newValues, kind: reflect.Float32})
+
+	m.expandKeysIfNeeds(vlen, index, keyValue)
 }
 
 func (m *Message) floatsKey(key string, values []float32) {

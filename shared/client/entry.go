@@ -30,14 +30,6 @@ func (e *entry) hasInt(val int) bool {
 	return ok
 }
 
-func (e *entry) hasFloat32(val float32) bool {
-	if len(e.float32s) == 0 {
-		return false
-	}
-	_, ok := e.float32s[val]
-	return ok
-}
-
 // bid.Accuracy can effectively be ignored in practice
 // I am unsure of the "canonical" or "standard" way of rounding to a decimal in Golang.
 func (e *entry) reduceFloat32(val float32) float32 {

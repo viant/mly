@@ -29,6 +29,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Deprecated: FetchDictHash is used to inspect dictionary data from a meta URL, which is
+// no longer a supported feature.
 func FetchDictHash(writer io.Writer, sourceURL string, fs afs.Service) error {
 	source, err := fs.DownloadWithURL(context.Background(), sourceURL)
 	if err != nil {
@@ -45,7 +47,7 @@ func FetchDictHash(writer io.Writer, sourceURL string, fs afs.Service) error {
 }
 
 func printDictHash(dict common.Dictionary, writer io.Writer) {
-	fmt.Fprintf(writer, "dict hash: %v\n", dict.UpdateHash())
+	fmt.Fprintf(writer, "dict hash: %v\n", dict.UpdateHash(0))
 	for _, l := range dict.Layers {
 		fmt.Fprintf(writer, "layer: %v hash: %v\n", l.Name, l.Hash)
 	}

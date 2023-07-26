@@ -137,10 +137,10 @@ func (d *Dictionary) reduceFloat(key string, value float32) (float32, int, field
 	ii := fieldOffset(input.Index)
 
 	if input.Wildcard {
+		// this isn't really a valid case
 		return value, defaultPrec, ii
 	}
 
-	// TODO why would entry not be set?
 	entr := d.getEntry(key)
 	if entr == nil {
 		return value, defaultPrec, unknownKeyField
@@ -158,6 +158,7 @@ func (d *Dictionary) reduceFloat(key string, value float32) (float32, int, field
 func NewDictionary(dict *common.Dictionary, inputs []*shared.Field) *Dictionary {
 	// index by name
 	inputIdx := make(map[string]*shared.Field)
+
 	for i, input := range inputs {
 		inputIdx[input.Name] = inputs[i]
 	}
@@ -168,14 +169,11 @@ func NewDictionary(dict *common.Dictionary, inputs []*shared.Field) *Dictionary 
 		registry: make(map[string]*entry),
 	}
 
-	result.init(dict)
-	return result
-}
-
-func (d *Dictionary) init(dict *common.Dictionary) {
-	if dict == nil || len(dict.Layers) == 0 {
-		return
+	if dict == nil {
+		return result
 	}
+
+	layerIdx := make(map[string]*common.Layer)
 
 	for _, layer := range dict.Layers {
 		e := new(entry)
@@ -192,10 +190,24 @@ func (d *Dictionary) init(dict *common.Dictionary) {
 				values[item] = true
 			}
 			e.strings = values
-		} else if layer.FloatPrec > 0 {
-			e.setPrec(layer.FloatPrec)
 		}
 
-		d.registry[layer.Name] = e
+		ln := layer.Name
+
+		result.registry[ln] = e
 	}
+
+	for _, input := range inputs {
+		iName := input.Name
+
+		if _, ok := layerIdx[iName]; ok {
+			continue
+		}
+
+		if input.Precision > 0 {
+			result.registry[iName] = FloatEntry(input.Precision)
+		}
+	}
+
+	return result
 }

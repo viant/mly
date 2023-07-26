@@ -7,8 +7,10 @@ pipeline:
     target: $target
     checkError: true
     commands:
-      - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.0005;sl:a'
-      - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.0008;sl:a'
+      - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.00054;sl:a'
+      - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.00053;sl:a'
+      - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.20001;sl:a'
+      - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.2,1.5;sl:a,b'
 
   assert:
     action: validator:assert
@@ -21,6 +23,14 @@ pipeline:
     action: validator:assert
     init:
       actual: $AsJSON($test.Cmd[1].Stdout)
+      expect: $LoadJSON('${parentPath}/expect-cache.json')
     actual: $actual
-    expect: $LoadJSON('${parentPath}/expect-cache.json')
+    expect: $expect
+
+  assertNoCache:
+    action: validator:assert
+    init:
+      actual: $AsJSON($test.Cmd[2].Stdout)
+    actual: $actual
+    expect: $LoadJSON('${parentPath}/expect-no-cache.json')
 

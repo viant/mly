@@ -169,7 +169,8 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 		}
 	}
 
-	if s.mode == ModeServer { //in server mode, cache hit rate would be low and expensive, thus skipping it
+	if s.mode == ModeServer {
+		// in server mode, cache hit rate would be low and expensive, thus skipping it
 		return 0, types.ErrKeyNotFound
 	}
 	if s.l1Client == nil {

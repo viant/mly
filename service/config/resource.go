@@ -2,7 +2,7 @@ package config
 
 import "time"
 
-//Modified represents modified folder
+// Modified represents modified folder
 type Modified struct {
 	Min time.Time
 	Max time.Time

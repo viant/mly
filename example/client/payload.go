@@ -62,6 +62,8 @@ func (c *CliPayload) Bind(k string, value interface{}, msg *client.Message) erro
 	return nil
 }
 
+// Parse expects the following format: "<input name>:[<type>|]<CSV values>[;<input name>:...]".
+// If type is not provided, then it will be string; otherwise, "int" and "float32" can be used.
 func Parse(p string, cp *CliPayload) error {
 	data := make(map[string]interface{})
 	c := None

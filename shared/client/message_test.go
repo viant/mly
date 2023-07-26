@@ -14,6 +14,7 @@ type fakeLayer struct {
 	strings []string
 	ints    []int
 	fp      uint
+	wc      bool
 	typen   string
 }
 
@@ -33,16 +34,17 @@ func makeMessages(fls []fakeLayer) Messages {
 			cl.Ints = fl.ints
 		}
 
-		if fl.fp > 0 {
-			cl.FloatPrec = int(fl.fp)
-		}
-
 		l[i] = cl
 
 		sf := &shared.Field{
 			Name:     fl.name,
 			Index:    i,
+			Wildcard: fl.wc,
 			DataType: fl.typen,
+		}
+
+		if fl.fp > 0 {
+			sf.Precision = int(fl.fp)
 		}
 
 		inputs[i] = sf
@@ -68,14 +70,20 @@ func TestMessage_FloatKey(t *testing.T) {
 			fp:    3,
 			typen: "float32",
 		},
+		{
+			name:  "s",
+			typen: "string",
+			wc:    true,
+		},
 	})
 
 	msg := msgs.Borrow()
 	msg.FloatKey("ft", 1.23456)
+	msg.StringKey("s", "a")
 
 	var key string
-	key = msg.CacheKeyAt(0)
-	assert.Equal(t, "1.235", key)
+	key = msg.CacheKey()
+	assert.Equal(t, "1.235/a", key)
 }
 
 func TestMessage_FloatsKey(t *testing.T) {

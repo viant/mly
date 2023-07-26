@@ -32,6 +32,7 @@ models:
   - id: fli
     url: ${appPath}/example/model/float_input_int_model
     useDict: true
+    debug: false
     datastore: fli
     inputs:
       - name: fl

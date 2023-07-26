@@ -16,12 +16,12 @@ import (
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
 	"github.com/viant/afs/option"
-	"github.com/viant/afs/url"
 	"github.com/viant/gmetric"
 	"github.com/viant/gtly"
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
+	"github.com/viant/mly/service/files"
 	"github.com/viant/mly/service/layers"
 	"github.com/viant/mly/service/request"
 	"github.com/viant/mly/service/stat"
@@ -292,7 +292,7 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 }
 
 func (s *Service) reloadIfNeeded(ctx context.Context) error {
-	snapshot, err := s.modifiedSnapshot(ctx, s.config.URL, &config.Modified{})
+	snapshot, err := files.ModifiedSnapshot(ctx, s.fs, s.config.URL, &config.Modified{})
 	if err != nil {
 		return fmt.Errorf("failed to check changes:%w", err)
 	}
@@ -337,21 +337,15 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		inputs[input.Name] = &signature.Inputs[i]
 	}
 
-	if dictionary != nil {
-		var layerIdx = make(map[string]*common.Layer)
-		for _, dl := range dictionary.Layers {
-			layerIdx[dl.Name] = &dl
-		}
-	}
-
 	// add inputs from the config that aren't in the model
 	for _, input := range s.config.Inputs {
-		if _, ok := inputs[input.Name]; ok {
+		iName := input.Name
+		if _, ok := inputs[iName]; ok {
 			continue
 		}
 
 		fInput := &domain.Input{
-			Name:      input.Name,
+			Name:      iName,
 			Index:     input.Index,
 			Auxiliary: true,
 		}
@@ -361,7 +355,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 			fInput.Type = reflect.TypeOf("")
 		}
 
-		inputs[input.Name] = fInput
+		inputs[iName] = fInput
 	}
 
 	evaluator := tfmodel.NewEvaluator(signature, model.Session)
@@ -376,9 +370,11 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	s.signature = signature
 
 	if dictionary != nil {
-		dictionary.UpdateHash()
+		filehash := snapshot.Min.Unix() + snapshot.Max.Unix()
+		dictionary.UpdateHash(filehash)
 
 		s.dictionary = dictionary
+
 		s.config.DictMeta.Hash = dictionary.Hash
 		s.config.DictMeta.Reloaded = time.Now()
 	}
@@ -389,51 +385,6 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	atomic.StoreInt32(&s.ReloadOK, 1)
 
 	return nil
-}
-
-// modifiedSnapshot checks and updates modified times based on the object in URL
-func (s *Service) modifiedSnapshot(ctx context.Context, URL string, resource *config.Modified) (*config.Modified, error) {
-	objects, err := s.fs.List(ctx, URL)
-	if err != nil {
-		return resource, fmt.Errorf("failed to list URL:%s; error:%w", URL, err)
-	}
-
-	if extURL := url.SchemeExtensionURL(URL); extURL != "" {
-		object, err := s.fs.Object(ctx, extURL)
-		if err != nil {
-			return nil, err
-		}
-		resource.Max = object.ModTime()
-		resource.Min = object.ModTime()
-		return resource, nil
-	}
-
-	for i, item := range objects {
-		if item.IsDir() && i == 0 {
-			continue
-		}
-		if item.IsDir() {
-			resource, err = s.modifiedSnapshot(ctx, item.URL(), resource)
-			if err != nil {
-				return resource, err
-			}
-			continue
-		}
-		if resource.Max.IsZero() {
-			resource.Max = item.ModTime()
-		}
-		if resource.Min.IsZero() {
-			resource.Min = item.ModTime()
-		}
-
-		if item.ModTime().After(resource.Max) {
-			resource.Max = item.ModTime()
-		}
-		if item.ModTime().Before(resource.Min) {
-			resource.Min = item.ModTime()
-		}
-	}
-	return resource, nil
 }
 
 func (s *Service) loadModel(ctx context.Context, err error) (*tf.SavedModel, error) {
@@ -453,9 +404,11 @@ func (s *Service) isModified(snapshot *config.Modified) bool {
 	if snapshot.Span() > time.Hour || snapshot.Max.IsZero() {
 		return false
 	}
+
 	s.mux.RLock()
 	modified := s.config.Modified
 	s.mux.RUnlock()
+
 	return !(modified.Max.Equal(snapshot.Max) && modified.Min.Equal(snapshot.Min))
 }
 
@@ -615,7 +568,7 @@ func (s *Service) newObjectProvider() (*gtly.Provider, error) {
 	var fields = make([]*gtly.Field, len(inputs))
 	for i, field := range inputs {
 		if verbose {
-			log.Printf("[%s obj] %s %v", s.config.ID, field.Name, field.RawType())
+			log.Printf("[%s objectProvider] %s %v", s.config.ID, field.Name, field.RawType())
 		}
 
 		fields[i] = &gtly.Field{

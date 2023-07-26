@@ -21,21 +21,22 @@ type (
 	Layer struct {
 		Name string // should be the name of the input
 
-		Strings   []string
-		Ints      []int
-		FloatPrec int // acceptable precision 0 means full precision as in practice there should never be a reason to round a float to an integer?
+		Strings []string
+		Ints    []int
 
 		Hash int // used to check if a model updated
 	}
 )
 
 // TODO this should use a fixed size integer?
-func (d *Dictionary) UpdateHash() int {
-	d.Hash = 0
+func (d *Dictionary) UpdateHash(fsHash int64) int {
+	d.Hash = int(fsHash)
+
 	for i := range d.Layers {
 		layer := &d.Layers[i]
 
 		hasher := fnv.New64()
+
 		if len(layer.Strings) > 0 {
 			sort.Strings(layer.Strings)
 			hashStrings(hasher, layer.Strings)
@@ -44,15 +45,16 @@ func (d *Dictionary) UpdateHash() int {
 			sort.Ints(layer.Ints)
 			hashInts(hasher, layer.Ints)
 			layer.Hash = int(hasher.Sum64())
-		} else if layer.FloatPrec > 0 {
-			hashInts(hasher, []int{layer.FloatPrec})
-			layer.Hash = int(hasher.Sum64())
-		} else {
-			continue
 		}
+
+		// precision changes will result in a change in hash as the hash's goal
+		// is to capture changes that would occur where the cache key is the same
+		// but the value is supposed to be different.
+		// a precision change would result in a different key.
 
 		d.Hash += layer.Hash
 	}
+
 	return d.Hash
 }
 
