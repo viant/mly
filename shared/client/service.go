@@ -689,7 +689,7 @@ func Marshal(data interface{}, id string) ([]byte, error) {
 			return nil, err
 		}
 		if id != "" {
-			fmt.Printf("[%s json] gojay\n", id)
+			fmt.Printf("[%s json] json\n", id)
 		}
 		return data, nil
 	}

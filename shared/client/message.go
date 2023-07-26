@@ -248,7 +248,8 @@ func (m *Message) intKey(key string, value int) {
 // FloatKey sets key/value pair
 func (m *Message) FloatKey(key string, value float32) {
 	m.panicIfBatch("Floats")
-	var newValue float32
+
+	newValue := value
 	if rep, prec, index := m.dictionary.reduceFloat(key, value); index != unknownKeyField {
 		newValue = rep
 		m.keys[index] = strconv.FormatFloat(float64(newValue), 'f', prec, 32)
