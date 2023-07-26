@@ -11,6 +11,7 @@ pipeline:
       - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.00053;sl:a'
       - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.20001;sl:a'
       - /tmp/e2e/mlyc -m fli -a 'fl|float32:1.2,1.5;sl:a,b'
+      - /tmp/e2e/mlyc -m flinc -a 'fl|float32:1.2;sl:a'
 
   assert:
     action: validator:assert
@@ -33,4 +34,11 @@ pipeline:
       actual: $AsJSON($test.Cmd[2].Stdout)
     actual: $actual
     expect: $LoadJSON('${parentPath}/expect-no-cache.json')
+
+  assertNoDict:
+    action: validator:assert
+    init:
+      actual: $AsJSON($test.Cmd[4].Stdout)
+    actual: $actual
+    expect: $LoadJSON('${parentPath}/expect-no-dict.json')
 
