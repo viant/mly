@@ -22,13 +22,13 @@ func RunWithOptions(options *Options) error {
 		return fmt.Errorf("could not determine model")
 	}
 
-	pl, err := options.Payload()
+	pls, err := options.Payloads()
 	if err != nil {
 		return err
 	}
 
 	if options.Debug {
-		fmt.Printf("payload:%v\n", pl)
+		fmt.Printf("payloads:%v\n", pls)
 	}
 
 	gm := gmetric.New()
@@ -38,50 +38,73 @@ func RunWithOptions(options *Options) error {
 		return err
 	}
 
-	message := cli.NewMessage()
-	defer message.Release()
+	if options.PayloadDelay > 0 {
+		time.Sleep(time.Duration(options.PayloadDelay) * time.Second)
+	}
 
-	pl.SetBatch(message)
-	pl.Iterator(func(k string, value interface{}) error {
-		return pl.Bind(k, value, message)
-	})
+	pPause := time.Duration(options.PayloadPause)
+	lp := len(pls)
 
-	response := &client.Response{}
+	for i, pl := range pls {
+		err = func() error {
+			message := cli.NewMessage()
+			defer message.Release()
 
-	storableSrv := storable.Singleton()
-	maker, err := storableSrv.Lookup(options.Storable)
-	if err != nil {
-		if options.Debug {
-			fmt.Printf("could not find Storable:\"%s\", building dynamically\n", options.Storable)
+			pl.SetBatch(message)
+			pl.Iterator(func(k string, value interface{}) error {
+				return pl.Bind(k, value, message)
+			})
+
+			response := &client.Response{}
+
+			storableSrv := storable.Singleton()
+			maker, err := storableSrv.Lookup(options.Storable)
+			if err != nil {
+				if options.Debug {
+					fmt.Printf("could not find Storable:\"%s\", building dynamically\n", options.Storable)
+				}
+
+				maker = checker.Generated(cli.Config.Datastore.MetaInput.Outputs, pl.Batch, false)
+			}
+
+			response.Data = maker()
+
+			ctx := context.Background()
+			cancel := func() {}
+			if options.TimeoutUs > 0 {
+				ctx, cancel = context.WithTimeout(ctx, time.Duration(options.TimeoutUs)*time.Microsecond)
+			}
+
+			err = cli.Run(ctx, message, response)
+
+			if err != nil && !options.Metrics {
+				cancel()
+				return err
+			}
+
+			cancel()
+
+			if options.Metrics {
+				return nil
+			}
+
+			toolbox.Dump(response)
+			return nil
+		}()
+
+		if err != nil {
+			return err
 		}
 
-		maker = checker.Generated(cli.Config.Datastore.MetaInput.Outputs, pl.Batch, false)
+		if i < lp-1 && pPause > 0 {
+			time.Sleep(pPause * time.Second)
+		}
 	}
-
-	response.Data = maker()
-
-	ctx := context.Background()
-	cancel := func() {}
-	if options.TimeoutUs > 0 {
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(options.TimeoutUs)*time.Microsecond)
-	}
-
-	err = cli.Run(ctx, message, response)
-
-	if err != nil && !options.Metrics {
-		cancel()
-		return err
-	}
-
-	cancel()
 
 	if options.Metrics {
 		ctrs := gm.OperationCounters()
 		toolbox.Dump(ctrs)
-		return nil
 	}
-
-	toolbox.Dump(response)
 
 	return err
 }

@@ -14,7 +14,7 @@ This library is compatible with Go 1.16+
 
 ## Motivation
 
-The goal of this library to provide a generic TensorFlow wrapper web service which can speed up end to end execution by leveraging a caching system. 
+The goal of this library to provide a TensorFlow model prediction HTTP service which can speed up end to end execution by leveraging a caching system. 
 Caching has to be seamless, meaning the client, behind the scenes, should take care of any dictionary-based key generation and model changes automatically. 
 
 In practice this library can provide substantial (100x) E2E execution improvement from the client side perspective, with the input space of billions of distinct keys. 
@@ -46,6 +46,8 @@ Models:
     URL: gs://modelBucket/MlXModelFolder
 ```
 
+The `URL` is loaded using [afs](https://github.com/viant/afs).
+
 2. Start the example server (in the background) with `go run ./example/server -c config.yaml`.
 3. Then invoke a prediction with `curl 'http://localhost:8086/v1/api/model/ml0/eval?modelInput1=val1&modelInputX=valueX'`.
 
@@ -55,7 +57,10 @@ The main performance benefit comes from trading compute with space.
 
 In order to leverage caching, the model has to use categorical features with a fixed vocabulary, with the input space providing a reasonable cache hit rate.
 
-Currently, only `StringLookup` and `IntegerLookup` layers are supported for caching.
+As of `v0.8.0`, numeric features are supported. 
+The cache space is reduced by limiting decimal precision.
+
+Until `v0.8.0`, only `StringLookup` and `IntegerLookup` layers are supported for caching.
 In terms of practical limits, only models with categorical features can be cached; even numeric values can theoretically be cached, if a given level of input precision loss is acceptable.
 
 By default, the client will configure itself using the web service cache settings.  
@@ -66,7 +71,6 @@ The library supports 3 types of caching:
 - external Aerospike cache
 - hybrid
 
-Currently, only the client supports the in-memory cache. 
 The in-memory cache uses [scache](https://github.com/viant/scache)'s most-recently-used implementation.
 
 When an external cache is used, the client will first check the external cache that is shared with web service; if data is found, it's copied to local in-memory cache. 
@@ -78,8 +82,7 @@ For example, we can have a 2 tier caching strategy, where we will call the tiers
 In this scenario, the L2 cache can be a very large SSD-backed Aerospike instance and L1 cache could be a smaller memory-based instance. 
 
 In this case, when we look for a cached value, first the in-memory cache is checked, followed by L1, then L2. 
-Once the value is found, the value is copied to L2 then from L2 to L1 and L1 to local memory, depending on where it's found.
-
+Then with a cache miss, the value is calculated then copied to L2 - then from L2 to L1 and L1 to local memory.
 
 **Example of `config.yaml` with both an in-memory and an Aerospike cache**
 
@@ -336,7 +339,7 @@ In all these, `%s` is `Model[].ID` (i.e. from `config.yaml`)
 
 These are provided via [`gmetric`](https://github.com/viant/gmetric).
 
-- `%sperformance` where `%s` is the datastore ID, i.e. `DataStores[].ID` from `config.yaml`.
+- `%s` where `%s` is the datastore ID, i.e. `DataStores[].ID` from `config.yaml`.
 - `%sClient` where `%s` is the model ID, i.e. `Models[].ID` from `config.yaml`.
 
 ## License
