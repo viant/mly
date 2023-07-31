@@ -12,7 +12,7 @@ import (
 	"github.com/viant/mly/shared/stat"
 )
 
-//NewStores creates new stores
+// NewStores creates new stores
 func NewStores(cfg *config.DatastoreList, gmetrics *gmetric.Service) (map[string]*Service, error) {
 	return NewStoresV2(cfg, gmetrics, false)
 }

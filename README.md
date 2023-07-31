@@ -1,4 +1,4 @@
-# Mly - machine learning executor on steroids for golang
+# mly - Latency focused deep-learning model runner client and server
 
 [![GoReportCard](https://goreportcard.com/badge/github.com/viant/mly)](https://goreportcard.com/report/github.com/viant/mly)
 [![GoDoc](https://godoc.org/github.com/viant/mly?status.svg)](https://godoc.org/github.com/viant/mly)
@@ -12,16 +12,17 @@ This library is compatible with Go 1.16+
 - [Contribution](#contributing-to-mly)
 - [License](#license)
 
-## Motivation
+# Motivation
 
-The goal of this library to provide a TensorFlow model prediction HTTP service which can speed up end to end execution by leveraging a caching system. 
+The goal of this library to provide a deep-learning model prediction HTTP service which can speed up end to end execution by leveraging a caching system. 
+Currently the only deep-learning library supported is TensorFlow.
 Caching has to be seamless, meaning the client, behind the scenes, should take care of any dictionary-based key generation and model changes automatically. 
 
 In practice this library can provide substantial (100x) E2E execution improvement from the client side perspective, with the input space of billions of distinct keys. 
 
 Each model provides both TensorFlow and cache-level performance metrics via HTTP REST API.
 
-## Introduction
+# Introduction
 
 This project provides libraries for both the client and the web service.
 
@@ -30,9 +31,9 @@ The web service supports multiple TensorFlow model integrations on the URI level
 The service automatically detects and reloads any model changes; it will poll the source files for modifications once a minute.
 Technically, any HTTP client can work with the service, but to get the seamless caching benefit, it's recommended to use provided client.
 
-## Quickstart
+# Quickstart
 
-To start a HTTP service with 2 models, from the repository root:
+To start a HTTP service with a model, from the repository root:
 
 1. Create a `config.yaml` file:
 
@@ -42,16 +43,16 @@ Endpoint:
 Models:
   - ID: ml0
     URL: gs://modelBucket/Ml0ModelFolder
-  - ID: mlx
-    URL: gs://modelBucket/MlXModelFolder
 ```
 
 The `URL` is loaded using [afs](https://github.com/viant/afs).
 
-2. Start the example server (in the background) with `go run ./example/server -c config.yaml`.
+2. Start the example server in the background with `go run ./example/server -c config.yaml &`.
 3. Then invoke a prediction with `curl 'http://localhost:8086/v1/api/model/ml0/eval?modelInput1=val1&modelInputX=valueX'`.
+4. Bring the server to the foreground by using the command `fg` .
+5. Use Ctrl+C to terminate the server.
 
-## Caching
+# Caching
 
 The main performance benefit comes from trading compute with space.
 
@@ -106,18 +107,18 @@ Connections:
     Hostnames: 127.0.0.1
 ```
 
-### Dictionary hash code
+## Dictionary hash code
 
 In caching mode, in order to manage cache and client/server consistency every time a model/dictionary gets re/loaded, `mly` computes a dictionary hash code.
 This hash code gets stored in the cache along with model prediction and is passed to the client in every response. 
 Once a client detects a change in dictionary hash code, it automatically initiates a dictionary reload and invalidates cache entries.
 
-## Configuration
+# Configuration
 
-### Server
+## Server
 
 The server accepts configuration with the following options:
-See `service/config/model.go` for types.
+See `service/config/model.go`.
 
 * `Models` : list of models
   - `ID`: `string` - required - model ID.
@@ -170,7 +171,7 @@ See `service/config/model.go` for types.
 
 * `EnableMemProf`: `bool` - optional - enables endpoint for memory profiling.
 
-### Client
+## Client
  
 `mly` client does not come with external config file.
 
@@ -180,14 +181,16 @@ To create a client, use the following snippet:
 mly := client.New("$modelID", []*client.Host{client.NewHost("mlServiceHost", mlServicePort)}, options ...)
 ```
 
-Where optional `options` can be of the following:
+Where optional `options` can be of, but not limited to, the following:
   * `NewCacheSize(sizeOption)`
   * `NewCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)`
   * `NewGmetric()` - custom instance of `gmetric` service
 
-## Usage
+See `shared/client/option.go` for more options. 
 
-### Server
+# Usage
+
+## Server
 
 To code a server executable you can use the following code:
 
@@ -208,7 +211,7 @@ func main() {
 }
 ```
 
-### Client
+## Client
 
 ```go
 package main
@@ -243,7 +246,7 @@ func main() {
 }
 ```
 
-### Output post-processing
+# Output post-processing
 
 By default, the model signature output name alongside the model prediction gets used to produce cachable output.
 This process can be customized for specific needs.
@@ -281,18 +284,18 @@ Where `MyOutputType` could implement the following interfaces to avoid reflectio
 - [Bintly](https://github.com/viant/bintly) (in-memory serialization)
 - [Gojay JSON](https://github.com/francoispqt/gojay/) (HTTP response)
 
-## Endpoints
+# Server Endpoints
 
-###  `/v1/api/config` 
+##  `/v1/api/config` 
 
 Shows the loaded and processed configuration.
 
-### `/v1/api/health` 
+## `/v1/api/health` 
 
 Shows if any models are failing to reload.
 Payload is a JSON object whose keys are each model ID as specified in the `config.yaml`, with values a number, where 0 indicates a failure to reload and 1 indicates that the last attempted reload was successful.
 
-#### Example
+### Example
 
 For a `config.yaml` like:
 
@@ -315,7 +318,7 @@ The `/v1/api/health` endpoint will provide a response like:
 }
 ```
 
-### `/v1/api/metric/operations` 
+## `/v1/api/metric/operations` 
 
 All metrics registered in the web service.
 These are provided via [`gmetric`](https://github.com/viant/gmetric).
@@ -324,8 +327,11 @@ In all these, `%s` is `Model[].ID` (i.e. from `config.yaml`)
 
 - `/v1/api/metric/operation/%sPerf` - Records metrics related to model handlers (compare with the related `Eval` metrics to calculate overhead).
 - `/v1/api/metric/operation/%sEval` - Records metrics related to the TensorFlow operations.
+- `/v1/api/metric/operation/%sDictMeta` - Records metrics to client dictionary fetch.
+- `/v1/api/metric/operation/%sCfgMeta` - Records metrics to client configuration fetch.
+- `/v1/api/metric/operation/%sMetaHandler` - Records server-side metrics to client set up.
 
-### `/v1/api/model`
+## `/v1/api/model`
 
 Model operations.
 
@@ -335,25 +341,25 @@ In all these, `%s` is `Model[].ID` (i.e. from `config.yaml`)
 - `/v1/api/model/%s/meta/config` - provides configuration for client related to model
 - `/v1/api/model/%s/meta/dictionary` - provides current dictionary
 
-## Client Metrics (`gmetric`)
+# Client Metrics (`gmetric`)
 
 These are provided via [`gmetric`](https://github.com/viant/gmetric).
 
 - `%s` where `%s` is the datastore ID, i.e. `DataStores[].ID` from `config.yaml`.
 - `%sClient` where `%s` is the model ID, i.e. `Models[].ID` from `config.yaml`.
 
-## License
+# License
 
 The source code is made available under the terms of the Apache License, Version 2, as stated in the file `LICENSE`.
 
 Individual files may be made available under their own specific license,
 all compatible with Apache License, Version 2. Please see individual files for details.
 
-## Contributing to `mly`
+# Contributing to `mly`
 
 `mly` is an open source project and contributors are welcome!
 
-## Credits and Acknowledgements
+# Credits and Acknowledgements
 
 **Initial Author:** Adrian Witas
 **Current Author:** David Choi

@@ -16,6 +16,7 @@ import (
 	"github.com/viant/mly/service/request"
 )
 
+// Handler converts a model prediction HTTP request to its internal calls.
 type Handler struct {
 	maxDuration time.Duration
 	service     *Service

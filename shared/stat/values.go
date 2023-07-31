@@ -6,6 +6,7 @@ import (
 	"github.com/viant/gmetric/stat"
 )
 
+// Values is a utility to pass multiple events to gmetric.
 type Values []interface{}
 
 func (v *Values) Append(item interface{}) {
@@ -25,7 +26,6 @@ func (v *Values) Values() []interface{} {
 	return *v
 }
 
-//NewValues creates a values slice
 func NewValues() *Values {
 	return &Values{}
 }

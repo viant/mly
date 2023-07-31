@@ -17,7 +17,7 @@ func (r Iterator) ToMap() (map[string]interface{}, error) {
 	return result, err
 }
 
-//MapToIterator create an iterator for supplied map
+// MapToIterator create an iterator for supplied map
 func MapToIterator(aMap map[string]interface{}) Iterator {
 	return func(pair Pair) error {
 		for k, v := range aMap {

@@ -64,8 +64,8 @@ func (s *Service) ServerDeprecatedFuncAnnouncement() {
 		return
 	}
 
-	if s.config.Cache != nil && (s.l1Client != nil || s.l2Client != nil) {
-		log.Printf("datastore %s may have in-memory cache enabled, which is unneeded since backplanes will capture most cache hits", s.config.ID)
+	if s.config.Cache != nil && s.config.Cache.SizeMb > 0 && (s.l1Client != nil || s.l2Client != nil) {
+		log.Printf("datastore %s may have in-memory cache has space allocated, which is unneeded since backplanes will capture most cache hits", s.config.ID)
 	}
 }
 
@@ -395,7 +395,6 @@ func NewWithCache(config *config.Datastore, l1Client, l2Client client.Service, c
 
 	// in server mode, cache hit rate is low, i.e., the chance a key exists not in L1 but in local cache is very low
 	// the only time this would happen is when a client makes a request while another client's request is populating L1
-
 	var err error
 	if config.Cache != nil {
 		srv.cache, err = scache.New(config.Cache)

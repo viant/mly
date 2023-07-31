@@ -30,13 +30,13 @@ import (
 const healthURI = "/v1/api/health"
 const statsURI = "/v1/api/stats"
 
-//Service represents http bridge
+// Service is the primary container for all HTTP based services.
 type Service struct {
 	server *http.Server
 	config *Config
 }
 
-// Deprecated - use Listen and Serve separately
+// Deprecated: use Listen and Serve separately
 func (s *Service) ListenAndServe() error {
 	ln, err := s.Listen()
 	if err != nil {
@@ -55,13 +55,14 @@ func (s *Service) Serve(l net.Listener) error {
 	return s.server.Serve(l)
 }
 
-// ListenAndServeTLS start https endpoint on secure port
+// Deprecated: ListenAndServeTLS start https endpoint on secure port.
+// Practically we terminate encryption via a load balancer.
 func (s *Service) ListenAndServeTLS(certFile, keyFile string) error {
 	log.Printf("starting mly service endpoint: %v\n", s.server.Addr)
 	return s.server.ListenAndServeTLS(certFile, keyFile)
 }
 
-// Shutdown stops http.Server
+// Shutdown calls http.(*Server).Shutdown
 func (s *Service) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
@@ -187,11 +188,6 @@ func New(cfg *Config) (*Service, error) {
 	datastores, err := datastore.NewStoresV2(&cfg.DatastoreList, metrics, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create datastores: %w", err)
-	}
-
-	// TODO remove
-	for _, ds := range datastores {
-		ds.ServerDeprecatedFuncAnnouncement()
 	}
 
 	hooks := []Hook{

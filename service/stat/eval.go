@@ -5,26 +5,21 @@ import (
 	"github.com/viant/mly/shared/stat"
 )
 
-const (
-	Evaluate = "eval"
-	Invalid  = "invalid"
-)
+type eval struct{}
 
-type service struct{}
+const Pending = "pending"
 
 // implements github.com/viant/gmetric/counter.Provider
-func (e service) Keys() []string {
+func (p eval) Keys() []string {
 	return []string{
 		stat.ErrorKey,
-		Evaluate,
-		Pending,
 		stat.Timeout,
-		Invalid,
+		Pending,
 	}
 }
 
 // implements github.com/viant/gmetric/counter.Provider
-func (e service) Map(value interface{}) int {
+func (p eval) Map(value interface{}) int {
 	if value == nil {
 		return -1
 	}
@@ -33,20 +28,15 @@ func (e service) Map(value interface{}) int {
 		return 0
 	case string:
 		switch val {
-		case Evaluate:
+		case stat.Timeout:
 			return 1
 		case Pending:
 			return 2
-		case stat.Timeout:
-			return 3
-		case Invalid:
-			return 4
 		}
 	}
-
 	return -1
 }
 
-func NewProvider() counter.Provider {
-	return &service{}
+func NewEval() counter.Provider {
+	return &eval{}
 }

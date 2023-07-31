@@ -144,7 +144,6 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 	}
 
 	stats.Append(stat.Evaluate)
-
 	err = ctx.Err()
 	if err != nil {
 		log.Printf("[%v do] server context Err():%v", s.config.ID, err)
@@ -239,16 +238,16 @@ func (s *Service) buildResponse(ctx context.Context, request *request.Request, r
 }
 
 func incrementPending(metric *gmetric.Operation, startTime time.Time) func() {
-	metric.IncrementValue(sstat.Pending)
+	metric.IncrementValue(stat.Pending)
 
 	index := metric.Index(startTime)
 	recentCounter := metric.Recent[index]
-	recentCounter.IncrementValue(sstat.Pending)
+	recentCounter.IncrementValue(stat.Pending)
 
 	return func() {
-		metric.DecrementValue(sstat.Pending)
+		metric.DecrementValue(stat.Pending)
 		recentCounter := metric.Recent[index]
-		recentCounter.DecrementValue(sstat.Pending)
+		recentCounter.DecrementValue(stat.Pending)
 	}
 }
 
@@ -337,6 +336,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		inputs[input.Name] = &signature.Inputs[i]
 	}
 
+	hasWildcard := false
 	// add inputs from the config that aren't in the model
 	for _, input := range s.config.Inputs {
 		iName := input.Name
@@ -344,10 +344,14 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 			continue
 		}
 
+		if input.Wildcard {
+			hasWildcard = true
+		}
+
 		fInput := &domain.Input{
 			Name:      iName,
 			Index:     input.Index,
-			Auxiliary: true,
+			Auxiliary: input.Auxiliary,
 		}
 
 		fInput.Type = input.RawType()
@@ -363,6 +367,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		signature.Output.DataType = s.config.OutputType
 	}
 
+	// modify all service objects
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
@@ -370,7 +375,11 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	s.signature = signature
 
 	if dictionary != nil {
-		filehash := snapshot.Min.Unix() + snapshot.Max.Unix()
+		var filehash int64
+		if hasWildcard {
+			filehash = snapshot.Min.Unix() + snapshot.Max.Unix()
+		}
+
 		dictionary.UpdateHash(filehash)
 
 		s.dictionary = dictionary
@@ -472,7 +481,8 @@ func (s *Service) scheduleModelReload() {
 	}
 }
 
-// Deprecated and unused. Loads common.Dictionary from a remote source.
+// Deprecated: model metadata should be embedded.
+// Loads common.Dictionary from a remote source.
 func (s *Service) loadDictionary(ctx context.Context, URL string) (*common.Dictionary, error) {
 	var result = &common.Dictionary{}
 	rawReader, err := s.fs.OpenURL(ctx, URL)
@@ -505,13 +515,15 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 	cfg.Init()
 
 	srv := &Service{
-		fs:              fs,
-		config:          cfg,
+		fs:           fs,
+		config:       cfg,
+		useDatastore: cfg.UseDictionary() && cfg.DataStore != "",
+		sema:         sema,
+
 		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
-		evaluatorMetric: metrics.MultiOperationCounter(location, cfg.ID+"Eval", cfg.ID+" evaluator performance", time.Microsecond, time.Minute, 2, sstat.NewService()),
-		useDatastore:    cfg.UseDictionary() && cfg.DataStore != "",
-		inputs:          make(map[string]*domain.Input),
-		sema:            sema,
+		evaluatorMetric: metrics.MultiOperationCounter(location, cfg.ID+"Eval", cfg.ID+" evaluator performance", time.Microsecond, time.Minute, 2, stat.NewEval()),
+
+		inputs: make(map[string]*domain.Input),
 	}
 
 	for _, opt := range options {

@@ -24,11 +24,13 @@ type (
 		Strings []string
 		Ints    []int
 
-		Hash int // used to check if a model updated
+		Hash int // memoization; used to check if a model updated
 	}
 )
 
 // TODO this should use a fixed size integer?
+// UpdateHash will memoize dictionary hashing.
+// Since wildcard fields don't provide an actual dictionary, we use the modification time information to generate a hash based on the file, passed in as fsHash.
 func (d *Dictionary) UpdateHash(fsHash int64) int {
 	d.Hash = int(fsHash)
 
