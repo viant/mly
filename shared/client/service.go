@@ -244,7 +244,9 @@ func (s *Service) init(options []Option) error {
 	if s.gmetrics == nil {
 		s.gmetrics = gmetric.New()
 	}
+
 	location := reflect.TypeOf(Service{}).PkgPath()
+
 	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewStore())
 	if s.Config.MaxRetry == 0 {
 		s.Config.MaxRetry = 3
@@ -365,11 +367,11 @@ func (s *Service) getHTTPClient(host *Host) *http.Client {
 
 func (s *Service) initDatastore() error {
 	remoteCfg := s.Config.Datastore
-	if remoteCfg.Datastore.ID == "" {
+	if remoteCfg == nil {
 		return nil
 	}
 
-	if remoteCfg == nil {
+	if remoteCfg.Datastore.ID == "" {
 		return nil
 	}
 
@@ -454,7 +456,15 @@ func (s *Service) discoverConfig(host *Host, URL string) (*config.Remote, error)
 			log.Printf("%sConnections[%d]:%+v", prefix, i, c)
 		}
 
-		log.Printf("%sDatastore:%+v", prefix, cfg.Datastore)
+		ds := cfg.Datastore
+		if ds.Reference != nil {
+			log.Printf("%sDatastore:[%s].Cache: %+v", prefix, ds.ID, ds.Cache)
+			log.Printf("%sDatastore:[%s].L1: %+v", prefix, ds.ID, ds.Connection)
+
+			if ds.L2 != nil {
+				log.Printf("%sDatastore:[%s].L2: %+v", prefix, cfg.Datastore.ID, cfg.Datastore.L2)
+			}
+		}
 
 		for i, mi := range cfg.MetaInput.Inputs {
 			log.Printf("%sMetaInput.Inputs[%d]:%+v", prefix, i, *mi)

@@ -33,7 +33,16 @@ func RunWithOptions(options *Options) error {
 
 	gm := gmetric.New()
 
-	cli, err := client.New(options.Model, options.Hosts(), client.WithDebug(options.Debug), client.WithGmetrics(gm))
+	opts := []client.Option{
+		client.WithDebug(options.Debug),
+		client.WithGmetrics(gm),
+	}
+
+	if options.CacheMB > 0 {
+		client.WithCacheSize(options.CacheMB)
+	}
+
+	cli, err := client.New(options.Model, options.Hosts(), opts...)
 	if err != nil {
 		return err
 	}
