@@ -3,8 +3,8 @@ package datastore
 import "time"
 
 const (
-	defaultTimeToLiveMs = 600000
-	defaultRetryTimeMs  = 120000
+	defaultTimeToLiveMs = 900000 // 15 minutes
+	defaultRetryTimeMs  = 5000   // 5 seconds
 )
 
 //Reference datastore reference
