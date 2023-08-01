@@ -85,7 +85,7 @@ func (s *Service) Key(key string) *Key {
 // Put puts entry to the datastore
 func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) error {
 	// Add to local cache first
-	if err := s.updateCache(key, value, dictHash); err != nil {
+	if err := s.updateCache(key.AsString(), value, dictHash); err != nil {
 		return err
 	}
 
@@ -145,8 +145,9 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 		onDone(time.Now(), *stats...)
 	}()
 
+	keyString := key.AsString()
 	if s.useCache {
-		status, dictHash, err := s.readFromCache(key, storable, stats)
+		status, dictHash, err := s.readFromCache(keyString, storable, stats)
 		if err != nil {
 			return 0, err
 		}
@@ -175,10 +176,10 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 	if s.useCache && key != nil {
 		if err == nil {
 			if storable != nil {
-				err = s.updateCache(key, storable, dictHash)
+				err = s.updateCache(keyString, storable, dictHash)
 			}
 		} else if common.IsKeyNotFound(err) {
-			if e := s.updateNotFound(key); e != nil {
+			if e := s.updateNotFound(keyString); e != nil {
 				return 0, types.ErrKeyNotFound
 			}
 		}
@@ -186,9 +187,9 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 	return dictHash, err
 }
 
-func (s *Service) updateNotFound(key *Key) error {
+func (s *Service) updateNotFound(keyString string) error {
 	entry := &Entry{
-		Key:      key.AsString(),
+		Key:      keyString,
 		NotFound: true,
 		Expiry:   time.Now().Add(s.config.RetryTime()),
 	}
@@ -196,10 +197,10 @@ func (s *Service) updateNotFound(key *Key) error {
 	if err != nil {
 		return err
 	}
-	return s.cache.Set(key.AsString(), data)
+	return s.cache.Set(keyString, data)
 }
 
-func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error {
+func (s *Service) updateCache(keyString string, entryData EntryData, dictHash int) error {
 	if entryData == nil {
 		return fmt.Errorf("entry was nil")
 	}
@@ -213,30 +214,32 @@ func (s *Service) updateCache(key *Key, entryData EntryData, dictHash int) error
 			entryData = data
 		}
 	}
+
 	entry := &Entry{
 		Hash:   dictHash,
-		Key:    key.AsString(),
+		Key:    keyString,
 		Data:   entryData,
 		Expiry: time.Now().Add(s.config.TimeToLive()),
 	}
 	data, err := bintly.Encode(entry)
 	if err != nil {
-		return fmt.Errorf("failed to marshal cache: %v, due to:%w ", key.AsString(), err)
+		return fmt.Errorf("failed to marshal cache: %v, due to:%w ", keyString, err)
 	}
-	err = s.cache.Set(key.AsString(), data)
+	err = s.cache.Set(keyString, data)
 	if err != nil {
 		return fmt.Errorf("failed to set cache " + err.Error())
 	}
 
 	if s.debug() {
-		log.Printf("[%s datastore update] local cache:\"%s\" (%d bytes) set", s.id(), key.AsString(), len(data))
+		log.Printf("[%s datastore update] local cache:\"%s\" (%d bytes) set", s.id(), keyString, len(data))
 	}
 
 	return nil
 }
 
-func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (CacheStatus, int, error) {
-	data, _ := s.cache.Get(key.AsString())
+// reads from local
+func (s *Service) readFromCache(keyString string, value Value, stats *stat.Values) (CacheStatus, int, error) {
+	data, _ := s.cache.Get(keyString)
 	if len(data) == 0 {
 		return CacheStatusNotFound, 0, nil
 	}
@@ -261,7 +264,7 @@ func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (Cach
 
 	if entry.Expiry.Before(time.Now()) {
 		stats.Append(stat.CacheExpired)
-		s.cache.Delete(key.AsString())
+		s.cache.Delete(keyString)
 		return CacheStatusNotFound, 0, nil
 	}
 
@@ -273,7 +276,11 @@ func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (Cach
 
 	common.SetHash(entry.Data, entry.Hash)
 
-	if key.AsString() != entry.Key {
+	if keyString != entry.Key {
+		if s.debug() {
+			log.Printf("[%s datastore readFromCache] key:\"%s\" entry.Key:\"%s\"", s.id(), keyString, entry.Key)
+		}
+
 		stats.Append(stat.CacheCollision)
 		return CacheStatusNotFound, 0, nil
 	}
