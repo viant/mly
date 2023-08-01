@@ -73,7 +73,6 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		} else {
 			log.Printf("[%v http] marshal error:%v data:%s", h.service.config.ID, merr, response.Data)
 		}
-
 	}
 
 	if err != nil {

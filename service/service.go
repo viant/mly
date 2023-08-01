@@ -54,12 +54,13 @@ type Service struct {
 	sema      *semaph.Semaph // prevents potentially explosive thread generation due to concurrent requests
 	evaluator *tfmodel.Evaluator
 
-	signature  *domain.Signature
-	dictionary *common.Dictionary
-	inputs     map[string]*domain.Input
+	// model io
+	signature *domain.Signature
+	inputs    map[string]*domain.Input
 
 	// caching
 	useDatastore bool
+	dictionary   *common.Dictionary
 	datastore    datastore.Storer
 
 	// outputs
@@ -146,7 +147,11 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 	stats.Append(stat.Evaluate)
 	err = ctx.Err()
 	if err != nil {
-		log.Printf("[%v do] server context Err():%v", s.config.ID, err)
+		stats.AppendError(err)
+
+		if s.config.Debug {
+			log.Printf("[%v do] server context Err():%v", s.config.ID, err)
+		}
 	}
 
 	return s.buildResponse(ctx, request, response, tensorValues)
@@ -175,7 +180,7 @@ func (s *Service) transformOutput(ctx context.Context, request *request.Request,
 			}
 
 			if isDebug {
-				log.Printf("[%s trout] put:\"%s\" ok", s.config.ID, cacheKey)
+				log.Printf("[%s trout] put:\"%s\" dictHash:%d ok", s.config.ID, cacheKey, dictHash)
 			}
 		}()
 	}
@@ -336,16 +341,11 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		inputs[input.Name] = &signature.Inputs[i]
 	}
 
-	hasWildcard := false
 	// add inputs from the config that aren't in the model
 	for _, input := range s.config.Inputs {
 		iName := input.Name
 		if _, ok := inputs[iName]; ok {
 			continue
-		}
-
-		if input.Wildcard {
-			hasWildcard = true
 		}
 
 		fInput := &domain.Input{
@@ -376,7 +376,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 
 	if dictionary != nil {
 		var filehash int64
-		if hasWildcard {
+		if useDict && len(dictionary.Layers) == 0 {
 			filehash = snapshot.Min.Unix() + snapshot.Max.Unix()
 		}
 
