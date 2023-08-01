@@ -111,6 +111,14 @@ func (g *genType) NKeys() int {
 // implements shared/common.Storable
 func (g *genType) Iterator() common.Iterator {
 	return func(pair common.Pair) error {
+		if g.D == nil {
+			return nil
+		}
+
+		for k, v := range g.D {
+			pair(k, v)
+		}
+
 		return nil
 	}
 }

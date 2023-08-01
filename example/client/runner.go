@@ -39,7 +39,11 @@ func RunWithOptions(options *Options) error {
 	}
 
 	if options.CacheMB > 0 {
-		client.WithCacheSize(options.CacheMB)
+		opts = append(opts, client.WithCacheSize(options.CacheMB))
+	}
+
+	if !options.NoHashCheck {
+		opts = append(opts, client.WithHashValidation(true))
 	}
 
 	cli, err := client.New(options.Model, options.Hosts(), opts...)

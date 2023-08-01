@@ -15,7 +15,8 @@ type Options struct {
 	Model    string `short:"m" long:"model" description:"model"`
 	Storable string `short:"s" long:"storable"`
 
-	CacheMB int `long:"cache"`
+	CacheMB     int  `long:"cache"`
+	NoHashCheck bool `long:"nohash"`
 
 	PayloadStr   []string `short:"a" long:"payload"`
 	PayloadPause int      `long:"pause" description:"pause seconds between payloads"`
