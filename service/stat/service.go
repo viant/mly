@@ -20,6 +20,8 @@ func (e service) Keys() []string {
 		Pending,
 		stat.Timeout,
 		Invalid,
+		stat.Canceled,
+		stat.DeadlineExceeded,
 	}
 }
 
@@ -41,6 +43,10 @@ func (e service) Map(value interface{}) int {
 			return 3
 		case Invalid:
 			return 4
+		case stat.Canceled:
+			return 5
+		case stat.DeadlineExceeded:
+			return 6
 		}
 	}
 

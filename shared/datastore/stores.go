@@ -42,11 +42,7 @@ func NewStoresV2(cfg *config.DatastoreList, gmetrics *gmetric.Service, verbose b
 
 		var counter *gmetric.Operation
 		if db.ID != "" {
-			if db.Cache != nil {
-				counter = gmetrics.MultiOperationCounter(location, db.ID, db.ID+" performance", time.Microsecond, time.Minute, 2, stat.NewCache())
-			} else {
-				counter = gmetrics.MultiOperationCounter(location, db.ID, db.ID+" performance", time.Microsecond, time.Minute, 2, stat.NewStore())
-			}
+			counter = gmetrics.MultiOperationCounter(location, db.ID, db.ID+" performance", time.Microsecond, time.Minute, 2, stat.NewCache())
 		}
 
 		dbService, err := NewWithCache(cfg.Datastores[i], l1Client, l2Client, counter)

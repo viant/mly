@@ -3,18 +3,24 @@ package stat
 import "github.com/viant/gmetric/counter"
 
 const (
-	ErrorKey       = "error"
-	NoSuchKey      = "noKey"
-	L2NoSuchKey    = "L2NoKey"
-	L1Copy         = "L1Copy"
-	HasValue       = "hasValue"
+	// Not deprecated since still used in other metrics
+	NoSuchKey = "noKey"
+
+	// Deprecated due to complications
+	HasValue = "hasValue"
+	CacheHit = "cacheHit"
+
 	CacheCollision = "collision"
-	CacheHit       = "cacheHit"
 	CacheExpired   = "expired"
-	// Context errors
-	Canceled         = "canceled"
-	DeadlineExceeded = "deadlineExceeded"
-	// Aerospike Errors
+	LocalHasValue  = "localHasValue"
+	LocalNoSuchKey = "localNoKey"
+
+	L1NoSuchKey = "L1NoKey"
+	L1HasValue  = "L1HasValue"
+	L2NoSuchKey = "L2NoKey"
+	L1Copy      = "L1Copy"
+
+	// Aerospike Errors - still complicated
 	Timeout = "timeout"
 	Down    = "down"
 )
@@ -33,6 +39,10 @@ func (p cache) Keys() []string {
 		L1Copy,
 		Timeout,
 		Down,
+		LocalHasValue,
+		LocalNoSuchKey,
+		L1NoSuchKey,
+		L1HasValue,
 	}
 }
 
@@ -64,6 +74,14 @@ func (p cache) Map(value interface{}) int {
 			return 8
 		case Down:
 			return 9
+		case LocalHasValue:
+			return 10
+		case LocalNoSuchKey:
+			return 11
+		case L1NoSuchKey:
+			return 12
+		case L1HasValue:
+			return 13
 		}
 	}
 	return -1

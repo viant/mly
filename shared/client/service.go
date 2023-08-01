@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -76,10 +75,12 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		onDone(time.Now(), *stats...)
 		s.releaseMessage(input)
 	}()
-	cachable, isCachable := input.(Cachable)
+
 	if response.Data == nil {
 		return fmt.Errorf("response data was empty - aborting request")
 	}
+
+	cachable, isCachable := input.(Cachable)
 	var err error
 	var cachedCount int
 	var cached []interface{}
@@ -124,14 +125,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}
 
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			stats.Append(stat.Canceled)
-		} else if errors.Is(err, context.DeadlineExceeded) {
-			stats.Append(stat.DeadlineExceeded)
-		} else {
-			stats.Append(err)
-		}
-
+		stats.AppendError(err)
 		return err
 	}
 

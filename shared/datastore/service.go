@@ -22,11 +22,11 @@ import (
 type CacheStatus int
 
 const (
-	//CacheStatusFoundNoSuchKey cacheable no such key status
+	// CacheStatusFoundNoSuchKey we cache the status that we did not find a cache; this no-cache value has a shorter expiry
 	CacheStatusFoundNoSuchKey = CacheStatus(iota)
-	//CacheStatusNotFound no such key status
+	// CacheStatusNotFound no such key status
 	CacheStatusNotFound
-	//CacheStatusFound entry found status
+	// CacheStatusFound entry found status
 	CacheStatusFound
 )
 
@@ -57,16 +57,6 @@ func (s *Service) Config() *config.Datastore {
 
 func (s *Service) debug() bool {
 	return s.config.Debug
-}
-
-func (s *Service) ServerDeprecatedFuncAnnouncement() {
-	if s.mode == ModeClient {
-		return
-	}
-
-	if s.config.Cache != nil && s.config.Cache.SizeMb > 0 && (s.l1Client != nil || s.l2Client != nil) {
-		log.Printf("datastore %s may have in-memory cache has space allocated, which is unneeded since backplanes will capture most cache hits", s.config.ID)
-	}
 }
 
 func (s *Service) id() string {
@@ -109,7 +99,7 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 		return err
 	}
 
-	if dictHash > 0 {
+	if dictHash != 0 {
 		bins[common.HashBin] = dictHash
 	}
 
@@ -164,7 +154,6 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 		case CacheStatusFoundNoSuchKey:
 			return 0, types.ErrKeyNotFound
 		case CacheStatusFound:
-			stats.Append(stat.HasValue)
 			return dictHash, nil
 		}
 	}
@@ -251,18 +240,19 @@ func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (Cach
 	if len(data) == 0 {
 		return CacheStatusNotFound, 0, nil
 	}
+
 	aMap, useMap := value.(map[string]interface{})
 	var rawData = []byte{}
 	if useMap {
 		value = &rawData
 	}
-	entry := &Entry{
-		Data: EntryData(value),
-	}
+
+	entry := &Entry{Data: EntryData(value)}
 	err := bintly.Decode(data, entry)
 	if err != nil {
 		return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
 	}
+
 	if useMap {
 		if err = json.Unmarshal(rawData, &aMap); err != nil {
 			return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
@@ -274,26 +264,28 @@ func (s *Service) readFromCache(key *Key, value Value, stats *stat.Values) (Cach
 		s.cache.Delete(key.AsString())
 		return CacheStatusNotFound, 0, nil
 	}
+
+	// cached a not found - prevents repeat downstream cache lookups
 	if entry.NotFound {
-		stats.Append(stat.CacheHit)
-		stats.Append(stat.NoSuchKey)
+		stats.Append(stat.LocalNoSuchKey)
 		return CacheStatusFoundNoSuchKey, 0, nil
 	}
 
 	common.SetHash(entry.Data, entry.Hash)
 
-	if key.AsString() == entry.Key {
-		stats.Append(stat.CacheHit)
-		return CacheStatusFound, entry.Hash, nil
+	if key.AsString() != entry.Key {
+		stats.Append(stat.CacheCollision)
+		return CacheStatusNotFound, 0, nil
 	}
-	stats.Append(stat.CacheCollision)
-	return CacheStatusNotFound, 0, nil
+
+	stats.Append(stat.LocalHasValue)
+	return CacheStatusFound, entry.Hash, nil
 }
 
 func (s *Service) getFromClient(ctx context.Context, key *Key, storable Value, stats *stat.Values) (int, error) {
 	dictHash, err := s.fromL1Client(ctx, key, storable)
 	if common.IsKeyNotFound(err) {
-		stats.Append(stat.NoSuchKey)
+		stats.Append(stat.L1NoSuchKey)
 		if s.l2Client == nil || key.L2 == nil {
 			return 0, err
 		}
@@ -309,10 +301,11 @@ func (s *Service) getFromClient(ctx context.Context, key *Key, storable Value, s
 			}
 			return 0, err
 		}
+		// TODO don't ignore?
 		_ = s.copyTOL1(ctx, storable, key, dictHash, stats)
-		stats.Append(stat.HasValue)
 		return dictHash, nil
 	}
+
 	if err != nil {
 		if common.IsTimeout(err) {
 			stats.Append(stat.Timeout)
@@ -320,7 +313,8 @@ func (s *Service) getFromClient(ctx context.Context, key *Key, storable Value, s
 		stats.Append(err)
 		return dictHash, err
 	}
-	stats.Append(stat.HasValue)
+
+	stats.Append(stat.L1HasValue)
 	return dictHash, nil
 }
 
