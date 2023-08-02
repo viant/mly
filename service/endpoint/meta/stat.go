@@ -5,34 +5,14 @@ import (
 	"github.com/viant/mly/shared/stat"
 )
 
-type vp struct{}
-
 const (
 	NotFound   = "http404"
 	Dictionary = "dict"
 	Config     = "cfg"
 )
 
-func (p *vp) Keys() []string {
-	return []string{
-		stat.ErrorKey,
-	}
-}
-
-func (v *vp) Map(value interface{}) int {
-	if value == nil {
-		return -1
-	}
-
-	if _, ok := value.(error); ok {
-		return 0
-	}
-
-	return -1
-}
-
 func NewProvider() counter.Provider {
-	return &vp{}
+	return stat.ErrorOnly()
 }
 
 type svp struct{}

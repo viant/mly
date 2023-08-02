@@ -20,7 +20,7 @@ func NewStores(cfg *config.DatastoreList, gmetrics *gmetric.Service) (map[string
 func NewStoresV2(cfg *config.DatastoreList, gmetrics *gmetric.Service, verbose bool) (map[string]*Service, error) {
 	var result = make(map[string]*Service)
 	location := reflect.TypeOf(Service{}).PkgPath()
-	var connections = map[string]client.Service{}
+	var connections = map[string]*client.Service{}
 	if len(cfg.Connections) > 0 {
 		for i, connection := range cfg.Connections {
 			aero, err := client.New(cfg.Connections[i])
@@ -40,12 +40,13 @@ func NewStoresV2(cfg *config.DatastoreList, gmetrics *gmetric.Service, verbose b
 			return nil, err
 		}
 
-		var counter *gmetric.Operation
+		var rctr, wctr *gmetric.Operation
 		if db.ID != "" {
-			counter = gmetrics.MultiOperationCounter(location, db.ID, db.ID+" performance", time.Microsecond, time.Minute, 2, stat.NewCache())
+			rctr = gmetrics.MultiOperationCounter(location, db.ID, db.ID+" read cache performance", time.Microsecond, time.Minute, 2, stat.NewCache())
+			wctr = gmetrics.MultiOperationCounter(location, db.ID+"CacheW", db.ID+" write cache performance", time.Microsecond, time.Minute, 2, stat.NewWrite())
 		}
 
-		dbService, err := NewWithCache(cfg.Datastores[i], l1Client, l2Client, counter)
+		dbService, err := NewWithCache(cfg.Datastores[i], l1Client, l2Client, rctr, wctr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create datastore: %v, due to %w", db.ID, err)
 		}
@@ -58,8 +59,8 @@ func NewStoresV2(cfg *config.DatastoreList, gmetrics *gmetric.Service, verbose b
 	return result, nil
 }
 
-func getClient(db *config.Datastore, connections map[string]client.Service) (client.Service, client.Service, error) {
-	var l1Client, l2Client client.Service
+func getClient(db *config.Datastore, connections map[string]*client.Service) (*client.Service, *client.Service, error) {
+	var l1Client, l2Client *client.Service
 	var ok bool
 	if db == nil || db.Reference == nil {
 		return nil, nil, nil

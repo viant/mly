@@ -88,5 +88,5 @@ func (p cache) Map(value interface{}) int {
 }
 
 func NewCache() counter.Provider {
-	return &cache{}
+	return cache{}
 }

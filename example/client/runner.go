@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/viant/gmetric"
@@ -58,8 +59,11 @@ func RunWithOptions(options *Options) error {
 	pPause := time.Duration(options.PayloadPause)
 	lp := len(pls)
 
-	for i, pl := range pls {
-		err = func() error {
+	concurrency := options.Concurrent
+
+	for i, upl := range pls {
+		pl := upl
+		payloadedRunner := func() error {
 			message := cli.NewMessage()
 			defer message.Release()
 
@@ -103,10 +107,33 @@ func RunWithOptions(options *Options) error {
 
 			toolbox.Dump(response)
 			return nil
-		}()
+		}
 
-		if err != nil {
-			return err
+		errs := make([]error, concurrency)
+
+		wg := new(sync.WaitGroup)
+		wg.Add(concurrency)
+
+		for wi := 0; wi < concurrency; wi++ {
+			go func(wi int) {
+				defer wg.Done()
+
+				time.Sleep(1)
+
+				err = payloadedRunner()
+
+				if err != nil {
+					errs[wi] = err
+				}
+			}(wi)
+		}
+
+		wg.Wait()
+
+		for wi, err := range errs {
+			if err != nil {
+				return fmt.Errorf("%d:%w", wi, err)
+			}
 		}
 
 		if i < lp-1 && pPause > 0 {
@@ -117,6 +144,16 @@ func RunWithOptions(options *Options) error {
 	if options.Metrics {
 		ctrs := gm.OperationCounters()
 		toolbox.Dump(ctrs)
+	}
+
+	cli.Close()
+
+	if options.ErrorHistory {
+		tops := cli.ErrorHistory.TopK()
+		for _, t := range tops {
+			fmt.Printf("%d %s\n", t.Count, string(t.Data))
+		}
+
 	}
 
 	return err

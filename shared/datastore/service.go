@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"time"
 
 	"github.com/aerospike/aerospike-client-go"
@@ -30,25 +31,18 @@ const (
 	CacheStatusFound
 )
 
-//StoreMode represents service mode
-type StoreMode int
-
-const (
-	//ModeServer server mode
-	ModeServer = StoreMode(0)
-	//ModeClient client mode
-	ModeClient = StoreMode(1)
-)
-
-//Service datastore service
+// Service datastore service
 type Service struct {
-	counter  *gmetric.Operation
-	l1Client client.Service
-	l2Client client.Service
-	useCache bool
+	config *config.Datastore
+	mode   StoreMode
+
+	useLocal bool
 	cache    *scache.Cache
-	config   *config.Datastore
-	mode     StoreMode
+	l1Client *client.Service
+	l2Client *client.Service
+
+	readCounter  *gmetric.Operation
+	writeCounter *gmetric.Operation
 }
 
 func (s *Service) Config() *config.Datastore {
@@ -82,10 +76,20 @@ func (s *Service) Key(key string) *Key {
 	return NewKey(s.config, key)
 }
 
-// Put puts entry to the datastore
+// Put implements Storer.Put
 func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) error {
+	stats := stat.NewValues()
+
+	if s.writeCounter != nil {
+		onDone := s.writeCounter.Begin(time.Now())
+		defer func() {
+			onDone(time.Now(), *stats...)
+		}()
+	}
+
 	// Add to local cache first
 	if err := s.updateCache(key.AsString(), value, dictHash); err != nil {
+		stats.Append(err)
 		return err
 	}
 
@@ -96,6 +100,7 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 	storable := getStorable(value)
 	bins, err := storable.Iterator().ToMap()
 	if err != nil {
+		stats.Append(err)
 		return err
 	}
 
@@ -113,9 +118,12 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 	wp := key.WritePolicy(0)
 	wp.SendKey = true
 	if s.l1Client != nil && !s.config.ReadOnly {
-		if err = s.l1Client.Put(ctx, wp, writeKey, bins); err != nil {
+		if err = s.l1Client.Put(wp, writeKey, bins); err != nil {
+			stats.Append(err)
 			return err
 		}
+
+		stats.Append(stat.L1Write)
 
 		if isDebug {
 			log.Printf("[%s datastore put] l1 OK", s.id())
@@ -124,7 +132,12 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 
 	if s.l2Client != nil && !s.config.L2.ReadOnly {
 		k2Key, _ := key.L2.Key()
-		err = s.l2Client.Put(ctx, wp, k2Key, bins)
+		err = s.l2Client.Put(wp, k2Key, bins)
+		if err != nil {
+			stats.Append(err)
+		} else {
+			stats.Append(stat.L2Write)
+		}
 
 		if isDebug {
 			log.Printf("[%s datastore put] l2 err:%v", s.id(), err)
@@ -133,20 +146,23 @@ func (s *Service) Put(ctx context.Context, key *Key, value Value, dictHash int) 
 	return err
 }
 
-//GetInto gets data into storable or error
+// GetInto implements Storer.GetInto
 func (s *Service) GetInto(ctx context.Context, key *Key, storable Value) (dictHash int, err error) {
 	return s.getInto(ctx, key, storable)
 }
 
 func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, error) {
-	onDone := s.counter.Begin(time.Now())
 	stats := stat.NewValues()
-	defer func() {
-		onDone(time.Now(), *stats...)
-	}()
+
+	if s.readCounter != nil {
+		onDone := s.readCounter.Begin(time.Now())
+		defer func() {
+			onDone(time.Now(), *stats...)
+		}()
+	}
 
 	keyString := key.AsString()
-	if s.useCache {
+	if s.useLocal {
 		status, dictHash, err := s.readFromCache(keyString, storable, stats)
 		if err != nil {
 			return 0, err
@@ -173,7 +189,7 @@ func (s *Service) getInto(ctx context.Context, key *Key, storable Value) (int, e
 		return 0, types.ErrKeyNotFound
 	}
 
-	if s.useCache && key != nil {
+	if s.useLocal && key != nil {
 		if err == nil {
 			if storable != nil {
 				err = s.updateCache(keyString, storable, dictHash)
@@ -221,10 +237,12 @@ func (s *Service) updateCache(keyString string, entryData EntryData, dictHash in
 		Data:   entryData,
 		Expiry: time.Now().Add(s.config.TimeToLive()),
 	}
+
 	data, err := bintly.Encode(entry)
 	if err != nil {
 		return fmt.Errorf("failed to marshal cache: %v, due to:%w ", keyString, err)
 	}
+
 	err = s.cache.Set(keyString, data)
 	if err != nil {
 		return fmt.Errorf("failed to set cache " + err.Error())
@@ -251,13 +269,22 @@ func (s *Service) readFromCache(keyString string, value Value, stats *stat.Value
 	}
 
 	entry := &Entry{Data: EntryData(value)}
+	defer func() {
+		if err := recover(); err != nil {
+			stats.Append(err)
+			log.Printf("[%s datastore readFromCache] key:\"%s\" panic:\"%v\" stack:%s", s.id(), keyString, err, string(debug.Stack()))
+		}
+	}()
+
 	err := bintly.Decode(data, entry)
 	if err != nil {
+		stats.Append(err)
 		return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
 	}
 
 	if useMap {
 		if err = json.Unmarshal(rawData, &aMap); err != nil {
+			stats.Append(err)
 			return CacheStatusNotFound, 0, fmt.Errorf("failed to unmarshal cache data: %s, err: %w", data, err)
 		}
 	}
@@ -290,13 +317,14 @@ func (s *Service) readFromCache(keyString string, value Value, stats *stat.Value
 }
 
 func (s *Service) getFromClient(ctx context.Context, key *Key, storable Value, stats *stat.Values) (int, error) {
-	dictHash, err := s.fromL1Client(ctx, key, storable)
+	dictHash, err := s.fromClient(ctx, s.l1Client, key, storable)
 	if common.IsKeyNotFound(err) {
 		stats.Append(stat.L1NoSuchKey)
 		if s.l2Client == nil || key.L2 == nil {
 			return 0, err
 		}
-		dictHash, err = s.fromL2Client(ctx, key.L2, storable)
+
+		dictHash, err = s.fromClient(ctx, s.l2Client, key.L2, storable)
 		if err != nil {
 			if common.IsKeyNotFound(err) {
 				stats.Append(stat.L2NoSuchKey)
@@ -308,7 +336,7 @@ func (s *Service) getFromClient(ctx context.Context, key *Key, storable Value, s
 			}
 			return 0, err
 		}
-		// TODO don't ignore?
+		// TODO don't ignore error
 		_ = s.copyTOL1(ctx, storable, key, dictHash, stats)
 		return dictHash, nil
 	}
@@ -335,8 +363,10 @@ func (s *Service) copyTOL1(ctx context.Context, value Value, key *Key, dictHash 
 	if dictHash != 0 && len(bins) > 0 {
 		bins[common.HashBin] = dictHash
 	}
-	err = s.l1Client.Put(ctx, key.WritePolicy(0), writeKey, aerospike.BinMap(bins))
+
+	err = s.l1Client.Put(key.WritePolicy(0), writeKey, aerospike.BinMap(bins))
 	if err != nil {
+		// TODO track as separate error?
 		stats.Append(err)
 		return err
 	}
@@ -344,15 +374,7 @@ func (s *Service) copyTOL1(ctx context.Context, value Value, key *Key, dictHash 
 	return nil
 }
 
-func (s *Service) fromL2Client(ctx context.Context, key *Key, storable Value) (int, error) {
-	return s.fromClient(ctx, s.l2Client, key, storable)
-}
-
-func (s *Service) fromL1Client(ctx context.Context, key *Key, storable Value) (int, error) {
-	return s.fromClient(ctx, s.l1Client, key, storable)
-}
-
-func (s *Service) fromClient(ctx context.Context, client client.Service, key *Key, value Value) (int, error) {
+func (s *Service) fromClient(ctx context.Context, client *client.Service, key *Key, value Value) (int, error) {
 	clientKey, err := key.Key()
 	if err != nil {
 		return 0, fmt.Errorf("failed to create key: %+v, due to %w", key, err)
@@ -385,13 +407,16 @@ func (s *Service) fromClient(ctx context.Context, client client.Service, key *Ke
 }
 
 // NewWithCache creates a cache optionally
-func NewWithCache(config *config.Datastore, l1Client, l2Client client.Service, counter *gmetric.Operation) (*Service, error) {
+func NewWithCache(config *config.Datastore, l1Client, l2Client *client.Service, counter *gmetric.Operation, writeCounter *gmetric.Operation) (*Service, error) {
 	srv := &Service{
-		config:   config,
+		config: config,
+
 		l1Client: l1Client,
 		l2Client: l2Client,
-		useCache: config.Cache != nil,
-		counter:  counter,
+		useLocal: config.Cache != nil,
+
+		readCounter:  counter,
+		writeCounter: writeCounter,
 	}
 
 	// in server mode, cache hit rate is low, i.e., the chance a key exists not in L1 but in local cache is very low

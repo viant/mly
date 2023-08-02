@@ -28,10 +28,16 @@ require (
 )
 
 require (
+	github.com/cyningsun/heavy-hitters v0.0.0-20230601160639-238b21a6ddce
+	github.com/migotom/heavykeeper v0.0.0-20230118182531-d6958b4bb326
+)
+
+require (
 	cloud.google.com/go v0.104.0 // indirect
 	cloud.google.com/go/compute v1.7.0 // indirect
 	cloud.google.com/go/iam v0.5.0 // indirect
 	cloud.google.com/go/storage v1.23.0 // indirect
+	github.com/OneOfOne/xxhash v1.2.8 // indirect
 	github.com/aws/aws-sdk-go v1.44.114 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect

@@ -3,23 +3,18 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
+
 	aero "github.com/aerospike/aerospike-client-go"
 	"github.com/viant/mly/shared/circut"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/config/datastore"
-	"strings"
-	"sync"
-	"time"
 )
 
-//Service represents aerospike client service
-type Service interface {
-	Get(ctx context.Context, key *aero.Key, binNames ...string) (*aero.Record, error)
-
-	Put(ctx context.Context, writePolicy *aero.WritePolicy, key *aero.Key, value aero.BinMap) error
-}
-
-type service struct {
+// Service represents aerospike client Service
+type Service struct {
 	*aero.Client
 	config       *datastore.Connection
 	basePolicy   *aero.BasePolicy
@@ -31,7 +26,7 @@ type service struct {
 }
 
 //Get returns record for supplied key and optional bin names.
-func (s *service) Get(ctx context.Context, key *aero.Key, binNames ...string) (record *aero.Record, err error) {
+func (s *Service) Get(ctx context.Context, key *aero.Key, binNames ...string) (record *aero.Record, err error) {
 	if !s.IsUp() {
 		return nil, common.ErrNodeDown
 	}
@@ -45,23 +40,25 @@ func (s *service) Get(ctx context.Context, key *aero.Key, binNames ...string) (r
 	return record, err
 }
 
-//Put put record to the store
-func (s *service) Put(ctx context.Context, writePolicy *aero.WritePolicy, key *aero.Key, value aero.BinMap) error {
+// Put puts a record to Aerospike.
+// TODO: Properly support context.
+func (s *Service) Put(writePolicy *aero.WritePolicy, key *aero.Key, value aero.BinMap) error {
 	if !s.IsUp() {
 		return common.ErrNodeDown
 	}
+
 	err := s.Client.Put(writePolicy, key, value)
 	s.checkConnectionError(err)
 	return err
 }
 
-func (s *service) Probe() {
+func (s *Service) Probe() {
 	if err := s.connect(); err == nil {
 		s.FlagUp()
 	}
 }
 
-func (s *service) checkConnectionError(err error) {
+func (s *Service) checkConnectionError(err error) {
 	if err == nil {
 		return
 	}
@@ -70,7 +67,7 @@ func (s *service) checkConnectionError(err error) {
 	}
 }
 
-func (s *service) connect() error {
+func (s *Service) connect() error {
 	hosts := s.hosts()
 	if len(hosts) == 0 {
 		return fmt.Errorf("hostname was empty")
@@ -83,7 +80,7 @@ func (s *service) connect() error {
 	return err
 }
 
-func (s *service) hosts() []*aero.Host {
+func (s *Service) hosts() []*aero.Host {
 	var hosts = make([]*aero.Host, 0)
 	for _, name := range strings.Split(s.config.Hostnames, ",") {
 		hosts = append(hosts, &aero.Host{Name: name, Port: s.config.Port})
@@ -91,7 +88,7 @@ func (s *service) hosts() []*aero.Host {
 	return hosts
 }
 
-func (s *service) init() {
+func (s *Service) init() {
 	clientPolicy := aero.NewClientPolicy()
 	basePolicy := aero.NewPolicy()
 
@@ -110,8 +107,8 @@ func (s *service) init() {
 }
 
 //New creates a new Aerospike service
-func New(config *datastore.Connection) (Service, error) {
-	srv := &service{
+func New(config *datastore.Connection) (*Service, error) {
+	srv := &Service{
 		config: config,
 	}
 	srv.init()

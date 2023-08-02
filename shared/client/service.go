@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cyningsun/heavy-hitters/misragries"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/shared/client/config"
@@ -25,6 +26,8 @@ import (
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
 	"github.com/viant/mly/shared/stat"
+	"github.com/viant/mly/shared/tracker"
+	"github.com/viant/mly/shared/tracker/mg"
 	"github.com/viant/xunsafe"
 	"golang.org/x/net/http2"
 )
@@ -32,18 +35,25 @@ import (
 //Service represent mly client
 type Service struct {
 	Config
+	hostIndex   int64
+	httpClient  http.Client
+	newStorable func() common.Storable
+
+	messages Messages
+	poolErr  error
+
 	sync.RWMutex
 	dict               *Dictionary
-	gmetrics           *gmetric.Service
-	counter            *gmetric.Operation
-	datastore          datastore.Storer
-	mux                sync.RWMutex
-	messages           Messages
-	poolErr            error
-	hostIndex          int64
-	newStorable        func() common.Storable
 	dictRefreshPending int32
-	httpClient         http.Client
+	datastore          datastore.Storer
+
+	// container for Datastore gmetric objects
+	gmetrics *gmetric.Service
+
+	counter     *gmetric.Operation
+	dictCounter *gmetric.Operation
+
+	ErrorHistory tracker.Tracker
 }
 
 // NewMessage returns a new message
@@ -51,20 +61,6 @@ func (s *Service) NewMessage() *Message {
 	message := s.messages.Borrow()
 	message.start()
 	return message
-}
-
-func (s *Service) releaseMessage(input interface{}) {
-	releaser, ok := input.(Releaser)
-	if ok {
-		releaser.Release()
-	}
-}
-
-func (s *Service) dictionary() *Dictionary {
-	s.RWMutex.RLock()
-	dict := s.dict
-	s.RWMutex.RUnlock()
-	return dict
 }
 
 // Run run model prediction
@@ -126,6 +122,11 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 	if err != nil {
 		stats.AppendError(err)
+
+		if ctx.Err() == nil && s.ErrorHistory != nil {
+			go s.ErrorHistory.AddBytes([]byte(err.Error()))
+		}
+
 		return err
 	}
 
@@ -158,11 +159,10 @@ func (s *Service) loadFromCache(ctx context.Context, cached *[]interface{}, batc
 	dataType := response.DataItemType()
 	if batchSize > 0 {
 		cachedCount, err := s.readFromCacheInBatch(ctx, batchSize, dataType, cachable, response, *cached)
-		if err != nil {
-			if !common.IsTransientError(err) {
-				log.Printf("cache error: %v", err)
-			}
+		if err != nil && !common.IsTransientError(err) {
+			log.Printf("cache error: %v", err)
 		}
+
 		return cachedCount, nil
 	}
 
@@ -231,24 +231,47 @@ func (s *Service) readFromCache(ctx context.Context, key string, target interfac
 	return false, 0, err
 }
 
+func (s *Service) releaseMessage(input interface{}) {
+	releaser, ok := input.(Releaser)
+	if ok {
+		releaser.Release()
+	}
+}
+
+func (s *Service) dictionary() *Dictionary {
+	s.RWMutex.RLock()
+	dict := s.dict
+	s.RWMutex.RUnlock()
+	return dict
+}
+
 func (s *Service) init(options []Option) error {
 	for _, option := range options {
 		option.Apply(s)
 	}
+
 	if s.gmetrics == nil {
 		s.gmetrics = gmetric.New()
 	}
 
 	location := reflect.TypeOf(Service{}).PkgPath()
-
 	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewStore())
+	s.dictCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientDict", s.Model+" client dictionary performance", time.Microsecond, time.Minute, 1, stat.ErrorOnly())
+
+	if s.ErrorHistory == nil {
+		impl := misragries.NewMisraGries(20)
+		s.ErrorHistory = mg.New(impl)
+	}
+
 	if s.Config.MaxRetry == 0 {
 		s.Config.MaxRetry = 3
 	}
+
 	err := s.initHTTPClient()
 	if err != nil {
 		return err
 	}
+
 	if s.Config.Datastore == nil {
 		if err := s.loadModelConfig(); err != nil {
 			return err
@@ -317,8 +340,16 @@ func (s *Service) loadModelConfig() error {
 }
 
 func (s *Service) loadModelDictionary() error {
+	stats := stat.NewValues()
+
+	onDone := s.dictCounter.Begin(time.Now())
+	defer func() {
+		onDone(time.Now(), stats.Values()...)
+	}()
+
 	host, err := s.getHost()
 	if err != nil {
+		stats.Append(err)
 		return err
 	}
 	URL := host.metaDictionaryURL(s.Model)
@@ -326,20 +357,25 @@ func (s *Service) loadModelDictionary() error {
 	httpClient := s.getHTTPClient(host)
 	response, err := httpClient.Get(URL)
 	if err != nil {
+		stats.Append(err)
 		return fmt.Errorf("failed to load Dictionary: %w", err)
 	}
 
 	if response.Body == nil {
-		return fmt.Errorf("unable to load dictioanry body was empty")
+		err = fmt.Errorf("unable to load dictioanry body was empty")
+		stats.Append(err)
+		return err
 	}
 
 	data, err := ioutil.ReadAll(response.Body)
 	if err != nil {
+		stats.Append(err)
 		return fmt.Errorf("failed to read body: %w", err)
 	}
 
 	dict := &common.Dictionary{}
 	if err = json.Unmarshal(data, dict); err != nil {
+		stats.Append(err)
 		return fmt.Errorf("failed to unmarshal dict: %w", err)
 	}
 
@@ -397,20 +433,16 @@ func (s *Service) initDatastore() error {
 	return nil
 }
 
-//Close closes the service
 func (s *Service) Close() error {
 	s.httpClient.CloseIdleConnections()
+	if s.ErrorHistory != nil {
+		s.ErrorHistory.Close()
+	}
+
 	return nil
 }
 
-func (s *Service) refreshMetadata() {
-	defer atomic.StoreInt32(&s.dictRefreshPending, 0)
-	if err := s.loadModelDictionary(); err != nil {
-		log.Printf("failed to refresh meta data: %v", err)
-	}
-}
-
-//New creates new mly client
+// New creates new client.
 func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 	for i := range hosts {
 		hosts[i].Init()
@@ -502,6 +534,13 @@ func (s *Service) assertDictHash(response *Response) {
 		if atomic.CompareAndSwapInt32(&s.dictRefreshPending, 0, 1) {
 			go s.refreshMetadata()
 		}
+	}
+}
+
+func (s *Service) refreshMetadata() {
+	defer atomic.StoreInt32(&s.dictRefreshPending, 0)
+	if err := s.loadModelDictionary(); err != nil {
+		log.Printf("failed to refresh meta data: %v", err)
 	}
 }
 
@@ -658,43 +697,5 @@ func (s *Service) reportBatch(count int, cached []interface{}) {
 			continue
 		}
 		log.Printf("[%s] cached[%v] %+v", s.Model, i, v)
-	}
-}
-
-func Marshal(data interface{}, id string) ([]byte, error) {
-	if data == nil {
-		return nil, fmt.Errorf("data was nil")
-	}
-	switch val := data.(type) {
-	case *Message:
-		if !val.isValid() {
-			return nil, fmt.Errorf("invalid message: has been already sent before")
-		}
-		if err := val.end(); err != nil {
-			return nil, fmt.Errorf("failed create message reader: %v", err)
-		}
-
-		if id != "" {
-			fmt.Printf("[%s Marshal] Message\n", id)
-		}
-		return val.Bytes(), nil
-	case gojay.MarshalerJSONObject:
-		data, err := gojay.Marshal(val)
-		if err != nil {
-			return nil, err
-		}
-		if id != "" {
-			fmt.Printf("[%s Marshal] gojay\n", id)
-		}
-		return data, nil
-	default:
-		data, err := json.Marshal(val)
-		if err != nil {
-			return nil, err
-		}
-		if id != "" {
-			fmt.Printf("[%s json] json\n", id)
-		}
-		return data, nil
 	}
 }

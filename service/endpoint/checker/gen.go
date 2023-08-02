@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/francoispqt/gojay"
+	"github.com/viant/bintly"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 )
@@ -133,6 +134,69 @@ func (g *genType) Set(iter common.Iterator) error {
 		g.D[key] = value
 		return nil
 	})
+}
+
+// implements bintly.Encoder
+func (g *genType) EncodeBinary(enc *bintly.Writer) error {
+	for k, _ := range g.s {
+		v := g.D[k]
+
+		switch tv := v.(type) {
+		case int:
+			enc.Int(tv)
+		case float32:
+			enc.Float32(tv)
+		case float64:
+			// this happens when copying from Aerospike to local cache since the Aerospike client upsizes float32
+			enc.Float32(float32(tv))
+		case string:
+			enc.String(tv)
+		default:
+			return fmt.Errorf("unhandled type %v", tv)
+		}
+	}
+
+	return nil
+}
+
+// implements bintly.Decoder
+func (g *genType) DecodeBinary(dec *bintly.Reader) error {
+	if g.D == nil {
+		g.D = make(map[string]interface{})
+	}
+
+	for key, f := range g.s {
+		switch f.DataType {
+		case "int":
+			var i int
+			dec.Int(&i)
+			g.D[key] = i
+		case "int32":
+			var i int32
+			dec.Int32(&i)
+			g.D[key] = i
+		case "int64":
+			var i int64
+			dec.Int64(&i)
+			g.D[key] = i
+		case "float32":
+			var f float32
+			dec.Float32(&f)
+			g.D[key] = f
+		case "float64":
+			var f float64
+			dec.Float64(&f)
+			g.D[key] = f
+		case "string":
+			var s string
+			dec.String(&s)
+			g.D[key] = s
+		default:
+			return fmt.Errorf("unknown type")
+		}
+	}
+
+	return nil
 }
 
 // implements gojay.UnmarshalerJSONArray
