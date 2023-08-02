@@ -145,15 +145,6 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 	}
 
 	stats.Append(stat.Evaluate)
-	err = ctx.Err()
-	if err != nil {
-		stats.AppendError(err)
-
-		if s.config.Debug {
-			log.Printf("[%v do] server context Err():%v", s.config.ID, err)
-		}
-	}
-
 	return s.buildResponse(ctx, request, response, tensorValues)
 }
 

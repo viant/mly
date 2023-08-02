@@ -24,7 +24,9 @@ type Handler struct {
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Request) {
-	ctx := httpRequest.Context()
+	// use Background() since there are things to be done regardless of if the request is cancceled from the client side.
+	ctx := context.Background()
+	// TODO: Handle httpRequest.Context() - there are issues since this can be canceled but there should be housekeeping completed.
 	ctx, cancel := context.WithTimeout(ctx, h.maxDuration)
 	defer cancel()
 
