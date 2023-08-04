@@ -65,7 +65,6 @@ func (c *CliPayload) Bind(k string, value interface{}, msg *client.Message) erro
 // If type is not provided, then it will be string; otherwise, "int" and "float32" can be used.
 func Parse(p string, cp *CliPayload) error {
 	data := make(map[string]interface{})
-	c := None
 
 	chunks := strings.Split(p, ";")
 	for _, chunk := range chunks {
@@ -82,19 +81,11 @@ func Parse(p string, cp *CliPayload) error {
 
 		valLen := len(vals)
 		if valLen > 1 {
-			if c == Single {
-				return fmt.Errorf("inconsistent batching at field %s", field)
-			}
-
-			c = Batch
-			if valLen > cp.Batch {
+			if cp.Batch == 0 {
 				cp.Batch = valLen
-			}
-		} else {
-			if c == Batch {
+			} else if cp.Batch != valLen {
 				return fmt.Errorf("inconsistent batching at field %s", field)
 			}
-			c = Single
 		}
 
 		typed := strings.Split(field, "|")

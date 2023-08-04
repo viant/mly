@@ -94,18 +94,17 @@ func RunWithOptions(options *Options) error {
 
 			err = cli.Run(ctx, message, response)
 
-			if err != nil && !options.Metrics {
+			if err != nil && !options.SkipError {
 				cancel()
 				return err
 			}
 
 			cancel()
 
-			if options.Metrics {
-				return nil
+			if !options.NoOutput {
+				toolbox.Dump(response)
 			}
 
-			toolbox.Dump(response)
 			return nil
 		}
 

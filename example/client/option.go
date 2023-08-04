@@ -24,6 +24,9 @@ type Options struct {
 	PayloadPause int      `long:"pause" description:"pause seconds between payloads"`
 	PayloadDelay int      `long:"delay" description:"pause seconds from first payload"`
 
+	SkipError bool `long:"skiperrs"`
+
+	NoOutput     bool `long:"noout"`
 	Metrics      bool `long:"metrics"`
 	ErrorHistory bool `long:"errhist"`
 }

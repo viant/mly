@@ -132,8 +132,12 @@ func TestMessage(t *testing.T) {
 
 	msg.SetBatchSize(2)
 
-	msg.StringsKey("multi", []string{"a", "b"})
 	msg.StringsKey("copied", []string{"1"})
+	msg.StringsKey("multi", []string{"a", "b"})
+
+	msg.end()
+	bytes := msg.Bytes()
+	fmt.Printf("%s\n", bytes)
 
 	var key string
 	key = msg.CacheKeyAt(0)

@@ -1,6 +1,7 @@
 package request
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -94,6 +95,36 @@ func TestDecode(t *testing.T) {
 				v, ok := r.Feeds[a2Idx].([][]string)
 				assert.True(t, ok)
 				assert.Equal(t, v[0][0], "a2_1")
+			},
+		},
+		{
+			desc: "bad_batch_expansion",
+			requestEnc: `{
+	"batch_size": 2,
+	"a1": ["a1_0"], 
+	"a2": ["a2_0", "a2_1"], 
+	"a3": ["a3_0", "a3_1"],
+	"cache_key": ["ck1", "ck2"],
+}`,
+			isValid: true,
+			additionalCheck: func(r *Request, t *testing.T) {
+				fmt.Printf("%+v\n", r.Feeds)
+
+				a1Idx := inputs["a1"].Index
+				v, ok := r.Feeds[a1Idx].([][]string)
+				assert.True(t, ok)
+				assert.Equal(t, 2, len(v))
+
+				assert.Equal(t, "a1_0", v[0][0])
+				assert.Equal(t, "a1_0", v[1][0])
+
+				a2Idx := inputs["a2"].Index
+				v, ok = r.Feeds[a2Idx].([][]string)
+				assert.True(t, ok)
+				assert.Equal(t, 2, len(v))
+
+				assert.Equal(t, "a2_0", v[0][0])
+				assert.Equal(t, "a2_1", v[1][0])
 			},
 		},
 	}
