@@ -7,7 +7,7 @@ pipeline:
     target: $target
     checkError: true
     commands:
-      - /tmp/e2e/mlyc --metrics -t 10 -m slow -a 'x|float32:0.5;y|float32:0.5'
+      - /tmp/e2e/mlyc --noout --skiperrs --metrics -t 10 -m slow -a 'x|float32:0.5;y|float32:0.5'
 
   assertMetrics:
     action: validator:assert
