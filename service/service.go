@@ -368,6 +368,10 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 
+	if s.evaluator != nil {
+		go s.evaluator.Close()
+	}
+
 	s.evaluator = evaluator
 	s.signature = signature
 
