@@ -278,9 +278,8 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 		log.Printf("[%s eval] %+v", s.config.ID, result)
 	}
 
-	// TODO doesn't need to block this thread
 	if s.stream != nil {
-		s.stream.Log(request, result, time.Now().Sub(startTime))
+		s.stream.Log(request.Body, result, time.Now().Sub(startTime))
 	}
 
 	return result, nil

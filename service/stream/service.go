@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/viant/afs"
 	"github.com/viant/mly/service/domain"
-	"github.com/viant/mly/service/request"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/tapper/config"
 	tlog "github.com/viant/tapper/log"
@@ -50,8 +49,8 @@ func NewService(modelID string, streamCfg *config.Stream, afsv afs.Service, dp d
 	return s, nil
 }
 
-func (s *Service) Log(req *request.Request, output interface{}, timeTaken time.Duration) {
-	if len(req.Body) == 0 {
+func (s *Service) Log(data []byte, output interface{}, timeTaken time.Duration) {
+	if len(data) == 0 {
 		return
 	}
 
@@ -59,10 +58,6 @@ func (s *Service) Log(req *request.Request, output interface{}, timeTaken time.D
 		return
 	}
 
-	msg := s.msgProvider.NewMessage()
-	defer msg.Free()
-
-	data := req.Body
 	hasBatchSize := bytes.Contains(data, []byte("batch_size"))
 	begin := bytes.IndexByte(data, '{')
 	end := bytes.LastIndexByte(data, '}')
@@ -71,25 +66,27 @@ func (s *Service) Log(req *request.Request, output interface{}, timeTaken time.D
 	}
 
 	// procedurally build the JSON string
+	tmsg := s.msgProvider.NewMessage()
+	defer tmsg.Free()
 
 	// include original json from request body
 	// remove all newlines as they break JSONL
 	singleLineBody := bytes.ReplaceAll(data[begin+1:end], []byte("\n"), []byte(" "))
 	singleLineBody = bytes.ReplaceAll(singleLineBody, []byte("\r"), []byte(" "))
-	msg.Put(singleLineBody)
+	tmsg.Put(singleLineBody)
 
 	// add some metadata
-	msg.PutByte(',')
+	tmsg.PutByte(',')
 
-	msg.PutInt("eval_duration", int(timeTaken.Microseconds()))
+	tmsg.PutInt("eval_duration", int(timeTaken.Microseconds()))
 	if bytes.Index(data, []byte("timestamp")) == -1 {
-		msg.PutString("timestamp", time.Now().In(time.UTC).Format("2006-01-02 15:04:05.000-07"))
+		tmsg.PutString("timestamp", time.Now().In(time.UTC).Format("2006-01-02 15:04:05.000-07"))
 	}
 
 	dict := s.dictProvider()
 
 	if dict != nil {
-		msg.PutInt("dict_hash", int(dict.Hash))
+		tmsg.PutInt("dict_hash", int(dict.Hash))
 	}
 
 	outputs := s.outputsProvider()
@@ -104,16 +101,16 @@ func (s *Service) Log(req *request.Request, output interface{}, timeTaken time.D
 					case 0:
 					case 1:
 						if hasBatchSize {
-							msg.PutStrings(outputName, []string{actual[0][0]})
+							tmsg.PutStrings(outputName, []string{actual[0][0]})
 						} else {
-							msg.PutString(outputName, actual[0][0])
+							tmsg.PutString(outputName, actual[0][0])
 						}
 					default:
 						var stringSlice = make([]string, len(actual))
 						for i, vec := range actual {
 							stringSlice[i] = vec[0]
 						}
-						msg.PutStrings(outputName, stringSlice)
+						tmsg.PutStrings(outputName, stringSlice)
 					}
 				}
 			case [][]int64:
@@ -122,16 +119,16 @@ func (s *Service) Log(req *request.Request, output interface{}, timeTaken time.D
 					case 0:
 					case 1:
 						if hasBatchSize {
-							msg.PutInts(outputName, []int{int(actual[0][0])})
+							tmsg.PutInts(outputName, []int{int(actual[0][0])})
 						} else {
-							msg.PutInt(outputName, int(actual[0][0]))
+							tmsg.PutInt(outputName, int(actual[0][0]))
 						}
 					default:
 						var ints = make([]int, len(actual))
 						for i, vec := range actual {
 							ints[i] = int(vec[0])
 						}
-						msg.PutInts(outputName, ints)
+						tmsg.PutInts(outputName, ints)
 					}
 				}
 			case [][]float32:
@@ -140,23 +137,23 @@ func (s *Service) Log(req *request.Request, output interface{}, timeTaken time.D
 					case 0:
 					case 1:
 						if hasBatchSize {
-							msg.PutFloats(outputName, []float64{float64(actual[0][0])})
+							tmsg.PutFloats(outputName, []float64{float64(actual[0][0])})
 						} else {
-							msg.PutFloat(outputName, float64(actual[0][0]))
+							tmsg.PutFloat(outputName, float64(actual[0][0]))
 						}
 					default:
 						var floats = make([]float64, len(actual))
 						for i, vec := range actual {
 							floats[i] = float64(vec[0])
 						}
-						msg.PutFloats(outputName, floats)
+						tmsg.PutFloats(outputName, floats)
 					}
 				}
 			}
 		}
 	}
 
-	if err := s.logger.Log(msg); err != nil {
+	if err := s.logger.Log(tmsg); err != nil {
 		log.Printf("[%s log] failed to log: %v\n", s.modelID, err)
 	}
 }
