@@ -8,6 +8,7 @@ import (
 type eval struct{}
 
 const Pending = "pending"
+const RLockEvaluator = "waitEvalLock"
 
 // implements github.com/viant/gmetric/counter.Provider
 func (p eval) Keys() []string {
@@ -15,6 +16,7 @@ func (p eval) Keys() []string {
 		stat.ErrorKey,
 		stat.Timeout,
 		Pending,
+		RLockEvaluator,
 	}
 }
 
@@ -32,6 +34,8 @@ func (p eval) Map(value interface{}) int {
 			return 1
 		case Pending:
 			return 2
+		case RLockEvaluator:
+			return 3
 		}
 	}
 	return -1

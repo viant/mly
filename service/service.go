@@ -234,17 +234,22 @@ func (s *Service) buildResponse(ctx context.Context, request *request.Request, r
 }
 
 func incrementPending(metric *gmetric.Operation, startTime time.Time) func() {
-	metric.IncrementValue(stat.Pending)
+	return incrementThenDecrement(metric, startTime, stat.Pending)
+}
 
-	index := metric.Index(startTime)
+func incrementThenDecrement(metric *gmetric.Operation, start time.Time, statName string) func() {
+	metric.IncrementValue(statName)
+
+	index := metric.Index(start)
 	recentCounter := metric.Recent[index]
-	recentCounter.IncrementValue(stat.Pending)
+	recentCounter.IncrementValue(statName)
 
 	return func() {
-		metric.DecrementValue(stat.Pending)
+		metric.DecrementValue(statName)
 		recentCounter := metric.Recent[index]
-		recentCounter.DecrementValue(stat.Pending)
+		recentCounter.DecrementValue(statName)
 	}
+
 }
 
 func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]interface{}, error) {
@@ -263,9 +268,11 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 		onPendingDone()
 	}()
 
+	rleDone := incrementThenDecrement(s.evaluatorMetric, time.Now(), stat.RLockEvaluator)
 	s.mux.RLock()
 	evaluator := s.evaluator
 	s.mux.RUnlock()
+	rleDone()
 
 	result, err := evaluator.Evaluate(request.Feeds)
 	if err != nil {
