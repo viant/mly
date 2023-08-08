@@ -399,13 +399,18 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 
 func (s *Service) loadModel(ctx context.Context, err error) (*tf.SavedModel, error) {
 	options := option.NewSource(&option.NoCache{Source: option.NoCacheBaseURL})
-	if err := s.fs.Copy(ctx, s.config.URL, s.config.Location, options); err != nil {
-		return nil, fmt.Errorf("failed to copy model %v, %s, due to %w", s.config.URL, s.config.Location, err)
+	remoteURL := s.config.URL
+	localPath := s.config.Location
+
+	if err := s.fs.Copy(ctx, remoteURL, localPath, options); err != nil {
+		return nil, fmt.Errorf("failed to copy model %v, %s, due to %w", remoteURL, localPath, err)
 	}
 
-	model, err := tf.LoadSavedModel(s.config.Location, s.config.Tags, nil)
+	log.Printf("[%s loadModel] copied %s to %s", s.config.ID, remoteURL, localPath)
+
+	model, err := tf.LoadSavedModel(localPath, s.config.Tags, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load model %v, %s, due to %w", s.config.URL, s.config.Location, err)
+		return nil, fmt.Errorf("failed to load model %v, %s, due to %w", remoteURL, localPath, err)
 	}
 	return model, nil
 }
