@@ -168,8 +168,12 @@ See `service/config/model.go`.
   - `MaxHeaderBytes`: `int` - optional - additional settings for `http.Server`, default `8192` (`8 * 1024`).
   - `WriteTimeout`: `int` - optional - maximum request timeout.
   - `PoolMaxSize`, `BufferSize`: `int` - optional - controls implementation of `net/http/httputil`, default `512` and `131072` (`128 * 1024`), respectively.
+  - `MaxEvaluatorConcurrency`: `int` - optional - controls semaphore that prevents too many CGo goroutines from spawning, default `5000`.
 
 * `EnableMemProf`: `bool` - optional - enables endpoint for memory profiling.
+* `EnableCPUProf`: `bool` - optional - enables endpoint for cpu profiling.
+* `AllowedSubnet`: `bool` - optional - restricts administrative endpoints to IP string prefixes.
+  - Restricts the system configuration, memory profile, CPU profile, and health endpoints.
 
 ## Client
  
@@ -330,6 +334,11 @@ In all these, `%s` is `Model[].ID` (i.e. from `config.yaml`)
 - `/v1/api/metric/operation/%sDictMeta` - Records metrics to client dictionary fetch.
 - `/v1/api/metric/operation/%sCfgMeta` - Records metrics to client configuration fetch.
 - `/v1/api/metric/operation/%sMetaHandler` - Records server-side metrics to client set up.
+
+## `/v1/api/debug`
+
+Requires `EnableMemProf` and / or `EnableCPUProf` to be enabled. 
+See [`service/endpoint/prof.go`](service/endpoint/prof.go) for details - otherwise, refer to `pprof` documentation.
 
 ## `/v1/api/model`
 
