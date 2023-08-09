@@ -11,6 +11,7 @@ import (
 	srvConfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/endpoint/checker"
 	"github.com/viant/mly/service/endpoint/health"
+	"github.com/viant/mly/service/endpoint/prometheus"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/mly/shared/common"
@@ -184,6 +185,8 @@ func New(cfg *Config) (*Service, error) {
 	metrics := gmetric.New()
 	metricHandler := gmetric.NewHandler(common.MetricURI, metrics)
 	mux.Handle(common.MetricURI, metricHandler)
+
+	mux.Handle("/v1/prometheus", prometheus.Handler())
 
 	datastores, err := datastore.NewStoresV2(&cfg.DatastoreList, metrics, true)
 	if err != nil {
