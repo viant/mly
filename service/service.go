@@ -132,14 +132,14 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 	}
 
 	if err != nil {
-		stats.Append(err)
+		stats.AppendError(err)
 		log.Printf("[%v do] limiter error:(%+v) request:(%+v)", s.config.ID, err, request)
 		return err
 	}
 
 	tensorValues, err := s.evaluate(ctx, request)
 	if err != nil {
-		stats.Append(err)
+		stats.AppendError(err)
 		log.Printf("[%v do] eval error:(%+v) request:(%+v)", s.config.ID, err, request)
 		return err
 	}
@@ -257,6 +257,7 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	if err != nil {
 		return nil, err
 	}
+
 	defer s.sema.Release()
 
 	startTime := time.Now()
@@ -277,6 +278,7 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	result, err := evaluator.Evaluate(request.Feeds)
 	if err != nil {
 		// this branch is logged by the caller
+		// these stats don't support context errors...
 		stats.Append(err)
 		return nil, err
 	}
