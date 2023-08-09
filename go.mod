@@ -31,6 +31,7 @@ require (
 	github.com/cyningsun/heavy-hitters v0.0.0-20230601160639-238b21a6ddce
 	github.com/migotom/heavykeeper v0.0.0-20230118182531-d6958b4bb326
 	github.com/prometheus/client_golang v1.16.0
+	golang.org/x/sync v0.2.0
 )
 
 require (
@@ -59,7 +60,6 @@ require (
 	go.opencensus.io v0.23.0 // indirect
 	golang.org/x/crypto v0.0.0-20220507011949-2cf3adece122 // indirect
 	golang.org/x/oauth2 v0.5.0 // indirect
-	golang.org/x/sync v0.2.0 // indirect
 	golang.org/x/sys v0.8.0 // indirect
 	golang.org/x/text v0.9.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220609144429-65e65417b02f // indirect

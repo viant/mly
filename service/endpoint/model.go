@@ -17,7 +17,7 @@ import (
 	"github.com/viant/mly/service/endpoint/meta"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
-	"github.com/viant/mly/shared/semaph"
+	"golang.org/x/sync/semaphore"
 )
 
 type Hook interface {
@@ -29,7 +29,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 	fs := afs.New()
 	handlerTimeout := config.Endpoint.WriteTimeout - time.Millisecond
 
-	sema := semaph.NewSemaph(config.Endpoint.MaxEvaluatorConcurrency)
+	sema := semaphore.NewWeighted(config.Endpoint.MaxEvaluatorConcurrency)
 
 	waitGroup := sync.WaitGroup{}
 	numModels := len(config.ModelList.Models)

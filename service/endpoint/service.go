@@ -195,7 +195,6 @@ func New(cfg *Config) (*Service, error) {
 
 	hooks := []Hook{
 		healthHandler,
-		statsHandler,
 	}
 
 	err = Build(mux, cfg, datastores, hooks, metrics)

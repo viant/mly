@@ -3,39 +3,22 @@ package health
 import (
 	"encoding/json"
 	"net/http"
-	"sync"
-
-	"github.com/viant/mly/service"
-	"github.com/viant/mly/service/config"
-	"github.com/viant/mly/shared/semaph"
 )
 
-// Used for maintaing non-model specific statistics
+// Deprecated. Used for maintaining non-model specific statistics
 type StatsHandler struct {
-	mu *sync.Mutex
-
-	sema *semaph.Semaph
 }
 
-type stats struct {
-	SemaphoreTokens int32
+type statDisplay struct {
+	SemaphoreTokens int
 }
 
-func (h *StatsHandler) stats() stats {
-	return stats{
-		SemaphoreTokens: h.sema.R(),
-	}
+func (h *StatsHandler) stats() statDisplay {
+	return statDisplay{}
 }
 
 func NewStatsHandler() *StatsHandler {
-	return &StatsHandler{
-		mu: new(sync.Mutex),
-	}
-}
-
-// implements Hook
-func (h *StatsHandler) Hook(c *config.Model, s *service.Service) {
-	h.sema = s.Sema()
+	return &StatsHandler{}
 }
 
 // implements http.Handler

@@ -16,7 +16,7 @@ type Endpoint struct {
 	PoolMaxSize int `json:",omitempty" yaml:",omitempty"`
 	BufferSize  int `json:",omitempty" yaml:",omitempty"`
 
-	MaxEvaluatorConcurrency int32 `json:",omitempty" yaml:",omitempty"`
+	MaxEvaluatorConcurrency int64 `json:",omitempty" yaml:",omitempty"`
 }
 
 //Init init applied default settings
@@ -46,6 +46,6 @@ func (e *Endpoint) Init() {
 	}
 
 	if e.MaxEvaluatorConcurrency <= 0 {
-		e.MaxEvaluatorConcurrency = 3000
+		e.MaxEvaluatorConcurrency = 5000
 	}
 }

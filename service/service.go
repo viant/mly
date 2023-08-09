@@ -32,9 +32,9 @@ import (
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/mly/shared/datastore"
-	"github.com/viant/mly/shared/semaph"
 	sstat "github.com/viant/mly/shared/stat"
 	"github.com/viant/xunsafe"
+	"golang.org/x/sync/semaphore"
 	"gopkg.in/yaml.v3"
 )
 
@@ -51,7 +51,7 @@ type Service struct {
 	mux      sync.RWMutex
 
 	// model
-	sema      *semaph.Semaph // prevents potentially explosive thread generation due to concurrent requests
+	sema      *semaphore.Weighted // prevents potentially explosive thread generation due to concurrent requests
 	evaluator *tfmodel.Evaluator
 
 	// model io
@@ -93,10 +93,6 @@ func (s *Service) Config() *config.Model {
 
 func (s *Service) Dictionary() *common.Dictionary {
 	return s.dictionary
-}
-
-func (s *Service) Sema() *semaph.Semaph {
-	return s.sema
 }
 
 func (s *Service) Do(ctx context.Context, request *request.Request, response *Response) error {
@@ -253,12 +249,12 @@ func incrementThenDecrement(metric *gmetric.Operation, start time.Time, statName
 }
 
 func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]interface{}, error) {
-	err := s.sema.Acquire(ctx)
+	err := s.sema.Acquire(ctx, 1)
 	if err != nil {
 		return nil, err
 	}
-
-	defer s.sema.Release()
+	// even if canceled/deadline exceeded, we're going to run the eval
+	defer s.sema.Release(1)
 
 	startTime := time.Now()
 	onDone := s.evaluatorMetric.Begin(startTime)
@@ -513,7 +509,7 @@ func (s *Service) loadDictionary(ctx context.Context, URL string) (*common.Dicti
 }
 
 // New creates a service
-func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, sema *semaph.Semaph, datastores map[string]*datastore.Service, options ...Option) (*Service, error) {
+func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, sema *semaphore.Weighted, datastores map[string]*datastore.Service, options ...Option) (*Service, error) {
 	if metrics == nil {
 		metrics = gmetric.New()
 	}
