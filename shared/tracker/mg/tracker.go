@@ -2,19 +2,24 @@
 package mg
 
 import (
+	"sync"
+
 	"github.com/cyningsun/heavy-hitters/misragries"
 	"github.com/viant/mly/shared/tracker"
 )
 
 type MisraGries struct {
 	mg *misragries.MisraGries
+	l  *sync.Mutex
 }
 
 func New(mg *misragries.MisraGries) tracker.Tracker {
-	return MisraGries{mg: mg}
+	return MisraGries{mg: mg, l: new(sync.Mutex)}
 }
 
 func (m MisraGries) AddBytes(b []byte) {
+	m.l.Lock()
+	defer m.l.Unlock()
 	m.mg.ProcessElement(string(b))
 }
 
