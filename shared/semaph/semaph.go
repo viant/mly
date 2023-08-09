@@ -29,7 +29,7 @@ func (s *Semaph) R() int32 {
 }
 
 // Acquire will block if there are no more "tickets" left; otherwise will decrement number of tickets and continue.
-// Caller must call Release() later.
+// Caller must call Release() later, unless an error is returned, which should always be context.Context.Err().
 func (s *Semaph) Acquire(ctx context.Context) error {
 	s.l.Lock()
 
@@ -42,7 +42,11 @@ func (s *Semaph) Acquire(ctx context.Context) error {
 			s.c.Wait()
 			// this would lock
 			if *cc {
+				// outer routine would exist without unlocking
 				defer s.l.Unlock()
+				// "pass the torch" to next thing Wait()-ing
+				s.c.Signal()
+				return
 			}
 			c <- true
 		}(&canceled)
@@ -74,7 +78,10 @@ func (s *Semaph) acquireDebug(ctx context.Context, f func(n int32) string) error
 		go func(cc *bool) {
 			s.c.Wait()
 			if *cc {
+				fmt.Printf("waited but canceled %s", f(s.r))
 				defer s.l.Unlock()
+				s.c.Signal()
+				return
 			}
 			c <- true
 		}(&canceled)
