@@ -3,7 +3,7 @@
 [![GoReportCard](https://goreportcard.com/badge/github.com/viant/mly)](https://goreportcard.com/report/github.com/viant/mly)
 [![GoDoc](https://godoc.org/github.com/viant/mly?status.svg)](https://godoc.org/github.com/viant/mly)
 
-This library is compatible with Go 1.16+
+This library is compatible with Go 1.17+
 
 - [Motivation](#motivation)
 - [Introduction](#introduction)
