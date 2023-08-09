@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/sync/semaphore"
 )
 
 func TestCore(t *testing.T) {
@@ -208,12 +209,98 @@ func TestCtx(t *testing.T) {
 	s := NewSemaph(2)
 
 	bctx := context.Background()
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	ctx, cancel := context.WithTimeout(bctx, 1*time.Millisecond)
 	defer cancel()
 
 	s.Acquire(bctx)
 	s.Acquire(bctx)
-	err := s.Acquire(ctx)
 
+	// semaph should be full now
+
+	waitAcquire := new(sync.WaitGroup)
+	waitAcquire.Add(1)
+
+	waitRelease := new(sync.WaitGroup)
+	waitRelease.Add(1)
+
+	err := s.Acquire(ctx)
 	assert.NotNil(t, err)
+
+	// now an Acquire was canceled
+
+	go func() {
+		waitAcquire.Done()
+		// this should wait
+		s.Acquire(bctx)
+
+		waitRelease.Done()
+		s.Release()
+	}()
+
+	waitAcquire.Wait()
+
+	s.Release()
+
+	ctx, cancel = context.WithTimeout(bctx, 1*time.Millisecond)
+	defer cancel()
+
+	waitRelease.Wait()
+
+	err = s.Acquire(ctx)
+	assert.Nil(t, err)
+}
+
+func BenchmarkSemaphParallel(b *testing.B) {
+	sizes := []int32{1, 2, 4, 8, 16}
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
+			semaphBP(NewSemaph(size), b)
+		})
+	}
+}
+
+func semaphBP(s *Semaph, b *testing.B) {
+	bctx := context.Background()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			r := sync.WaitGroup{}
+			r.Add(1)
+			go func() {
+				s.Acquire(bctx)
+				r.Done()
+			}()
+			go func() {
+				r.Wait()
+				s.Release()
+			}()
+		}
+	})
+}
+
+func BenchmarkSyncWeightedParallel(b *testing.B) {
+	sizes := []int64{1, 2, 4, 8, 16}
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
+			syncWBP(semaphore.NewWeighted(size), b)
+		})
+	}
+}
+
+func syncWBP(s *semaphore.Weighted, b *testing.B) {
+	bctx := context.Background()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			r := sync.WaitGroup{}
+			r.Add(1)
+			go func() {
+				s.Acquire(bctx, 1)
+				r.Done()
+			}()
+
+			go func() {
+				r.Wait()
+				s.Release(1)
+			}()
+		}
+	})
 }
