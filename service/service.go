@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,7 @@ import (
 	"github.com/viant/mly/service/layers"
 	"github.com/viant/mly/service/request"
 	"github.com/viant/mly/service/stat"
+	"github.com/viant/mly/service/stat/batch"
 	"github.com/viant/mly/service/stream"
 	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/service/transform"
@@ -70,6 +72,8 @@ type Service struct {
 	// metrics
 	serviceMetric   *gmetric.Operation
 	evaluatorMetric *gmetric.Operation
+
+	batchMetrics *batch.BatchMetrics
 
 	// logging
 	stream *stream.Service
@@ -257,15 +261,33 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	defer s.sema.Release(1)
 
 	startTime := time.Now()
-	onDone := s.evaluatorMetric.Begin(startTime)
-	onPendingDone := incrementPending(s.evaluatorMetric, startTime)
+	metric := s.evaluatorMetric
+	onDone := metric.Begin(startTime)
+
+	if request.Input != nil {
+		bs := request.Input.BatchSize
+		if bs == 0 {
+			bs = 1
+		}
+
+		metric.IncrementValueBy(stat.NumElements, int64(bs))
+		index := metric.Index(startTime)
+		recentCounter := metric.Recent[index]
+		recentCounter.IncrementValueBy(stat.NumElements, int64(bs))
+
+		od := s.batchMetrics.Begin(bs)
+		defer func() { od(time.Now()) }()
+	}
+
+	onPendingDone := incrementPending(metric, startTime)
 	stats := sstat.NewValues()
+
 	defer func() {
 		onDone(time.Now(), stats.Values()...)
 		onPendingDone()
 	}()
 
-	rleDone := incrementThenDecrement(s.evaluatorMetric, time.Now(), stat.RLockEvaluator)
+	rleDone := incrementThenDecrement(metric, time.Now(), stat.RLockEvaluator)
 	s.mux.RLock()
 	evaluator := s.evaluator
 	s.mux.RUnlock()
@@ -526,6 +548,10 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 
 		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
 		evaluatorMetric: metrics.MultiOperationCounter(location, cfg.ID+"Eval", cfg.ID+" evaluator performance", time.Microsecond, time.Minute, 2, stat.NewEval()),
+		batchMetrics: batch.NewBatchMetrics(func(bs int) *gmetric.Operation {
+			return metrics.MultiOperationCounter(location, fmt.Sprintf("%sBatch%03d", cfg.ID, bs), cfg.ID+" batch size:"+strconv.Itoa(bs)+" service performance",
+				time.Microsecond, time.Minute, 2, nil)
+		}),
 
 		inputs: make(map[string]*domain.Input),
 	}

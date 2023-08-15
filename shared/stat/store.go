@@ -8,8 +8,12 @@ func (p store) Keys() []string {
 	return []string{
 		ErrorKey,
 		NoSuchKey,
+
+		// Deprecated - Aerospike specific
 		Timeout,
+		// Deprecated - Aerospike specific
 		Down,
+
 		Canceled,
 		DeadlineExceeded,
 	}

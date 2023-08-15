@@ -31,6 +31,27 @@ func TestBasic(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+func BenchmarkBasicParallel(b *testing.B) {
+	_, filename, _, _ := runtime.Caller(0)
+	root := filepath.Join(filepath.Dir(filename), "../..")
+	modelDest := filepath.Join(root, "example/model/slow_model")
+
+	model, _ := tf.LoadSavedModel(modelDest, []string{"serve"}, nil)
+
+	signature, _ := tfmodel.Signature(model)
+	evaluator := tfmodel.NewEvaluator(signature, model.Session)
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			feeds := make([]interface{}, 0)
+			feeds = append(feeds, [][]string{{"a"}})
+			feeds = append(feeds, [][]string{{"c"}})
+
+			evaluator.Evaluate(feeds)
+		}
+	})
+}
+
 func TestBasicV2(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(filename), "../..")
