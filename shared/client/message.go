@@ -512,7 +512,7 @@ func (m *Message) endInMultiKeyMode() error {
 func (m *Message) flushTransient(dim *transient, hasCacheHit bool) error {
 	switch actual := dim.values.(type) {
 	case []string:
-		if hasCacheHit {
+		if hasCacheHit && len(actual) > 1 {
 			var result = make([]string, m.requestBatchSize())
 			j := 0
 			for i, item := range actual {
@@ -526,7 +526,7 @@ func (m *Message) flushTransient(dim *transient, hasCacheHit bool) error {
 		}
 		m.stringsKey(dim.name, actual)
 	case []int:
-		if hasCacheHit {
+		if hasCacheHit && len(actual) > 1 {
 			var result = make([]int, m.requestBatchSize())
 			j := 0
 			for i, item := range actual {
@@ -540,7 +540,7 @@ func (m *Message) flushTransient(dim *transient, hasCacheHit bool) error {
 		}
 		m.intsKey(dim.name, actual)
 	case []float32:
-		if hasCacheHit {
+		if hasCacheHit && len(actual) > 1 {
 			var result = make([]float32, m.requestBatchSize())
 			j := 0
 			for i, item := range actual {

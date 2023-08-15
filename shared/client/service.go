@@ -357,6 +357,7 @@ func (s *Service) loadModelDictionary() error {
 	httpClient := s.getHTTPClient(host)
 	response, err := httpClient.Get(URL)
 	if err != nil {
+		// no context errors supported
 		stats.Append(err)
 		return fmt.Errorf("failed to load Dictionary: %w", err)
 	}
