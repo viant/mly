@@ -14,6 +14,7 @@ import (
 	"github.com/viant/mly/service/buffer"
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/request"
+	"github.com/viant/mly/shared/common"
 )
 
 // Handler converts a model prediction HTTP request to its internal calls.
@@ -33,7 +34,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	isDebug := h.service.config.Debug
 
 	request := h.service.NewRequest()
-	response := &Response{Status: "ok", started: time.Now()}
+	response := &Response{Status: common.StatusOK, started: time.Now()}
 	if httpRequest.Method == http.MethodGet {
 		if err := h.buildRequestFromQuery(httpRequest, request); err != nil {
 			http.Error(writer, err.Error(), http.StatusBadRequest)

@@ -51,6 +51,7 @@ type Service struct {
 	gmetrics *gmetric.Service
 
 	counter     *gmetric.Operation
+	httpCounter *gmetric.Operation
 	dictCounter *gmetric.Operation
 
 	ErrorHistory tracker.Tracker
@@ -87,6 +88,11 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 		cachedCount, err = s.loadFromCache(ctx, &cached, batchSize, response, cachable)
 		if err != nil {
+			stats.AppendError(err)
+			if ctx.Err() == nil && s.ErrorHistory != nil {
+				go s.ErrorHistory.AddBytes([]byte(err.Error()))
+			}
+
 			return err
 		}
 	}
@@ -114,15 +120,29 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		fmt.Printf("[%s] request: %s\n", modelName, strings.Trim(string(data), " \n"))
 	}
 
-	body, err := s.postRequest(ctx, data)
-	if isDebug {
-		fmt.Printf("[%s] response.Body:%s\n", modelName, body)
-		fmt.Printf("[%s] error:%s\n", modelName, err)
-	}
+	err = func() error {
+		httpOnDone := s.httpCounter.Begin(time.Now())
+		httpStats := stat.NewValues()
+
+		defer func() {
+			httpOnDone(time.Now(), *httpStats...)
+		}()
+
+		body, err := s.postRequest(ctx, data)
+		if isDebug {
+			fmt.Printf("[%s] response.Body:%s\n", modelName, body)
+			fmt.Printf("[%s] error:%s\n", modelName, err)
+		}
+
+		if err != nil {
+			httpStats.AppendError(err)
+		}
+
+		return err
+	}()
 
 	if err != nil {
 		stats.AppendError(err)
-
 		if ctx.Err() == nil && s.ErrorHistory != nil {
 			go s.ErrorHistory.AddBytes([]byte(err.Error()))
 		}
@@ -256,6 +276,7 @@ func (s *Service) init(options []Option) error {
 
 	location := reflect.TypeOf(Service{}).PkgPath()
 	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewStore())
+	s.httpCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTP", s.Model+" client HTTP performance", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly())
 	s.dictCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientDict", s.Model+" client dictionary performance", time.Microsecond, time.Minute, 1, stat.ErrorOnly())
 
 	if s.ErrorHistory == nil {
