@@ -8,7 +8,7 @@ import (
 
 const memProfURI = "/v1/api/debug/memprof"
 
-const cpuProfIndexURI = "/v1/api/debug/pprof"
+const cpuProfIndexURI = "/v1/api/debug/pprof/"
 
 const cpuProfCmdlineURI = "/v1/api/debug/pprof/cmdline"
 const cpuProfProfileURI = "/v1/api/debug/pprof/profile"
