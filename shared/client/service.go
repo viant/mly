@@ -120,7 +120,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		fmt.Printf("[%s] request: %s\n", modelName, strings.Trim(string(data), " \n"))
 	}
 
-	err = func() error {
+	body, err := func() ([]byte, error) {
 		httpOnDone := s.httpCounter.Begin(time.Now())
 		httpStats := stat.NewValues()
 
@@ -138,7 +138,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 			httpStats.AppendError(err)
 		}
 
-		return err
+		return body, err
 	}()
 
 	if err != nil {
@@ -160,7 +160,6 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}
 
 	if response.Status != common.StatusOK {
-		// TODO is this correct?
 		return nil
 	}
 
