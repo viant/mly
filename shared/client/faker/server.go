@@ -2,11 +2,12 @@ package faker
 
 import (
 	"fmt"
+	"net/http"
+	"strconv"
+
 	"github.com/viant/afs"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
-	"net/http"
-	"strconv"
 )
 
 type Server struct {
@@ -24,8 +25,9 @@ func (s *Server) Start() {
 		Addr:    ":" + strconv.Itoa(s.Port),
 		Handler: h2c.NewHandler(mux, &http2.Server{}),
 	}
-	fmt.Printf("starting listerning: %v ...\n", s.Server.Addr)
+	fmt.Printf("starting listening: %v ...\n", s.Server.Addr)
 	s.Server.ListenAndServe()
+	fmt.Printf("done %v\n", s.Server.Addr)
 }
 
 func (s *Server) Stop() {

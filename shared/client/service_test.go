@@ -3,6 +3,11 @@ package client
 import (
 	"context"
 	"fmt"
+	"path"
+	"reflect"
+	"testing"
+	"time"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/viant/bintly"
 	"github.com/viant/mly/shared"
@@ -13,10 +18,6 @@ import (
 	"github.com/viant/mly/shared/datastore/mock"
 	"github.com/viant/scache"
 	"github.com/viant/toolbox"
-	"path"
-	"reflect"
-	"testing"
-	"time"
 )
 
 type TestOutput struct {
@@ -155,7 +156,7 @@ func TestService_Run(t *testing.T) {
 			if i == 1 {
 				expectStatus = common.StatusCached
 			}
-			assert.EqualValues(t, expectStatus, response.Status, testCase.description)
+			assert.EqualValues(t, expectStatus, response.Status, fmt.Sprintf("%s - status", testCase.description))
 			time.Sleep(300 * time.Microsecond)
 		}
 

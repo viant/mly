@@ -3,11 +3,12 @@ package faker
 import (
 	"context"
 	"fmt"
-	"github.com/viant/afs"
 	"io/ioutil"
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/viant/afs"
 )
 
 const (
@@ -33,14 +34,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	machURL := h.matchedURL(URI)
+	machURL := h.fetchTestdata(URI)
 	output, err := h.fs.DownloadWithURL(context.TODO(), machURL)
 	if h.debug {
 		fmt.Printf("matched URL: %v %s\n", machURL, data)
 		fmt.Printf("output: %s\n", output)
 	}
+
 	if err == nil {
-		w.Header().Set("Content-Type", "applicaiton/json")
+		w.Header().Set("Content-Type", "application/json")
 		w.Write(output)
 		return
 	}
@@ -49,7 +51,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func (h *Handler) matchedURL(URI string) string {
+func (h *Handler) fetchTestdata(URI string) string {
 	match := ""
 	if index := strings.Index(URI, beginFragment); index != -1 {
 		match = URI[index+len(beginFragment):]

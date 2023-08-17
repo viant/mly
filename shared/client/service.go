@@ -73,6 +73,10 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		s.releaseMessage(input)
 	}()
 
+	if ctx.Err() != nil {
+		stats.Append(stat.EarlyCtxError)
+	}
+
 	if response.Data == nil {
 		return fmt.Errorf("response data was empty - aborting request")
 	}
@@ -274,7 +278,7 @@ func (s *Service) init(options []Option) error {
 	}
 
 	location := reflect.TypeOf(Service{}).PkgPath()
-	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewStore())
+	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewClient())
 	s.httpCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTP", s.Model+" client HTTP performance", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly())
 	s.dictCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientDict", s.Model+" client dictionary performance", time.Microsecond, time.Minute, 1, stat.ErrorOnly())
 

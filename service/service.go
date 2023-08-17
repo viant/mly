@@ -109,7 +109,7 @@ func (s *Service) Do(ctx context.Context, request *request.Request, response *Re
 func (s *Service) do(ctx context.Context, request *request.Request, response *Response) error {
 	startTime := time.Now()
 	onDone := s.serviceMetric.Begin(startTime)
-	onPendingDone := incrementPending(s.serviceMetric, startTime)
+	onPendingDone := enterThenExit(s.serviceMetric, startTime, stat.Pending, stat.Pending)
 	stats := sstat.NewValues()
 	defer func() {
 		onDone(time.Now(), stats.Values()...)
@@ -229,23 +229,18 @@ func (s *Service) buildResponse(ctx context.Context, request *request.Request, r
 	return nil
 }
 
-func incrementPending(metric *gmetric.Operation, startTime time.Time) func() {
-	return incrementThenDecrement(metric, startTime, stat.Pending)
-}
-
-func incrementThenDecrement(metric *gmetric.Operation, start time.Time, statName string) func() {
-	metric.IncrementValue(statName)
+func enterThenExit(metric *gmetric.Operation, start time.Time, enterValue interface{}, exitValue interface{}) func() {
+	metric.IncrementValue(enterValue)
 
 	index := metric.Index(start)
 	recentCounter := metric.Recent[index]
-	recentCounter.IncrementValue(statName)
+	recentCounter.IncrementValue(enterValue)
 
 	return func() {
-		metric.DecrementValue(statName)
+		metric.DecrementValue(exitValue)
 		recentCounter := metric.Recent[index]
-		recentCounter.DecrementValue(statName)
+		recentCounter.DecrementValue(exitValue)
 	}
-
 }
 
 func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]interface{}, error) {
@@ -258,14 +253,14 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 
 	startTime := time.Now()
 	onDone := s.evaluatorMetric.Begin(startTime)
-	onPendingDone := incrementPending(s.evaluatorMetric, startTime)
+	onPendingDone := enterThenExit(s.evaluatorMetric, startTime, sstat.Enter, sstat.Exit)
 	stats := sstat.NewValues()
 	defer func() {
 		onDone(time.Now(), stats.Values()...)
 		onPendingDone()
 	}()
 
-	rleDone := incrementThenDecrement(s.evaluatorMetric, time.Now(), stat.RLockEvaluator)
+	rleDone := enterThenExit(s.evaluatorMetric, time.Now(), stat.RLockDir(sstat.Enter), stat.RLockDir(sstat.Exit))
 	s.mux.RLock()
 	evaluator := s.evaluator
 	s.mux.RUnlock()
