@@ -138,7 +138,7 @@ See `service/config/model.go`.
     * `Auxiliary`: `bool` - optional - the input is permitted to be provided in an evaluation request.
     * `Wildcard`: `bool` - conditionally required - if enabled this input will not have a vocabulary for lookup; if `UseDict` is true, the service will refuse to start if it cannot guess the vocabulary extraction Operation. 
     * `Precision`: `int` - conditionally required - if the input is a float type and dictionary is enabled, this can be used to round the value to a lower precision which can improve cache hit rates; if `UseDict` is true, the service will refuse to start if it encounters a float input without a `Precision`.
-  - `KeyFields`: `[]string` - deprecated, optional - list of fields used to generate caching key (by default, all model inputs, sorted alphabetically). Deprecated, no longer used; all inputs are used to generate a cache key.
+  - `KeyFields`: `[]string` - optional - list of fields used to generate caching key (by default, all model inputs, sorted alphabetically). Can be used to order and add valid inputs that can be used as a cache key but not used as prediction input.
   - `Auxiliary`: `[]string` - deprecated, optional - list of additional fields that are acceptable for eval server call. Deprecated, use `Field.Auxiliary`.
   - `Outputs`: `[]shared.Field` - deprecated, optional - model outputs are automatically pulled from the model.
   - `DataStore`: `string` - optional - name of Datastore to cache, should match `Datastores[].ID`.

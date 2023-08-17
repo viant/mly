@@ -10,6 +10,8 @@ type (
 		Index    int
 		DataType string `json:",omitempty" yaml:",omitempty"`
 
+		// Indicates not an input for the model, but is eligible to
+		// be passed in a payload, and is NOT used as a key.
 		Auxiliary bool `json:",omitempty" yaml:",omitempty"`
 		Wildcard  bool `json:",omitempty" yaml:",omitempty"`
 		Precision int  `json:",omitempty" yaml:",omitempty"`
@@ -20,10 +22,17 @@ type (
 	Fields []*Field
 
 	MetaInput struct {
-		Inputs    []*Field
-		KeyFields []string `json:",omitempty" yaml:",omitempty"` // Deprecated: use Field.Wildcard
-		Auxiliary []string `json:",omitempty" yaml:",omitempty"` // Deprecated: use Field.Auxiliary
-		Outputs   []*Field `json:",omitempty" yaml:",omitempty"`
+		Inputs []*Field
+
+		// This is used to order inputs and provide extra caching information
+		// to the client.
+		// TODO rethink this, use a property on Field instead.
+		KeyFields []string `json:",omitempty" yaml:",omitempty"`
+
+		// Deprecated: use Field.Auxiliary
+		Auxiliary []string `json:",omitempty" yaml:",omitempty"`
+
+		Outputs []*Field `json:",omitempty" yaml:",omitempty"`
 	}
 )
 
