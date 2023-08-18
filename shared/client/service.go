@@ -132,7 +132,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 			httpOnDone(time.Now(), *httpStats...)
 		}()
 
-		body, err := s.postRequest(ctx, data)
+		body, err := s.postRequest(ctx, data, httpStats)
 		if isDebug {
 			fmt.Printf("[%s] response.Body:%s\n", modelName, body)
 			fmt.Printf("[%s] error:%s\n", modelName, err)
@@ -569,14 +569,16 @@ func (s *Service) refreshMetadata() {
 	}
 }
 
-func (s *Service) postRequest(ctx context.Context, data []byte) ([]byte, error) {
+func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values) ([]byte, error) {
 	host, err := s.getHost()
 	if err != nil {
 		return nil, err
 	}
+
 	var output []byte
 	output, err = s.httpPost(ctx, data, host)
 	if common.IsConnectionError(err) {
+		mvt.Append(stat.Down)
 		host.FlagDown()
 	}
 	return output, err
@@ -623,7 +625,7 @@ func (s *Service) getHost() (*Host, error) {
 	count := len(s.Hosts)
 	switch count {
 	case 0:
-
+		return nil, fmt.Errorf("no hosts configured")
 	case 1:
 		candidate := s.Hosts[0]
 		if !candidate.IsUp() {
@@ -636,12 +638,14 @@ func (s *Service) getHost() (*Host, error) {
 		if candidate.IsUp() {
 			return candidate, nil
 		}
+
 		for i := 0; i < len(s.Hosts); i++ {
 			if s.Hosts[i].IsUp() {
 				return s.Hosts[i], nil
 			}
 		}
 	}
+
 	return nil, fmt.Errorf("%v:%v %w", s.Hosts[0].Name, s.Hosts[0].Port, common.ErrNodeDown)
 }
 
