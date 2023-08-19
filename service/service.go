@@ -33,6 +33,7 @@ import (
 	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/mly/shared/datastore"
 	sstat "github.com/viant/mly/shared/stat"
+	smetric "github.com/viant/mly/shared/stat/metric"
 	"github.com/viant/xunsafe"
 	"golang.org/x/sync/semaphore"
 	"gopkg.in/yaml.v3"
@@ -230,17 +231,7 @@ func (s *Service) buildResponse(ctx context.Context, request *request.Request, r
 }
 
 func enterThenExit(metric *gmetric.Operation, start time.Time, enterValue interface{}, exitValue interface{}) func() {
-	metric.IncrementValue(enterValue)
-
-	index := metric.Index(start)
-	recentCounter := metric.Recent[index]
-	recentCounter.IncrementValue(enterValue)
-
-	return func() {
-		metric.DecrementValue(exitValue)
-		recentCounter := metric.Recent[index]
-		recentCounter.DecrementValue(exitValue)
-	}
+	return smetric.EnterThenExit(metric, start, enterValue, exitValue)
 }
 
 func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]interface{}, error) {

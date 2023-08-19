@@ -26,6 +26,7 @@ import (
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
 	"github.com/viant/mly/shared/stat"
+	"github.com/viant/mly/shared/stat/metric"
 	"github.com/viant/mly/shared/tracker"
 	"github.com/viant/mly/shared/tracker/mg"
 	"github.com/viant/xunsafe"
@@ -128,7 +129,10 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		httpOnDone := s.httpCounter.Begin(time.Now())
 		httpStats := stat.NewValues()
 
+		od := metric.EnterThenExit(s.httpCounter, time.Now(), stat.Enter, stat.Exit)
+
 		defer func() {
+			od()
 			httpOnDone(time.Now(), *httpStats...)
 		}()
 
@@ -279,7 +283,7 @@ func (s *Service) init(options []Option) error {
 
 	location := reflect.TypeOf(Service{}).PkgPath()
 	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewClient())
-	s.httpCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTP", s.Model+" client HTTP performance", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly())
+	s.httpCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTP", s.Model+" client HTTP performance", time.Microsecond, time.Minute, 2, stat.NewHttp())
 	s.dictCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientDict", s.Model+" client dictionary performance", time.Microsecond, time.Minute, 1, stat.ErrorOnly())
 
 	if s.ErrorHistory == nil {

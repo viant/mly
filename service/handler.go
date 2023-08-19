@@ -7,10 +7,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/francoispqt/gojay"
+	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/buffer"
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/request"
@@ -22,6 +24,8 @@ type Handler struct {
 	maxDuration time.Duration
 	service     *Service
 	pool        *buffer.Pool
+
+	poolMetrics *gmetric.Operation
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Request) {
@@ -42,29 +46,37 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		}
 	} else {
 		defer httpRequest.Body.Close()
+
+		onDone := h.poolMetrics.Begin(time.Now())
 		data, size, err := buffer.Read(h.pool, httpRequest.Body)
+
 		defer h.pool.Put(data)
-		if err != nil {
-			http.Error(writer, err.Error(), http.StatusInternalServerError)
-			return
-		}
 
-		request.Body = data[:size]
-		if isDebug {
-			trimmed := strings.Trim(string(request.Body), " \n\r")
-			log.Printf("[%v http] input: %s\n", h.service.config.ID, trimmed)
-		}
+		func() {
+			defer func() { onDone(time.Now()) }()
 
-		err = gojay.Unmarshal(data[:size], request)
-		if err != nil {
-			if isDebug {
-				log.Printf("[%v http] unmarshal error: %v\n", h.service.config.ID, err)
+			if err != nil {
+				http.Error(writer, err.Error(), http.StatusInternalServerError)
+				return
 			}
 
-			rmsg := fmt.Sprintf("%s (are your input types correct?)", err.Error())
-			http.Error(writer, rmsg, http.StatusBadRequest)
-			return
-		}
+			request.Body = data[:size]
+			if isDebug {
+				trimmed := strings.Trim(string(request.Body), " \n\r")
+				log.Printf("[%v http] input: %s\n", h.service.config.ID, trimmed)
+			}
+
+			err = gojay.Unmarshal(data[:size], request)
+			if err != nil {
+				if isDebug {
+					log.Printf("[%v http] unmarshal error: %v\n", h.service.config.ID, err)
+				}
+
+				rmsg := fmt.Sprintf("%s (are your input types correct?)", err.Error())
+				http.Error(writer, rmsg, http.StatusBadRequest)
+				return
+			}
+		}()
 	}
 
 	err := h.handleAppRequest(ctx, writer, request, response)
@@ -132,10 +144,12 @@ func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
 }
 
 //NewHandler creates a new HTTP service Handler
-func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration) *Handler {
+func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration, m *gmetric.Service) *Handler {
+	location := reflect.TypeOf(&Handler{}).PkgPath()
 	return &Handler{
 		service:     service,
 		pool:        pool,
 		maxDuration: maxDuration,
+		poolMetrics: m.OperationCounter(location, service.config.ID+"HttpPool", service.config.ID+" HTTP []byte Pool", time.Microsecond, time.Minute, 2),
 	}
 }
