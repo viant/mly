@@ -12,16 +12,16 @@ import (
 
 // Signature searches the Tensorflow operation graph for inputs and outputs.
 func Signature(model *tf.SavedModel) (*domain.Signature, error) {
-	signature, ok := model.Signatures[domain.DefaultSignatureKey]
+	tfSignature, ok := model.Signatures[domain.DefaultSignatureKey]
 	if !ok {
 		return nil, fmt.Errorf("failed to lookup signature: %v", domain.DefaultSignatureKey)
 	}
 
 	sig := &domain.Signature{
-		Method: signature.MethodName,
+		Method: tfSignature.MethodName,
 	}
 
-	for layerName, tfInfo := range signature.Outputs {
+	for layerName, tfInfo := range tfSignature.Outputs {
 		output := domain.Output{
 			Name: layerName,
 		}
@@ -44,7 +44,7 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 
 	sig.Output = sig.Outputs[0]
 
-	sigInputs := signature.Inputs
+	sigInputs := tfSignature.Inputs
 	var inputs = make([]string, 0, len(sigInputs))
 	for k := range sigInputs {
 		inputs = append(inputs, k)

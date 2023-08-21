@@ -15,6 +15,7 @@ import (
 	"github.com/viant/mly/service/config"
 	serviceConfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/endpoint/meta"
+	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
 	"golang.org/x/sync/semaphore"
@@ -26,6 +27,7 @@ type Hook interface {
 
 func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.Service, hooks []Hook, metrics *gmetric.Service) error {
 	pool := buffer.New(config.Endpoint.PoolMaxSize, config.Endpoint.BufferSize)
+
 	fs := afs.New()
 	handlerTimeout := config.Endpoint.WriteTimeout - time.Millisecond
 
@@ -48,7 +50,8 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 
 			log.Printf("[%s] model loading", model.ID)
 			e := func() error {
-				modelSrv, err := service.New(context.Background(), fs, model, metrics, sema, datastores)
+				tfService := tfmodel.NewService()
+				modelSrv, err := service.New(context.Background(), model, tfService, fs, metrics, datastores)
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)
 				}

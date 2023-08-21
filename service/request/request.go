@@ -17,19 +17,21 @@ var exists struct{} = struct{}{}
 // There is no strict struct for request payload since some of the keys of the request are dynamically generated based on the model inputs.
 // See shared/client.Message for client-side perspective.
 type Request struct {
-	Body     []byte // usually the POST JSON content
-	Feeds    []interface{}
-	inputs   map[string]*domain.Input
-	supplied map[string]struct{}
-	Input    *transfer.Input
+	Body []byte // usually the POST JSON content
+
+	Feeds    []interface{}       // passed through to Evaluator
+	supplied map[string]struct{} // used to check if the required inputs were provided
+
+	Input  *transfer.Input          // cache metadata
+	inputs map[string]*domain.Input // type metadata
 }
 
 func NewRequest(keyLen int, inputs map[string]*domain.Input) *Request {
 	return &Request{
-		inputs:   inputs,
 		Feeds:    make([]interface{}, keyLen),
-		Input:    &transfer.Input{},
 		supplied: make(map[string]struct{}, keyLen),
+		Input:    &transfer.Input{},
+		inputs:   inputs,
 	}
 }
 

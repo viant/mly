@@ -12,8 +12,8 @@ import (
 
 // Transformer is an adapter module used when the output of the TensorFlow model wants to be modified server side.
 // signature is the Signature of the relevant model, determined by request context.
-// input is the request body unmarshalled.
-// output is the TensorFlow SavedModel output.
+// input is the request body object as a *gtly.Object
+// output is the TensorFlow SavedModel prediction output.
 type Transformer func(ctx context.Context, signature *Signature, input *gtly.Object, output interface{}) (common.Storable, error)
 
 func appendPair(outputs []Output, v []interface{}, ii int, pairs []*kvPair) ([]*kvPair, error) {

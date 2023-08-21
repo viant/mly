@@ -15,5 +15,5 @@ type Input struct {
 	Vocab     bool // false if embedded vocabulary should be ignored
 	Auxiliary bool // true if this input isn't part of the model
 
-	reflect.Type
+	Type reflect.Type
 }

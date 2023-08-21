@@ -1,28 +1,20 @@
 package service
 
 import (
-	"compress/gzip"
 	"context"
-	sjson "encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"reflect"
-	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
-	"github.com/viant/afs/option"
 	"github.com/viant/gmetric"
 	"github.com/viant/gtly"
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
-	"github.com/viant/mly/service/files"
-	"github.com/viant/mly/service/layers"
+	"github.com/viant/mly/service/gtlyop"
 	"github.com/viant/mly/service/request"
 	"github.com/viant/mly/service/stat"
 	"github.com/viant/mly/service/stream"
@@ -35,33 +27,23 @@ import (
 	sstat "github.com/viant/mly/shared/stat"
 	smetric "github.com/viant/mly/shared/stat/metric"
 	"github.com/viant/xunsafe"
-	"golang.org/x/sync/semaphore"
-	"gopkg.in/yaml.v3"
 )
 
 type Service struct {
 	config *config.Model
 	closed int32
 
-	// TODO how does this interact with Service.inputs
+	// TODO document how does this interacts with Service.inputs
 	inputProvider *gtly.Provider
 
-	// reload
+	// reload TODO finish refactor
 	ReloadOK int32
-	fs       afs.Service
-	mux      sync.RWMutex
 
-	// model
-	sema      *semaphore.Weighted // prevents potentially explosive thread generation due to concurrent requests
-	evaluator *tfmodel.Evaluator
-
-	// model io
-	signature *domain.Signature
-	inputs    map[string]*domain.Input
+	// tensorflow evaluator factory & instance
+	tfService *tfmodel.Service
 
 	// caching
 	useDatastore bool
-	dictionary   *common.Dictionary
 	datastore    datastore.Storer
 
 	// outputs
@@ -81,19 +63,19 @@ func (s *Service) Close() error {
 		return fmt.Errorf("already closed")
 	}
 
-	if s.evaluator == nil {
-		return nil
-	}
-
-	return s.evaluator.Close()
+	return s.tfService.Close()
 }
 
 func (s *Service) Config() *config.Model {
 	return s.config
 }
 
+func (s *Service) Signature() *domain.Signature {
+	return s.tfService.Signature()
+}
+
 func (s *Service) Dictionary() *common.Dictionary {
-	return s.dictionary
+	return s.tfService.Dictionary()
 }
 
 func (s *Service) Do(ctx context.Context, request *request.Request, response *Response) error {
@@ -110,7 +92,7 @@ func (s *Service) Do(ctx context.Context, request *request.Request, response *Re
 func (s *Service) do(ctx context.Context, request *request.Request, response *Response) error {
 	startTime := time.Now()
 	onDone := s.serviceMetric.Begin(startTime)
-	onPendingDone := enterThenExit(s.serviceMetric, startTime, stat.Pending, stat.Pending)
+	onPendingDone := smetric.EnterThenExit(s.serviceMetric, startTime, stat.Pending, stat.Pending)
 	stats := sstat.NewValues()
 	defer func() {
 		onDone(time.Now(), stats.Values()...)
@@ -128,12 +110,6 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 		return clienterr.Wrap(fmt.Errorf("%w, body: %s", err, request.Body))
 	}
 
-	if err != nil {
-		stats.AppendError(err)
-		log.Printf("[%v do] limiter error:(%+v) request:(%+v)", s.config.ID, err, request)
-		return err
-	}
-
 	tensorValues, err := s.evaluate(ctx, request)
 	if err != nil {
 		stats.AppendError(err)
@@ -142,51 +118,32 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 	}
 
 	stats.Append(stat.Evaluate)
+
 	return s.buildResponse(ctx, request, response, tensorValues)
 }
 
-func (s *Service) transformOutput(ctx context.Context, request *request.Request, output interface{}) (common.Storable, error) {
-	inputIndex := inputIndex(output)
-	inputObject := request.Input.ObjectAt(s.inputProvider, inputIndex)
-
-	transformed, err := s.transformer(ctx, s.signature, inputObject, output)
+func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]interface{}, error) {
+	startTime := time.Now()
+	result, err := s.tfService.Predict(ctx, request.Feeds)
 	if err != nil {
-		return nil, fmt.Errorf("failed to transform: %v, %w", s.config.ID, err)
+		return nil, err
 	}
 
-	if s.useDatastore {
-		dictHash := s.Dictionary().Hash
-		cacheKey := request.Input.KeyAt(inputIndex)
-
-		isDebug := s.config.Debug
-		key := s.datastore.Key(cacheKey)
-
-		go func() {
-			err := s.datastore.Put(ctx, key, transformed, dictHash)
-			if err != nil {
-				log.Printf("[%s trout] put error:%v", s.config.ID, err)
-			}
-
-			if isDebug {
-				log.Printf("[%s trout] put:\"%s\" dictHash:%d ok", s.config.ID, cacheKey, dictHash)
-			}
-		}()
+	if s.config.Debug {
+		log.Printf("[%s eval] %+v", s.config.ID, result)
 	}
 
-	return transformed, nil
-}
-
-func inputIndex(output interface{}) int {
-	inputIndex := 0
-	if out, ok := output.(*shared.Output); ok {
-		inputIndex = out.InputIndex
+	if s.stream != nil {
+		s.stream.Log(request.Body, result, time.Now().Sub(startTime))
 	}
-	return inputIndex
+
+	return result, nil
 }
 
 func (s *Service) buildResponse(ctx context.Context, request *request.Request, response *Response, tensorValues []interface{}) error {
-	if s.dictionary != nil {
-		response.DictHash = s.dictionary.Hash
+	dictionary := s.Dictionary()
+	if dictionary != nil {
+		response.DictHash = dictionary.Hash
 	}
 
 	// TODO change with understanding that batched / multi-request always operates on the first dimension
@@ -230,272 +187,43 @@ func (s *Service) buildResponse(ctx context.Context, request *request.Request, r
 	return nil
 }
 
-func enterThenExit(metric *gmetric.Operation, start time.Time, enterValue interface{}, exitValue interface{}) func() {
-	return smetric.EnterThenExit(metric, start, enterValue, exitValue)
-}
+func (s *Service) transformOutput(ctx context.Context, request *request.Request, output interface{}) (common.Storable, error) {
+	inputIndex := 0
+	if out, ok := output.(*shared.Output); ok {
+		inputIndex = out.InputIndex
+	}
 
-func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]interface{}, error) {
-	err := s.sema.Acquire(ctx, 1)
+	inputObject := request.Input.ObjectAt(s.inputProvider, inputIndex)
+
+	signature := s.Signature()
+	transformed, err := s.transformer(ctx, signature, inputObject, output)
 	if err != nil {
-		return nil, err
-	}
-	// even if canceled/deadline exceeded, we're going to run the eval
-	defer s.sema.Release(1)
-
-	startTime := time.Now()
-	onDone := s.evaluatorMetric.Begin(startTime)
-	onPendingDone := enterThenExit(s.evaluatorMetric, startTime, sstat.Enter, sstat.Exit)
-	stats := sstat.NewValues()
-	defer func() {
-		onDone(time.Now(), stats.Values()...)
-		onPendingDone()
-	}()
-
-	rleDone := enterThenExit(s.evaluatorMetric, time.Now(), stat.RLockDir(sstat.Enter), stat.RLockDir(sstat.Exit))
-	s.mux.RLock()
-	evaluator := s.evaluator
-	s.mux.RUnlock()
-	rleDone()
-
-	result, err := evaluator.Evaluate(request.Feeds)
-	if err != nil {
-		// this branch is logged by the caller
-		// these stats don't support context errors...
-		stats.Append(err)
-		return nil, err
+		return nil, fmt.Errorf("failed to transform: %v, %w", s.config.ID, err)
 	}
 
-	if s.config.Debug {
-		log.Printf("[%s eval] %+v", s.config.ID, result)
-	}
+	if s.useDatastore {
+		cacheKey := request.Input.KeyAt(inputIndex)
+		key := s.datastore.Key(cacheKey)
 
-	if s.stream != nil {
-		s.stream.Log(request.Body, result, time.Now().Sub(startTime))
-	}
+		dictHash := s.Dictionary().Hash
 
-	return result, nil
-}
-
-func (s *Service) reloadIfNeeded(ctx context.Context) error {
-	snapshot, err := files.ModifiedSnapshot(ctx, s.fs, s.config.URL, &config.Modified{})
-	if err != nil {
-		return fmt.Errorf("failed to check changes:%w", err)
-	}
-
-	if !s.isModified(snapshot) {
-		atomic.StoreInt32(&s.ReloadOK, 1)
-		return nil
-	}
-
-	model, err := s.loadModel(ctx, err)
-	if err != nil {
-		return err
-	}
-
-	signature, err := tfmodel.Signature(model)
-	if err != nil {
-		return fmt.Errorf("signature error:%w", err)
-	}
-
-	var dictionary *common.Dictionary
-	reconcileIOFromSignature(s.config, signature)
-	useDict := s.config.UseDictionary()
-	if useDict {
-		s.config.DictMeta.Error = ""
-		if s.config.DictURL != "" {
-			if dictionary, err = s.loadDictionary(ctx, s.config.DictURL); err != nil {
-				s.config.DictMeta.Error = err.Error()
-				return err
-			}
-		} else {
-			// extract dictionary from the graph
-			dictionary, err = layers.Dictionary(model.Session, model.Graph, signature)
+		go func() {
+			err := s.datastore.Put(ctx, key, transformed, dictHash)
 			if err != nil {
-				s.config.DictMeta.Error = err.Error()
-				return fmt.Errorf("dictionary error:%w", err)
+				log.Printf("[%s trout] put error:%v", s.config.ID, err)
 			}
-		}
+
+			if s.config.Debug {
+				log.Printf("[%s trout] put:\"%s\" dictHash:%d ok", s.config.ID, cacheKey, dictHash)
+			}
+		}()
 	}
 
-	var inputs = make(map[string]*domain.Input)
-	for i, input := range signature.Inputs {
-		inputs[input.Name] = &signature.Inputs[i]
-	}
-
-	// add inputs from the config that aren't in the model
-	for _, input := range s.config.Inputs {
-		iName := input.Name
-		if _, ok := inputs[iName]; ok {
-			continue
-		}
-
-		fInput := &domain.Input{
-			Name:      iName,
-			Index:     input.Index,
-			Auxiliary: input.Auxiliary,
-		}
-
-		fInput.Type = input.RawType()
-		if fInput.Type == nil {
-			fInput.Type = reflect.TypeOf("")
-		}
-
-		inputs[iName] = fInput
-	}
-
-	evaluator := tfmodel.NewEvaluator(signature, model.Session)
-	if s.config.OutputType != "" {
-		signature.Output.DataType = s.config.OutputType
-	}
-
-	// modify all service objects
-	s.mux.Lock()
-	defer s.mux.Unlock()
-
-	if s.evaluator != nil {
-		go s.evaluator.Close()
-	}
-
-	s.evaluator = evaluator
-	s.signature = signature
-
-	if dictionary != nil {
-		var filehash int64
-		if useDict && len(dictionary.Layers) == 0 {
-			filehash = snapshot.Min.Unix() + snapshot.Max.Unix()
-		}
-
-		dictionary.UpdateHash(filehash)
-
-		s.dictionary = dictionary
-
-		s.config.DictMeta.Hash = dictionary.Hash
-		s.config.DictMeta.Reloaded = time.Now()
-	}
-
-	s.inputs = inputs
-	s.config.Modified = snapshot
-
-	atomic.StoreInt32(&s.ReloadOK, 1)
-
-	return nil
-}
-
-func (s *Service) loadModel(ctx context.Context, err error) (*tf.SavedModel, error) {
-	options := option.NewSource(&option.NoCache{Source: option.NoCacheBaseURL})
-	remoteURL := s.config.URL
-	localPath := s.config.Location
-
-	if err := s.fs.Copy(ctx, remoteURL, localPath, options); err != nil {
-		return nil, fmt.Errorf("failed to copy model %v, %s, due to %w", remoteURL, localPath, err)
-	}
-
-	log.Printf("[%s loadModel] copied %s to %s", s.config.ID, remoteURL, localPath)
-
-	model, err := tf.LoadSavedModel(localPath, s.config.Tags, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load model %v, %s, due to %w", remoteURL, localPath, err)
-	}
-	return model, nil
-}
-
-func (s *Service) isModified(snapshot *config.Modified) bool {
-	if snapshot.Span() > time.Hour || snapshot.Max.IsZero() {
-		return false
-	}
-
-	s.mux.RLock()
-	modified := s.config.Modified
-	s.mux.RUnlock()
-
-	return !(modified.Max.Equal(snapshot.Max) && modified.Min.Equal(snapshot.Min))
-}
-
-// NewRequest should be used for Do()
-func (s *Service) NewRequest() *request.Request {
-	return request.NewRequest(s.config.KeysLen(), s.inputs)
-}
-
-func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datastore.Service) error {
-	if !s.useDatastore {
-		return nil
-	}
-
-	if s.signature == nil {
-		return fmt.Errorf("signature was emtpy")
-	}
-
-	if len(cfg.KeyFields) == 0 {
-		for _, input := range s.signature.Inputs {
-			cfg.KeyFields = append(cfg.KeyFields, input.Name)
-		}
-	}
-
-	if s.datastore == nil {
-		var ok bool
-		if s.datastore, ok = datastores[cfg.DataStore]; !ok {
-			return fmt.Errorf("failed to lookup datastore ID: %v", cfg.DataStore)
-		}
-	}
-
-	datastoreConfig := s.datastore.Config()
-	if datastoreConfig.Storable == "" && len(datastoreConfig.Fields) == 0 {
-		// TODO check for multi-output models
-		_ = datastoreConfig.FieldsDescriptor(storable.NewFields(s.signature.Output.Name, cfg.OutputType))
-	}
-
-	if s.newStorable == nil {
-		s.newStorable = getStorable(datastoreConfig)
-	}
-
-	return nil
-}
-
-func (s *Service) scheduleModelReload() {
-	for range time.Tick(time.Minute) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-
-		// TODO extend backwards compatibility testing
-		err := s.reloadIfNeeded(ctx)
-		if err != nil {
-			log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
-			atomic.StoreInt32(&s.ReloadOK, 0)
-		}
-
-		if atomic.LoadInt32(&s.closed) != 0 {
-			log.Printf("[%s reload] stopping reload loop", s.config.ID)
-			// we are shutting down
-			return
-		}
-	}
-}
-
-// Deprecated: model metadata should be embedded.
-// Loads common.Dictionary from a remote source.
-func (s *Service) loadDictionary(ctx context.Context, URL string) (*common.Dictionary, error) {
-	var result = &common.Dictionary{}
-	rawReader, err := s.fs.OpenURL(ctx, URL)
-	if err != nil {
-		return nil, err
-	}
-	defer rawReader.Close()
-	var reader io.Reader = rawReader
-	if strings.HasSuffix(URL, ".gz") {
-		if reader, err = gzip.NewReader(rawReader); err != nil {
-			return nil, err
-		}
-	}
-	if strings.Contains(URL, ".yaml") {
-		decoder := yaml.NewDecoder(reader)
-		return result, decoder.Decode(result)
-	}
-	decoder := sjson.NewDecoder(reader)
-	return result, decoder.Decode(result)
+	return transformed, nil
 }
 
 // New creates a service
-func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetric.Service, sema *semaphore.Weighted, datastores map[string]*datastore.Service, options ...Option) (*Service, error) {
+func New(ctx context.Context, cfg *config.Model, tfsrv *tfmodel.Service, fs afs.Service, metrics *gmetric.Service, datastores map[string]*datastore.Service, options ...Option) (*Service, error) {
 	if metrics == nil {
 		metrics = gmetric.New()
 	}
@@ -505,15 +233,13 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 	cfg.Init()
 
 	srv := &Service{
-		fs:           fs,
-		config:       cfg,
+		config:    cfg,
+		tfService: tfsrv,
+
 		useDatastore: cfg.UseDictionary() && cfg.DataStore != "",
-		sema:         sema,
 
 		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
 		evaluatorMetric: metrics.MultiOperationCounter(location, cfg.ID+"Eval", cfg.ID+" evaluator performance", time.Microsecond, time.Minute, 2, stat.NewEval()),
-
-		inputs: make(map[string]*domain.Input),
 	}
 
 	for _, opt := range options {
@@ -536,10 +262,8 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 		}
 
 		if cfg.Stream != nil {
-			srv.stream, err = stream.NewService(cfg.ID, cfg.Stream, fs, func() *common.Dictionary {
-				return srv.dictionary
-			}, func() []domain.Output {
-				return srv.signature.Outputs
+			srv.stream, err = stream.NewService(cfg.ID, cfg.Stream, fs, srv.Dictionary, func() []domain.Output {
+				return srv.Signature().Outputs
 			})
 		}
 
@@ -547,7 +271,7 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 			return err
 		}
 
-		if srv.inputProvider, err = srv.newObjectProvider(); err != nil {
+		if srv.inputProvider, err = gtlyop.NewObjectProvider(cfg); err != nil {
 			return err
 		}
 
@@ -563,83 +287,68 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 	return srv, err
 }
 
-func (s *Service) newObjectProvider() (*gtly.Provider, error) {
-	verbose := s.config.Debug
-	inputs := s.config.Inputs
-
-	var fields = make([]*gtly.Field, len(inputs))
-	for i, field := range inputs {
-		if verbose {
-			log.Printf("[%s objectProvider] %s %v", s.config.ID, field.Name, field.RawType())
-		}
-
-		fields[i] = &gtly.Field{
-			Name: field.Name,
-			Type: field.RawType(),
-		}
-	}
-	provider, err := gtly.NewProvider("input", fields...)
-	if err != nil {
-		return nil, err
-	}
-	return provider, nil
+func (s *Service) reloadIfNeeded(ctx context.Context) error {
+	return s.tfService.ReloadIfNeeded(ctx)
 }
 
-// Attempts to figure out input and output signatures of the model and compares them to
-// the configured inputs and outputs.
-// Generally, the configured values will override actual values.
-// Additionally, any other inputs (auxiliary) will be added.
-// config will be modified to match the signature from the model with the overrides.
-func reconcileIOFromSignature(config *config.Model, signature *domain.Signature) {
-	byName := config.FieldByName()
+// NewRequest should be used for Do()
+func (s *Service) NewRequest() *request.Request {
+	numKeyInputs := s.config.KeysLen()
+	inputs := s.tfService.Inputs()
+	return request.NewRequest(numKeyInputs, inputs)
+}
 
-	if len(signature.Inputs) == 0 {
-		return
+func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datastore.Service) error {
+	if !s.useDatastore {
+		return nil
 	}
 
-	for ii := range signature.Inputs {
-		input := &signature.Inputs[ii]
-
-		if input.Type == nil {
-			input.Type = reflect.TypeOf("")
-		}
-
-		fieldCfg, ok := byName[input.Name]
-		if !ok {
-			fieldCfg = &shared.Field{Name: input.Name}
-			config.Inputs = append(config.Inputs, fieldCfg)
-		}
-
-		input.Vocab = !fieldCfg.Wildcard && fieldCfg.Precision <= 0
-
-		if fieldCfg.DataType == "" {
-			fieldCfg.SetRawType(input.Type)
-		}
-
-		delete(byName, fieldCfg.Name)
+	signature := s.Signature()
+	if signature == nil {
+		return fmt.Errorf("signature was emtpy")
 	}
 
-	if len(signature.Outputs) > 0 {
-		outputIndex := config.OutputIndex()
-		for _, output := range signature.Outputs {
-			if _, has := outputIndex[output.Name]; has {
-				continue
-			}
-
-			field := &shared.Field{Name: output.Name, DataType: output.DataType}
-			if field.DataType == "" {
-				field.SetRawType(reflect.TypeOf(""))
-			}
-
-			config.Outputs = append(config.Outputs, field)
+	if len(cfg.KeyFields) == 0 {
+		for _, input := range signature.Inputs {
+			cfg.KeyFields = append(cfg.KeyFields, input.Name)
 		}
 	}
 
-	for k, v := range byName {
-		if v.DataType == "" {
-			v.SetRawType(reflect.TypeOf(""))
+	if s.datastore == nil {
+		var ok bool
+		if s.datastore, ok = datastores[cfg.DataStore]; !ok {
+			return fmt.Errorf("failed to lookup datastore ID: %v", cfg.DataStore)
+		}
+	}
+
+	datastoreConfig := s.datastore.Config()
+	if datastoreConfig.Storable == "" && len(datastoreConfig.Fields) == 0 {
+		// TODO check for multi-output models
+		fields := storable.NewFields(signature.Output.Name, cfg.OutputType)
+		_ = datastoreConfig.FieldsDescriptor(fields)
+	}
+
+	if s.newStorable == nil {
+		s.newStorable = getStorable(datastoreConfig)
+	}
+
+	return nil
+}
+
+func (s *Service) scheduleModelReload() {
+	for range time.Tick(time.Minute) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		err := s.reloadIfNeeded(ctx)
+		if err != nil {
+			log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
+			atomic.StoreInt32(&s.ReloadOK, 0)
 		}
 
-		byName[k].Auxiliary = true
+		if atomic.LoadInt32(&s.closed) != 0 {
+			log.Printf("[%s reload] shutting down, stopping reload loop", s.config.ID)
+			return
+		}
 	}
 }

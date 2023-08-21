@@ -1,6 +1,7 @@
 package domain
 
-// Signature represents Tensorflow SavedModel function Signature
+// Signature represents Tensorflow SavedModel function Signature.
+// TODO document and address issues if reloaded model IO changes.
 type Signature struct {
 	Method  string
 	Inputs  []Input

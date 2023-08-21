@@ -1,4 +1,4 @@
-package layers
+package tfmodel
 
 import (
 	"fmt"
@@ -7,7 +7,6 @@ import (
 
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/domain"
-	"github.com/viant/mly/service/tfmodel/export"
 	"github.com/viant/mly/shared/common"
 )
 
@@ -35,7 +34,7 @@ func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signatur
 func DiscoverDictionary(session *tf.Session, graph *tf.Graph, layers []string) (*common.Dictionary, error) {
 	var result = new(common.Dictionary)
 	for _, name := range layers {
-		exported, err := export.Export(session, graph, name)
+		exported, err := Export(session, graph, name)
 		if err != nil {
 			return nil, err
 		}
