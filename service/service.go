@@ -25,10 +25,12 @@ import (
 	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/mly/shared/datastore"
 	sstat "github.com/viant/mly/shared/stat"
-	smetric "github.com/viant/mly/shared/stat/metric"
 	"github.com/viant/xunsafe"
 )
 
+// Service serves as the entrypoint for using the ML model.
+// It is responsible for caching, the ML model provides some metadata
+// related to caching.
 type Service struct {
 	config *config.Model
 	closed int32
@@ -50,9 +52,8 @@ type Service struct {
 	transformer domain.Transformer
 	newStorable func() common.Storable
 
-	// metrics
-	serviceMetric   *gmetric.Operation
-	evaluatorMetric *gmetric.Operation
+	// serviceMetric measures validate + model + transformer
+	serviceMetric ServiceOperation
 
 	// logging
 	stream *stream.Service
@@ -91,12 +92,10 @@ func (s *Service) Do(ctx context.Context, request *request.Request, response *Re
 
 func (s *Service) do(ctx context.Context, request *request.Request, response *Response) error {
 	startTime := time.Now()
-	onDone := s.serviceMetric.Begin(startTime)
-	onPendingDone := smetric.EnterThenExit(s.serviceMetric, startTime, stat.Pending, stat.Pending)
+	onDone := s.serviceMetric.Operation.Begin(startTime)
 	stats := sstat.NewValues()
 	defer func() {
 		onDone(time.Now(), stats.Values()...)
-		onPendingDone()
 	}()
 
 	err := request.Validate()
@@ -118,7 +117,6 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 	}
 
 	stats.Append(stat.Evaluate)
-
 	return s.buildResponse(ctx, request, response, tensorValues)
 }
 
@@ -236,10 +234,8 @@ func New(ctx context.Context, cfg *config.Model, tfsrv *tfmodel.Service, fs afs.
 		config:    cfg,
 		tfService: tfsrv,
 
-		useDatastore: cfg.UseDictionary() && cfg.DataStore != "",
-
-		serviceMetric:   metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
-		evaluatorMetric: metrics.MultiOperationCounter(location, cfg.ID+"Eval", cfg.ID+" evaluator performance", time.Microsecond, time.Minute, 2, stat.NewEval()),
+		useDatastore:  cfg.UseDictionary() && cfg.DataStore != "",
+		serviceMetric: NewServiceOperation(metrics, location, cfg.ID),
 	}
 
 	for _, opt := range options {
@@ -294,6 +290,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 // NewRequest should be used for Do()
 func (s *Service) NewRequest() *request.Request {
 	numKeyInputs := s.config.KeysLen()
+	// This may change mid-request, but only under exceptional circumstances.
 	inputs := s.tfService.Inputs()
 	return request.NewRequest(numKeyInputs, inputs)
 }

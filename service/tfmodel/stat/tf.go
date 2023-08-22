@@ -5,21 +5,20 @@ import (
 	"github.com/viant/mly/shared/stat"
 )
 
-type eval struct{}
+type tfs struct{}
 
-const Pending = "pending"
+const Running = "running"
 
 // implements github.com/viant/gmetric/counter.Provider
-func (p eval) Keys() []string {
+func (p tfs) Keys() []string {
 	return []string{
 		stat.ErrorKey,
-		stat.Timeout,
-		Pending,
+		Running,
 	}
 }
 
 // implements github.com/viant/gmetric/counter.Provider
-func (p eval) Map(value interface{}) int {
+func (p tfs) Map(value interface{}) int {
 	if value == nil {
 		return -1
 	}
@@ -29,22 +28,20 @@ func (p eval) Map(value interface{}) int {
 		return 0
 	case string:
 		switch val {
-		case stat.Timeout:
+		case Running:
 			return 1
-		case Pending:
-			return 2
 		}
 	case stat.Dir:
-		return 2
+		return 1
 	}
 
 	return -1
 }
 
-func (p eval) NewCounter() counter.CustomCounter {
+func (p tfs) NewCounter() counter.CustomCounter {
 	return new(stat.Occupancy)
 }
 
-func NewEval() counter.Provider {
-	return &eval{}
+func NewTfs() counter.Provider {
+	return &tfs{}
 }

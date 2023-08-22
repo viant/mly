@@ -37,7 +37,10 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 	isDebug := h.service.config.Debug
 
+	// TODO this context isn't guaranteed to leak - the model can change in the
+	// middle of a request
 	request := h.service.NewRequest()
+
 	response := &Response{Status: common.StatusOK, started: time.Now()}
 	if httpRequest.Method == http.MethodGet {
 		if err := h.buildRequestFromQuery(httpRequest, request); err != nil {
@@ -49,9 +52,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 		onDone := h.poolMetrics.Begin(time.Now())
 		data, size, err := buffer.Read(h.pool, httpRequest.Body)
-
 		defer h.pool.Put(data)
-
 		func() {
 			defer func() { onDone(time.Now()) }()
 
@@ -143,7 +144,7 @@ func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
 	return err
 }
 
-//NewHandler creates a new HTTP service Handler
+// NewHandler creates a new HTTP service Handler
 func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration, m *gmetric.Service) *Handler {
 	location := reflect.TypeOf(&Handler{}).PkgPath()
 	return &Handler{

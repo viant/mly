@@ -9,5 +9,5 @@ type Modified struct {
 }
 
 func (r *Modified) Span() time.Duration {
-	return r.Min.Sub(r.Min)
+	return r.Max.Sub(r.Min)
 }

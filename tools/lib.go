@@ -19,7 +19,6 @@ import (
 	sconfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/endpoint"
-	"github.com/viant/mly/service/layers"
 	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
@@ -79,7 +78,7 @@ func DiscoverDictHash(model *tf.SavedModel, writer io.Writer) error {
 		return err
 	}
 
-	dict, err := layers.Dictionary(model.Session, model.Graph, signature)
+	dict, err := tfmodel.Dictionary(model.Session, model.Graph, signature)
 	if err != nil {
 		return err
 	}

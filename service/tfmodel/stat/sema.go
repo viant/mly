@@ -5,21 +5,22 @@ import (
 	"github.com/viant/mly/shared/stat"
 )
 
-type eval struct{}
+type sema struct{}
 
-const Pending = "pending"
+const Waiting = "waiting"
 
 // implements github.com/viant/gmetric/counter.Provider
-func (p eval) Keys() []string {
+func (p sema) Keys() []string {
 	return []string{
 		stat.ErrorKey,
-		stat.Timeout,
-		Pending,
+		stat.Canceled,
+		stat.DeadlineExceeded,
+		Waiting,
 	}
 }
 
 // implements github.com/viant/gmetric/counter.Provider
-func (p eval) Map(value interface{}) int {
+func (p sema) Map(value interface{}) int {
 	if value == nil {
 		return -1
 	}
@@ -29,22 +30,24 @@ func (p eval) Map(value interface{}) int {
 		return 0
 	case string:
 		switch val {
-		case stat.Timeout:
+		case stat.Canceled:
 			return 1
-		case Pending:
+		case stat.DeadlineExceeded:
 			return 2
+		case Waiting:
+			return 3
 		}
 	case stat.Dir:
-		return 2
+		return 3
 	}
 
 	return -1
 }
 
-func (p eval) NewCounter() counter.CustomCounter {
+func (p sema) NewCounter() counter.CustomCounter {
 	return new(stat.Occupancy)
 }
 
-func NewEval() counter.Provider {
-	return &eval{}
+func NewSema() counter.Provider {
+	return &sema{}
 }

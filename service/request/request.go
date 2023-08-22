@@ -19,7 +19,11 @@ var exists struct{} = struct{}{}
 type Request struct {
 	Body []byte // usually the POST JSON content
 
-	Feeds    []interface{}       // passed through to Evaluator
+	// Passed through to Evaluator.
+	// This is expected to be [numInputs][1][batchSize]T.
+	// TODO consider scenario when the second slice does not have length 1.
+	Feeds []interface{}
+
 	supplied map[string]struct{} // used to check if the required inputs were provided
 
 	Input  *transfer.Input          // cache metadata
@@ -36,6 +40,7 @@ func NewRequest(keyLen int, inputs map[string]*domain.Input) *Request {
 }
 
 // Put is used when constructing a request NOT using gojay.
+// Deprecated - no longer support this option.
 func (r *Request) Put(key string, value string) error {
 	if input, ok := r.inputs[key]; ok {
 		r.supplied[key] = exists

@@ -450,6 +450,7 @@ func (s *Service) initDatastore() error {
 		if err := remoteCfg.FieldsDescriptor(remoteCfg.Fields); err != nil {
 			return err
 		}
+
 		s.newStorable = func() common.Storable {
 			return storable.New(remoteCfg.Fields)
 		}

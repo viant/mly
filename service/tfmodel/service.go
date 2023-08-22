@@ -20,77 +20,55 @@ import (
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/files"
-	srvstat "github.com/viant/mly/service/stat"
+	tfstat "github.com/viant/mly/service/tfmodel/stat"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
-	"github.com/viant/mly/shared/stat"
-	smetric "github.com/viant/mly/shared/stat/metric"
 	"golang.org/x/sync/semaphore"
 	"gopkg.in/yaml.v2"
 )
 
+// Service is responsible for being the entrypoint for all Tensorflow
+// model runs.
+// It manages loading and reloading the model files, as well as providing
+// metadata based off the model and configuration.
 type Service struct {
-	// prevents potentially explosive thread generation due to concurrent requests
-	// this should be shared across all Evaluators.
-	semaphore *semaphore.Weighted
-
 	// Modifies this object to be used by config endpoints.
 	config *config.Model
+
+	evaluatorMeta *EvaluatorMeta
+	batcherConfig *BatcherConfig
+	batcherMetric *gmetric.Operation
+
+	// transitory evaluator
+	batcher   *Batcher
+	evaluator *Evaluator
+
+	mux sync.RWMutex
+	wg  *sync.WaitGroup // prevents calling to a closed Evaluator
 
 	inputs     map[string]*domain.Input
 	signature  *domain.Signature
 	dictionary *common.Dictionary
 
-	fs       afs.Service
-	mux      sync.RWMutex
-	ReloadOK int32
+	fs afs.Service
 
-	evaluator *Evaluator
+	ReloadOK int32
 
 	metric *gmetric.Operation
 }
 
 func (s *Service) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
-	err := s.semaphore.Acquire(ctx, 1)
-	if err != nil {
-		return nil, err
-	}
-
-	// even if canceled/deadline exceeded, we're going to run the eval
-	defer s.semaphore.Release(1)
-
-	startTime := time.Now()
-	onDone := s.metric.Begin(startTime)
-	onPendingDone := smetric.EnterThenExit(s.metric, startTime, stat.Enter, stat.Exit)
-	stats := stat.NewValues()
-
-	defer func() {
-		onDone(time.Now(), stats.Values()...)
-		onPendingDone()
-	}()
-
 	s.mux.RLock()
-	tv, err := s.evaluator.Evaluate(params)
+	evaluator := s.evaluator
+	wg := s.wg
+
+	wg.Add(1)
 	s.mux.RUnlock()
 
-	if err != nil {
-		stats.Append(err)
-		return nil, err
-	}
+	tv, err := evaluator.Evaluate(ctx, params)
+	wg.Done()
 
 	return tv, err
-}
-
-func (s *Service) Inputs() map[string]*domain.Input {
-	return s.inputs
-}
-
-func (s *Service) Signature() *domain.Signature {
-	return s.signature
-}
-
-func (s *Service) Dictionary() *common.Dictionary {
-	return s.dictionary
 }
 
 // Assumes that after the initial reload, there is no significant changes
@@ -118,7 +96,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		return fmt.Errorf("signature error:%w", err)
 	}
 
-	// modifies signature.Inputs[].Vocab
+	// modifies signature.Inputs[].Vocab for Dictionary()
 	reconcileIOFromSignature(s.config, signature)
 
 	var dictionary *common.Dictionary
@@ -128,6 +106,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		s.config.DictMeta.Error = ""
 
 		if s.config.DictURL != "" {
+			// Deprecated branch
 			if dictionary, err = s.loadDictionary(ctx, s.config.DictURL); err != nil {
 				s.config.DictMeta.Error = err.Error()
 				return err
@@ -177,31 +156,39 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		modelInputsByName[configInputName] = input
 	}
 
-	evaluator := NewEvaluator(signature, model.Session)
+	newEvaluator := NewEvaluator(signature, model.Session, *s.evaluatorMeta)
 
 	if s.config.OutputType != "" {
 		signature.Output.DataType = s.config.OutputType
 	}
 
 	// modify all service objects
+
 	s.mux.Lock()
-	defer s.mux.Unlock()
 
-	if s.evaluator != nil {
-		// this should call Close on the old evaluator
-		go s.evaluator.Close()
-	}
+	oldEvaluator := s.evaluator
+	s.evaluator = newEvaluator
+	oldWg := s.wg
+	s.wg = new(sync.WaitGroup)
 
-	s.evaluator = evaluator
+	s.mux.Unlock()
+	// from this point, nothing should pick up the oldEvaluator, but there
+	// may still be goroutines that have yet to call oldEvaluator.Evaluate()
+	// but they should have Add()-ed to the oldWg.
+	go func() {
+		oldWg.Wait()
+		oldEvaluator.Close()
+	}()
 
 	if dictionary != nil {
 		s.dictionary = dictionary
-		// this updates status as shown in /v1/api/config/
+
+		// updates status as shown in /v1/api/config/
 		s.config.DictMeta.Hash = dictionary.Hash
 		s.config.DictMeta.Reloaded = time.Now()
 	}
 
-	// this updates status as shown in /v1/api/config/
+	// updates status as shown in /v1/api/config/
 	s.config.Modified = snapshot
 
 	// in theory, these should never materially change, unless the
@@ -222,6 +209,8 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 // config.Inputs may be modified.
 // config.Inputs[].DataType may be modified.
 // config.Inputs[].rawType may be modified.
+// config.Inputs[].Auxiliary may be modified.
+// config.Outputs may be modified
 func reconcileIOFromSignature(config *config.Model, signature *domain.Signature) {
 	configuredInputsByName := config.FieldByName()
 
@@ -229,8 +218,9 @@ func reconcileIOFromSignature(config *config.Model, signature *domain.Signature)
 		return
 	}
 
+	// go through inputs from the model
 	for modelInputName := range signature.Inputs {
-		// use pointer to actual object
+		// use pointer to modify object
 		modelInput := &signature.Inputs[modelInputName]
 
 		if modelInput.Type == nil {
@@ -306,6 +296,7 @@ func (s *Service) isModified(snapshot *config.Modified) bool {
 		return false
 	}
 
+	// if another reloadModelIfNeeded() is running, wait until it is completed...
 	s.mux.RLock()
 	modified := s.config.Modified
 	s.mux.RUnlock()
@@ -339,6 +330,18 @@ func (s *Service) loadDictionary(ctx context.Context, URL string) (*common.Dicti
 	return result, decoder.Decode(result)
 }
 
+func (s *Service) Inputs() map[string]*domain.Input {
+	return s.inputs
+}
+
+func (s *Service) Signature() *domain.Signature {
+	return s.signature
+}
+
+func (s *Service) Dictionary() *common.Dictionary {
+	return s.dictionary
+}
+
 func (s *Service) Close() error {
 	if s.evaluator == nil {
 		return nil
@@ -350,10 +353,17 @@ func (s *Service) Close() error {
 func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sema *semaphore.Weighted) *Service {
 	location := reflect.TypeOf(&Service{}).PkgPath()
 
+	id := cfg.ID
+
+	meta := EvaluatorMeta{
+		semaphore:  sema,
+		semaMetric: metrics.MultiOperationCounter(location, id+"Semaphore", id+" Tensorflow semaphore", time.Microsecond, time.Minute, 2, tfstat.NewSema()),
+		tfMetric:   metrics.MultiOperationCounter(location, id+"TFService", id+" Tensorflow performance", time.Microsecond, time.Minute, 2, tfstat.NewTfs()),
+	}
+
 	return &Service{
-		semaphore: sema,
-		config:    cfg,
-		fs:        fs,
-		metric:    metrics.MultiOperationCounter(location, cfg.ID+"TFService", cfg.ID+" tensorflow performance", time.Microsecond, time.Minute, 2, srvstat.NewEval()),
+		evaluatorMeta: &meta,
+		config:        cfg,
+		fs:            fs,
 	}
 }
