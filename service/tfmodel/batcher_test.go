@@ -3,42 +3,26 @@ package tfmodel
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/tfmodel/batcher"
 	"github.com/viant/toolbox"
 )
 
 func TestBatcherBatchMax(t *testing.T) {
-	_, filename, _, _ := runtime.Caller(0)
-	root := filepath.Join(filepath.Dir(filename), "../..")
-	t.Logf("Root %s", root)
-	modelDest := filepath.Join(root, "example/model/string_lookups_int_model")
-
-	model, err := tf.LoadSavedModel(modelDest, []string{"serve"}, nil)
-	assert.Nil(t, err)
-
-	signature, err := Signature(model)
-	assert.Nil(t, err)
-
-	met := createEvalMeta()
-	evaluator := NewEvaluator(signature, model.Session, met)
-
-	batchr := NewBatcher(evaluator, len(signature.Inputs), batcher.BatcherConfig{
+	signature, evaluator, met := tLoadEvaluator(t, "example/model/string_lookups_int_model")
+	batchSrv := NewBatcher(evaluator, len(signature.Inputs), batcher.BatcherConfig{
 		MaxBatchCounts: 3,
 		MaxBatchSize:   100,
 		MaxBatchWait:   time.Millisecond * 1,
 	})
 
-	batchr.Verbose = &batcher.V{"test", true}
-	fmt.Printf("%+v\n", batchr)
+	batchSrv.Verbose = &batcher.V{"test", true}
+	fmt.Printf("%+v\n", batchSrv)
 
 	feeds := make([]interface{}, 0)
 	feeds = append(feeds, [][]string{{"a"}, {"b"}})
@@ -64,7 +48,7 @@ func TestBatcherBatchMax(t *testing.T) {
 		wg.Add(1)
 
 		go func() {
-			sb, err := batchr.Queue(feeds)
+			sb, err := batchSrv.Queue(feeds)
 			assert.Nil(t, err)
 
 			wait := time.Now()
@@ -83,7 +67,7 @@ func TestBatcherBatchMax(t *testing.T) {
 		}()
 
 		go func() {
-			sb, err := batchr.Queue(feeds3)
+			sb, err := batchSrv.Queue(feeds3)
 			assert.Nil(t, err)
 
 			wait := time.Now()
@@ -103,31 +87,19 @@ func TestBatcherBatchMax(t *testing.T) {
 	}
 
 	assert.Equal(t, int32(0), errors, "got errors")
-
 	wg.Wait()
-
 	toolbox.Dump(met)
-
-	batchr.Close()
+	batchSrv.Close()
 }
 
 func BenchmarkBatcherParallel(b *testing.B) {
-	_, filename, _, _ := runtime.Caller(0)
-	root := filepath.Join(filepath.Dir(filename), "../..")
-	modelDest := filepath.Join(root, "example/model/string_lookups_int_model")
-
-	model, err := tf.LoadSavedModel(modelDest, []string{"serve"}, nil)
-	if err != nil {
-		b.Error(err)
+	bnil := func(err error) {
+		if err != nil {
+			b.Error(err)
+		}
 	}
 
-	signature, err := Signature(model)
-	if err != nil {
-		b.Error(err)
-	}
-
-	met := createEvalMeta()
-	evaluator := NewEvaluator(signature, model.Session, met)
+	signature, evaluator, _ := loadEvaluator("example/model/string_lookups_int_model", bnil, bnil)
 
 	bcfg := batcher.BatcherConfig{
 		MaxBatchSize:   100,

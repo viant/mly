@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/viant/mly/service/tfmodel/batcher"
+	"github.com/viant/mly/service/tfmodel/evaluator"
 )
 
 // Batcher sits on top of an Evaluator and collects predictions calls
@@ -18,7 +19,7 @@ type Batcher struct {
 	closeChan chan bool
 	wg        sync.WaitGroup
 
-	evaluator *Evaluator
+	evaluator *evaluator.Service
 	inputLen  int
 
 	bsPool *sync.Pool
@@ -397,7 +398,7 @@ func (b *Batcher) Dispatcher() {
 	}
 }
 
-func NewBatcher(evaluator *Evaluator, inputLen int, batchConfig batcher.BatcherConfig) *Batcher {
+func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig batcher.BatcherConfig) *Batcher {
 	b := &Batcher{
 		evaluator: evaluator,
 		inputLen:  inputLen,

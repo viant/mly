@@ -1,4 +1,4 @@
-package tfmodel
+package evaluator
 
 import (
 	"context"
@@ -6,16 +6,13 @@ import (
 	"time"
 
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
-	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/stat"
-
-	"golang.org/x/sync/semaphore"
 )
 
 // Represents a TF session for running predictions.
-type Evaluator struct {
+type Service struct {
 	EvaluatorMeta
 
 	session *tf.Session
@@ -26,16 +23,7 @@ type Evaluator struct {
 	signature domain.Signature
 }
 
-type EvaluatorMeta struct {
-	// prevents potentially explosive thread generation due to concurrent requests
-	// this should be shared across all Evaluators.
-	semaphore  *semaphore.Weighted
-	semaMetric *gmetric.Operation
-
-	tfMetric *gmetric.Operation
-}
-
-func (e *Evaluator) feeds(feeds []interface{}) (map[tf.Output]*tf.Tensor, error) {
+func (e *Service) feeds(feeds []interface{}) (map[tf.Output]*tf.Tensor, error) {
 	var result = make(map[tf.Output]*tf.Tensor, len(feeds))
 	for _, input := range e.signature.Inputs {
 		tensor, err := tf.NewTensor(feeds[input.Index])
@@ -47,7 +35,7 @@ func (e *Evaluator) feeds(feeds []interface{}) (map[tf.Output]*tf.Tensor, error)
 	return result, nil
 }
 
-func (e *Evaluator) acquire(ctx context.Context) (func(), error) {
+func (e *Service) acquire(ctx context.Context) (func(), error) {
 	onDone := e.semaMetric.Begin(time.Now())
 	stats := stat.NewValues()
 	defer onDone(time.Now())
@@ -63,7 +51,7 @@ func (e *Evaluator) acquire(ctx context.Context) (func(), error) {
 
 // Evaluate runs the primary model prediction via Cgo Tensorflow.
 // params is expected to be [inputs][1][batch]T - see service/request.Request.Feeds and related methods.
-func (e *Evaluator) Evaluate(ctx context.Context, params []interface{}) ([]interface{}, error) {
+func (e *Service) Evaluate(ctx context.Context, params []interface{}) ([]interface{}, error) {
 	release, err := e.acquire(ctx)
 	if err != nil {
 		return nil, err
@@ -94,17 +82,17 @@ func (e *Evaluator) Evaluate(ctx context.Context, params []interface{}) ([]inter
 }
 
 // Close closes the Tensorflow session.
-func (e *Evaluator) Close() error {
+func (e *Service) Close() error {
 	return e.session.Close()
 }
 
-func NewEvaluator(signature *domain.Signature, session *tf.Session, meta EvaluatorMeta) *Evaluator {
+func NewEvaluator(signature *domain.Signature, session *tf.Session, meta EvaluatorMeta) *Service {
 	fetches := []tf.Output{}
 	for _, output := range signature.Outputs {
 		fetches = append(fetches, output.Output(output.Index))
 	}
 
-	evaluator := &Evaluator{
+	evaluator := &Service{
 		EvaluatorMeta: meta,
 
 		signature: *signature,

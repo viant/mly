@@ -21,6 +21,7 @@ import (
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/files"
 	"github.com/viant/mly/service/tfmodel/batcher"
+	"github.com/viant/mly/service/tfmodel/evaluator"
 	tfstat "github.com/viant/mly/service/tfmodel/stat"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
@@ -36,13 +37,13 @@ type Service struct {
 	// Modifies this object to be used by config endpoints.
 	config *config.Model
 
-	evaluatorMeta *EvaluatorMeta
+	evaluatorMeta *evaluator.EvaluatorMeta
 	batcherConfig *batcher.BatcherConfig
 	batcherMetric *gmetric.Operation
 
 	// transitory evaluator
 	batcher   *Batcher
-	evaluator *Evaluator
+	evaluator *evaluator.Service
 
 	mux sync.RWMutex
 	wg  *sync.WaitGroup // prevents calling to a closed Evaluator
@@ -61,7 +62,7 @@ func (s *Service) Predict(ctx context.Context, params []interface{}) ([]interfac
 	s.mux.RLock()
 	// Maybe use interface?
 	var batcher *Batcher
-	var evaluator *Evaluator
+	var evaluator *evaluator.Service
 	if s.batcher != nil {
 		batcher = s.batcher
 	} else {
@@ -174,7 +175,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		signature.Output.DataType = s.config.OutputType
 	}
 
-	newEvaluator := NewEvaluator(signature, model.Session, *s.evaluatorMeta)
+	newEvaluator := evaluator.NewEvaluator(signature, model.Session, *s.evaluatorMeta)
 
 	var newBatchSrv *Batcher
 	if s.config.Batch.MaxBatchCounts > 1 {
@@ -389,11 +390,9 @@ func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sem
 
 	id := cfg.ID
 
-	meta := EvaluatorMeta{
-		semaphore:  sema,
-		semaMetric: metrics.MultiOperationCounter(location, id+"Semaphore", id+" Tensorflow semaphore", time.Microsecond, time.Minute, 2, tfstat.NewSema()),
-		tfMetric:   metrics.MultiOperationCounter(location, id+"TFService", id+" Tensorflow performance", time.Microsecond, time.Minute, 2, tfstat.NewTfs()),
-	}
+	semaMetric := metrics.MultiOperationCounter(location, id+"Semaphore", id+" Tensorflow semaphore", time.Microsecond, time.Minute, 2, tfstat.NewSema())
+	tfMetric := metrics.MultiOperationCounter(location, id+"TFService", id+" Tensorflow performance", time.Microsecond, time.Minute, 2, tfstat.NewTfs())
+	meta := evaluator.MakeEvaluatorMeta(sema, semaMetric, tfMetric)
 
 	return &Service{
 		evaluatorMeta: &meta,

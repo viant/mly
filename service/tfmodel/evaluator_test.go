@@ -12,80 +12,70 @@ import (
 	"github.com/stretchr/testify/assert"
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/gmetric"
+	"github.com/viant/mly/service/domain"
 	srvstat "github.com/viant/mly/service/stat"
+	"github.com/viant/mly/service/tfmodel/evaluator"
 	"golang.org/x/sync/semaphore"
 )
 
-func createEvalMeta() EvaluatorMeta {
+func createEvalMeta() evaluator.EvaluatorMeta {
 	s := gmetric.New()
-	return EvaluatorMeta{
-		semaphore:  semaphore.NewWeighted(100),
-		semaMetric: s.MultiOperationCounter("test", "test sema", "", time.Microsecond, time.Minute, 2, srvstat.NewEval()),
-		tfMetric:   s.MultiOperationCounter("test", "test eval", "", time.Microsecond, time.Minute, 2, srvstat.NewEval()),
+	return evaluator.MakeEvaluatorMeta(semaphore.NewWeighted(100),
+		s.MultiOperationCounter("test", "test sema", "", time.Microsecond, time.Minute, 2, srvstat.NewEval()),
+		s.MultiOperationCounter("test", "test eval", "", time.Microsecond, time.Minute, 2, srvstat.NewEval()))
+
+}
+
+func loadEvaluator(path string, withLoadModel, withSignature func(error)) (*domain.Signature, *evaluator.Service, evaluator.EvaluatorMeta) {
+	_, filename, _, _ := runtime.Caller(0)
+	root := filepath.Join(filepath.Dir(filename), "../..")
+	modelDest := filepath.Join(root, path)
+	model, err := tf.LoadSavedModel(modelDest, []string{"serve"}, nil)
+	withLoadModel(err)
+	signature, err := Signature(model)
+	withSignature(err)
+	met := createEvalMeta()
+	return signature, evaluator.NewEvaluator(signature, model.Session, met), met
+}
+
+func tLoadEvaluator(t *testing.T, path string) (*domain.Signature, *evaluator.Service, evaluator.EvaluatorMeta) {
+	tnil := func(err error) {
+		assert.Nil(t, err)
 	}
+
+	return loadEvaluator(path, tnil, tnil)
 }
 
 func TestBasic(t *testing.T) {
-	_, filename, _, _ := runtime.Caller(0)
-	root := filepath.Join(filepath.Dir(filename), "../..")
-	t.Logf("Root %s", root)
-	modelDest := filepath.Join(root, "example/model/string_lookups_int_model")
-
-	model, err := tf.LoadSavedModel(modelDest, []string{"serve"}, nil)
-	assert.Nil(t, err)
-
-	signature, err := Signature(model)
-	assert.Nil(t, err)
-	evaluator := NewEvaluator(signature, model.Session, createEvalMeta())
+	_, evaluator, _ := tLoadEvaluator(t, "example/model/string_lookups_int_model")
 
 	feeds := make([]interface{}, 0)
 	feeds = append(feeds, [][]string{{"a"}})
 	feeds = append(feeds, [][]string{{"c"}})
 
-	_, err = evaluator.Evaluate(context.Background(), feeds)
+	_, err := evaluator.Evaluate(context.Background(), feeds)
 	assert.Nil(t, err)
 }
 
 func TestBasicV2(t *testing.T) {
-	_, filename, _, _ := runtime.Caller(0)
-	root := filepath.Join(filepath.Dir(filename), "../..")
-	t.Logf("Root %s", root)
-	modelDest := filepath.Join(root, "example/model/vectorization_int_model")
+	_, evaluator, _ := tLoadEvaluator(t, "example/model/vectorization_int_model")
 
-	model, err := tf.LoadSavedModel(modelDest, []string{"serve"}, nil)
-	assert.Nil(t, err)
-
-	signature, err := Signature(model)
-	assert.Nil(t, err)
-	evaluator := NewEvaluator(signature, model.Session, createEvalMeta())
 	feeds := make([]interface{}, 0)
 	feeds = append(feeds, [][]string{{"a b c"}, {"b d d"}})
 	feeds = append(feeds, [][]string{{"c"}, {"d"}})
 
-	_, err = evaluator.Evaluate(context.Background(), feeds)
+	_, err := evaluator.Evaluate(context.Background(), feeds)
 	assert.Nil(t, err)
 }
 
-func TestKeyedOut(t *testing.T) {
-}
-
 func BenchmarkEvaluatorParallel(b *testing.B) {
-	_, filename, _, _ := runtime.Caller(0)
-	root := filepath.Join(filepath.Dir(filename), "../..")
-	modelDest := filepath.Join(root, "example/model/string_lookups_int_model")
-
-	model, err := tf.LoadSavedModel(modelDest, []string{"serve"}, nil)
-	if err != nil {
-		b.Error(err)
+	bnil := func(err error) {
+		if err != nil {
+			b.Error(err)
+		}
 	}
 
-	signature, err := Signature(model)
-	if err != nil {
-		b.Error(err)
-	}
-
-	met := createEvalMeta()
-	evaluator := NewEvaluator(signature, model.Session, met)
+	_, evaluator, _ := loadEvaluator("example/model/string_lookups_int_model", bnil, bnil)
 
 	feeds := make([]interface{}, 0)
 	feeds = append(feeds, [][]string{{"a"}, {"b"}})
