@@ -21,7 +21,9 @@ import (
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/files"
 	"github.com/viant/mly/service/tfmodel/batcher"
+	batchconfig "github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator"
+	"github.com/viant/mly/service/tfmodel/signature"
 	tfstat "github.com/viant/mly/service/tfmodel/stat"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
@@ -38,11 +40,11 @@ type Service struct {
 	config *config.Model
 
 	evaluatorMeta *evaluator.EvaluatorMeta
-	batcherConfig *batcher.BatcherConfig
+	batcherConfig *batchconfig.BatcherConfig
 	batcherMetric *gmetric.Operation
 
 	// transitory evaluator
-	batcher   *Batcher
+	batcher   *batcher.Service
 	evaluator *evaluator.Service
 
 	mux sync.RWMutex
@@ -61,7 +63,7 @@ type Service struct {
 func (s *Service) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
 	s.mux.RLock()
 	// Maybe use interface?
-	var batcher *Batcher
+	var batcher *batcher.Service
 	var evaluator *evaluator.Service
 	if s.batcher != nil {
 		batcher = s.batcher
@@ -106,7 +108,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		return err
 	}
 
-	signature, err := Signature(model)
+	signature, err := signature.Signature(model)
 	if err != nil {
 		return fmt.Errorf("signature error:%w", err)
 	}
@@ -177,9 +179,9 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 
 	newEvaluator := evaluator.NewEvaluator(signature, model.Session, *s.evaluatorMeta)
 
-	var newBatchSrv *Batcher
+	var newBatchSrv *batcher.Service
 	if s.config.Batch.MaxBatchCounts > 1 {
-		newBatchSrv = NewBatcher(newEvaluator, len(signature.Inputs), (*s.config.Batch).BatcherConfig)
+		newBatchSrv = batcher.NewBatcher(newEvaluator, len(signature.Inputs), (*s.config.Batch).BatcherConfig)
 	}
 
 	// modify all service objects

@@ -1,4 +1,4 @@
-package batcher
+package config
 
 import "time"
 

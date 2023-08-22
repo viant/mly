@@ -13,6 +13,7 @@ import (
 
 	"github.com/viant/mly/service/endpoint"
 	"github.com/viant/mly/service/tfmodel"
+	"github.com/viant/mly/service/tfmodel/signature"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/tapper/config"
 	"github.com/viant/tapper/io"
@@ -71,7 +72,7 @@ func Discover(options *Options) error {
 		return err
 	}
 
-	signature, err := tfmodel.Signature(model)
+	signature, err := signature.Signature(model)
 	if err != nil {
 		return err
 	}

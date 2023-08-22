@@ -1,4 +1,4 @@
-package tfmodel
+package batcher
 
 import (
 	"context"
@@ -9,19 +9,20 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/viant/mly/service/tfmodel/batcher"
+	"github.com/viant/mly/service/tfmodel/batcher/config"
+	"github.com/viant/mly/service/tfmodel/evaluator/test"
 	"github.com/viant/toolbox"
 )
 
-func TestBatcherBatchMax(t *testing.T) {
-	signature, evaluator, met := tLoadEvaluator(t, "example/model/string_lookups_int_model")
-	batchSrv := NewBatcher(evaluator, len(signature.Inputs), batcher.BatcherConfig{
+func TestServiceBatchMax(t *testing.T) {
+	signature, evaluator, met := test.TLoadEvaluator(t, "example/model/string_lookups_int_model")
+	batchSrv := NewBatcher(evaluator, len(signature.Inputs), config.BatcherConfig{
 		MaxBatchCounts: 3,
 		MaxBatchSize:   100,
 		MaxBatchWait:   time.Millisecond * 1,
 	})
 
-	batchSrv.Verbose = &batcher.V{"test", true}
+	batchSrv.Verbose = &config.V{"test", true}
 	fmt.Printf("%+v\n", batchSrv)
 
 	feeds := make([]interface{}, 0)
@@ -92,16 +93,16 @@ func TestBatcherBatchMax(t *testing.T) {
 	batchSrv.Close()
 }
 
-func BenchmarkBatcherParallel(b *testing.B) {
+func BenchmarkServiceParallel(b *testing.B) {
 	bnil := func(err error) {
 		if err != nil {
 			b.Error(err)
 		}
 	}
 
-	signature, evaluator, _ := loadEvaluator("example/model/string_lookups_int_model", bnil, bnil)
+	signature, evaluator, _ := test.LoadEvaluator("example/model/string_lookups_int_model", bnil, bnil)
 
-	bcfg := batcher.BatcherConfig{
+	bcfg := config.BatcherConfig{
 		MaxBatchSize:   100,
 		MaxBatchCounts: 80,
 		MaxBatchWait:   time.Millisecond * 1,

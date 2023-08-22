@@ -1,4 +1,4 @@
-package tfmodel
+package batcher
 
 import (
 	"context"
@@ -7,14 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/viant/mly/service/tfmodel/batcher"
+	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator"
 )
 
-// Batcher sits on top of an Evaluator and collects predictions calls
+// Service sits on top of an Evaluator and collects predictions calls
 // and attempts to merge multiple calls into a single call, if they occur
 // often enough.
-type Batcher struct {
+type Service struct {
 	closed    bool
 	closeChan chan bool
 	wg        sync.WaitGroup
@@ -27,7 +27,7 @@ type Batcher struct {
 
 	q chan InputBatch
 
-	batcher.BatcherConfig
+	config.BatcherConfig
 }
 
 // InputBatch represents upstream data.
@@ -53,7 +53,7 @@ type predictionBatch struct {
 }
 
 // Waits for any queued batches to complete then closes underlying resources.
-func (b *Batcher) Close() error {
+func (b *Service) Close() error {
 	b.closeChan <- true
 	b.closed = true
 	if b.evaluator != nil {
@@ -65,16 +65,16 @@ func (b *Batcher) Close() error {
 }
 
 // len([]SubBatch) is fixed to MaxBatchCounts.
-func (b *Batcher) getSubBatches() []SubBatch {
+func (b *Service) getSubBatches() []SubBatch {
 	return b.bsPool.Get().([]SubBatch)
 }
 
 // this isn't a really helpful pool?
-func (b *Batcher) getActive() []interface{} {
+func (b *Service) getActive() []interface{} {
 	return b.abPool.Get().([]interface{})
 }
 
-func (b *Batcher) Evaluate(ctx context.Context, inputs []interface{}) ([]interface{}, error) {
+func (b *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interface{}, error) {
 	sb, err := b.Queue(inputs)
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (b *Batcher) Evaluate(ctx context.Context, inputs []interface{}) ([]interfa
 	return nil, fmt.Errorf("unhandled select")
 }
 
-func (b *Batcher) Queue(inputs []interface{}) (*SubBatch, error) {
+func (b *Service) Queue(inputs []interface{}) (*SubBatch, error) {
 	if b.closed {
 		return nil, fmt.Errorf("closed")
 	}
@@ -139,7 +139,7 @@ func (b *Batcher) Queue(inputs []interface{}) (*SubBatch, error) {
 	return sb, nil
 }
 
-func (b *Batcher) run(batch predictionBatch) {
+func (b *Service) run(batch predictionBatch) {
 	if b.Verbose != nil {
 		log.Printf("[%s run] inputData :%v", b.Verbose.ID, batch.inputData)
 	}
@@ -207,7 +207,7 @@ func (b *Batcher) run(batch predictionBatch) {
 }
 
 // Dispatcher runs and gathers model prediction requests and batches them up.
-func (b *Batcher) Dispatcher() {
+func (b *Service) Dispatcher() {
 	active := b.getActive()
 	subBatches := b.getSubBatches()
 
@@ -398,8 +398,8 @@ func (b *Batcher) Dispatcher() {
 	}
 }
 
-func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig batcher.BatcherConfig) *Batcher {
-	b := &Batcher{
+func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig config.BatcherConfig) *Service {
+	b := &Service{
 		evaluator: evaluator,
 		inputLen:  inputLen,
 

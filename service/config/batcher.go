@@ -3,11 +3,11 @@ package config
 import (
 	"time"
 
-	"github.com/viant/mly/service/tfmodel/batcher"
+	"github.com/viant/mly/service/tfmodel/batcher/config"
 )
 
 type BatcherConfigFile struct {
-	batcher.BatcherConfig
+	config.BatcherConfig
 	MaxBatchWaitMicros int
 }
 
