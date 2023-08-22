@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	"github.com/viant/mly/service/tfmodel/batcher"
 	"github.com/viant/toolbox"
 )
 
@@ -30,9 +31,14 @@ func TestBatcherBatchMax(t *testing.T) {
 	met := createEvalMeta()
 	evaluator := NewEvaluator(signature, model.Session, met)
 
-	batcher := NewBatcher(evaluator, len(signature.Inputs), 3, 100, time.Millisecond*1)
-	batcher.Verbose = &V{"test", true}
-	fmt.Printf("%+v\n", batcher)
+	batchr := NewBatcher(evaluator, len(signature.Inputs), batcher.BatcherConfig{
+		MaxBatchCounts: 3,
+		MaxBatchSize:   100,
+		MaxBatchWait:   time.Millisecond * 1,
+	})
+
+	batchr.Verbose = &batcher.V{"test", true}
+	fmt.Printf("%+v\n", batchr)
 
 	feeds := make([]interface{}, 0)
 	feeds = append(feeds, [][]string{{"a"}, {"b"}})
@@ -58,7 +64,7 @@ func TestBatcherBatchMax(t *testing.T) {
 		wg.Add(1)
 
 		go func() {
-			sb, err := batcher.Queue(feeds)
+			sb, err := batchr.Queue(feeds)
 			assert.Nil(t, err)
 
 			wait := time.Now()
@@ -77,7 +83,7 @@ func TestBatcherBatchMax(t *testing.T) {
 		}()
 
 		go func() {
-			sb, err := batcher.Queue(feeds3)
+			sb, err := batchr.Queue(feeds3)
 			assert.Nil(t, err)
 
 			wait := time.Now()
@@ -102,7 +108,7 @@ func TestBatcherBatchMax(t *testing.T) {
 
 	toolbox.Dump(met)
 
-	batcher.Close()
+	batchr.Close()
 }
 
 func BenchmarkBatcherParallel(b *testing.B) {
@@ -123,7 +129,13 @@ func BenchmarkBatcherParallel(b *testing.B) {
 	met := createEvalMeta()
 	evaluator := NewEvaluator(signature, model.Session, met)
 
-	batcher := NewBatcher(evaluator, len(signature.Inputs), 100, 80, time.Millisecond*1)
+	bcfg := batcher.BatcherConfig{
+		MaxBatchSize:   100,
+		MaxBatchCounts: 80,
+		MaxBatchWait:   time.Millisecond * 1,
+	}
+
+	batcher := NewBatcher(evaluator, len(signature.Inputs), bcfg)
 
 	feeds2 := make([]interface{}, 0)
 	feeds2 = append(feeds2, [][]string{{"a"}, {"b"}})

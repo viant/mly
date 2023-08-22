@@ -21,6 +21,7 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
+// TODO Refactor out
 type Hook interface {
 	Hook(*config.Model, *service.Service)
 }

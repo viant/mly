@@ -106,9 +106,9 @@ func NewMetaHandler(srv *service.Service, datastoreList *sconfig.DatastoreList, 
 		modelService: srv,
 		datastore:    assembleConfig(datastoreList, cfg.DataStore),
 
-		handlerMetrics: gmetrics.MultiOperationCounter(location, cfg.ID+"MetaHandler", cfg.ID+" meta handler performance", time.Microsecond, time.Minute, 2, NewServiceVP()),
-		dictMetrics:    gmetrics.MultiOperationCounter(location, cfg.ID+"DictMeta", cfg.ID+" dictionary service performance", time.Microsecond, time.Minute, 2, NewProvider()),
-		cfgMetrics:     gmetrics.MultiOperationCounter(location, cfg.ID+"CfgMeta", cfg.ID+" configuration service performance", time.Microsecond, time.Minute, 2, NewProvider()),
+		handlerMetrics: gmetrics.MultiOperationCounter(location, cfg.ID+"MetaHandler", cfg.ID+" meta handler performance", time.Microsecond, time.Minute, 1, NewServiceVP()),
+		dictMetrics:    gmetrics.MultiOperationCounter(location, cfg.ID+"DictMeta", cfg.ID+" dictionary service performance", time.Microsecond, time.Minute, 1, NewProvider()),
+		cfgMetrics:     gmetrics.MultiOperationCounter(location, cfg.ID+"CfgMeta", cfg.ID+" configuration service performance", time.Microsecond, time.Minute, 1, NewProvider()),
 	}
 
 	handler.datastore.MetaInput = cfg.MetaInput

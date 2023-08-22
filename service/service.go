@@ -53,7 +53,8 @@ type Service struct {
 	newStorable func() common.Storable
 
 	// serviceMetric measures validate + model + transformer
-	serviceMetric ServiceOperation
+	serviceMetric *gmetric.Operation
+	reloadMetric  *gmetric.Operation
 
 	// logging
 	stream *stream.Service
@@ -231,12 +232,14 @@ func New(ctx context.Context, cfg *config.Model, tfsrv *tfmodel.Service, fs afs.
 	cfg.Init()
 
 	srv := &Service{
-		config:    cfg,
-		tfService: tfsrv,
-
+		config:        cfg,
+		tfService:     tfsrv,
 		useDatastore:  cfg.UseDictionary() && cfg.DataStore != "",
-		serviceMetric: NewServiceOperation(metrics, location, cfg.ID),
+		serviceMetric: metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
+		reloadMetric:  metrics.MultiOperationCounter(location, cfg.ID+"Reload", cfg.ID+" reloading", time.Microsecond, time.Minute, 1, sstat.NewCtxErrOnly()),
 	}
+
+	tfsrv.ReloadOK = &srv.ReloadOK
 
 	for _, opt := range options {
 		opt.Apply(srv)
@@ -337,8 +340,15 @@ func (s *Service) scheduleModelReload() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
+		onDone := s.reloadMetric.Begin(time.Now())
+		stats := sstat.NewValues()
+		defer func() {
+			onDone(time.Now(), stats.Values()...)
+		}()
+
 		err := s.reloadIfNeeded(ctx)
 		if err != nil {
+			stats.AppendError(err)
 			log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
 			atomic.StoreInt32(&s.ReloadOK, 0)
 		}

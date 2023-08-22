@@ -20,6 +20,7 @@ import (
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/files"
+	"github.com/viant/mly/service/tfmodel/batcher"
 	tfstat "github.com/viant/mly/service/tfmodel/stat"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
@@ -36,7 +37,7 @@ type Service struct {
 	config *config.Model
 
 	evaluatorMeta *EvaluatorMeta
-	batcherConfig *BatcherConfig
+	batcherConfig *batcher.BatcherConfig
 	batcherMetric *gmetric.Operation
 
 	// transitory evaluator
@@ -52,20 +53,33 @@ type Service struct {
 
 	fs afs.Service
 
-	ReloadOK int32
-
-	metric *gmetric.Operation
+	// Should point to service.Service.ReloadOK
+	ReloadOK *int32
 }
 
 func (s *Service) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
 	s.mux.RLock()
-	evaluator := s.evaluator
+	// Maybe use interface?
+	var batcher *Batcher
+	var evaluator *Evaluator
+	if s.batcher != nil {
+		batcher = s.batcher
+	} else {
+		evaluator = s.evaluator
+	}
 	wg := s.wg
 
 	wg.Add(1)
 	s.mux.RUnlock()
 
-	tv, err := evaluator.Evaluate(ctx, params)
+	var tv []interface{}
+	var err error
+	if batcher != nil {
+		tv, err = batcher.Evaluate(ctx, params)
+	} else {
+		tv, err = evaluator.Evaluate(ctx, params)
+	}
+
 	wg.Done()
 
 	return tv, err
@@ -82,7 +96,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	}
 
 	if !s.isModified(snapshot) {
-		atomic.StoreInt32(&s.ReloadOK, 1)
+		atomic.StoreInt32(s.ReloadOK, 1)
 		return nil
 	}
 
@@ -156,28 +170,46 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		modelInputsByName[configInputName] = input
 	}
 
-	newEvaluator := NewEvaluator(signature, model.Session, *s.evaluatorMeta)
-
 	if s.config.OutputType != "" {
 		signature.Output.DataType = s.config.OutputType
+	}
+
+	newEvaluator := NewEvaluator(signature, model.Session, *s.evaluatorMeta)
+
+	var newBatchSrv *Batcher
+	if s.config.Batch.MaxBatchCounts > 1 {
+		newBatchSrv = NewBatcher(newEvaluator, len(signature.Inputs), (*s.config.Batch).BatcherConfig)
 	}
 
 	// modify all service objects
 
 	s.mux.Lock()
 
+	oldBatcher := s.batcher
+	s.batcher = newBatchSrv
+
 	oldEvaluator := s.evaluator
 	s.evaluator = newEvaluator
+
 	oldWg := s.wg
 	s.wg = new(sync.WaitGroup)
 
 	s.mux.Unlock()
-	// from this point, nothing should pick up the oldEvaluator, but there
+	// from this point, nothing should pick up the oldEvaluator or oldBatcher, but there
 	// may still be goroutines that have yet to call oldEvaluator.Evaluate()
 	// but they should have Add()-ed to the oldWg.
 	go func() {
-		oldWg.Wait()
-		oldEvaluator.Close()
+		if oldWg != nil {
+			oldWg.Wait()
+		}
+
+		if oldBatcher != nil {
+			oldBatcher.Close()
+		}
+
+		if oldEvaluator != nil {
+			oldEvaluator.Close()
+		}
 	}()
 
 	if dictionary != nil {
@@ -196,7 +228,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	s.signature = signature
 	s.inputs = modelInputsByName
 
-	atomic.StoreInt32(&s.ReloadOK, 1)
+	atomic.StoreInt32(s.ReloadOK, 1)
 	return nil
 }
 
@@ -350,6 +382,8 @@ func (s *Service) Close() error {
 	return s.evaluator.Close()
 }
 
+// NewService creates an unprepared Service.
+// This service isn't ready until RelodIfNeeded() is called.
 func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sema *semaphore.Weighted) *Service {
 	location := reflect.TypeOf(&Service{}).PkgPath()
 

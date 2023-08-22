@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/viant/mly/service/tfmodel/batcher"
 )
 
 // Batcher sits on top of an Evaluator and collects predictions calls
@@ -14,6 +16,7 @@ import (
 type Batcher struct {
 	closed    bool
 	closeChan chan bool
+	wg        sync.WaitGroup
 
 	evaluator *Evaluator
 	inputLen  int
@@ -23,31 +26,7 @@ type Batcher struct {
 
 	q chan InputBatch
 
-	BatcherConfig
-}
-
-type BatcherConfig struct {
-	// MaxBatchSize defines the limit of batch size (input rows) that can be
-	// accumulated before the batch will be sent to the model for prediction.
-	// If an incoming batch's size is >= MaxBatchSize, then it will be run as
-	// its own batch - there's no hard limiting and incoming batch size.
-	MaxBatchSize int
-
-	// MaxBatchCounts represent the maximum number of incoming batches to wait
-	// for before sending for prediction.
-	MaxBatchCounts int
-
-	// MaxBatchWait indicates maximum wait since the start of the current
-	// batch collection.
-	// This is not a rolling window.
-	MaxBatchWait time.Duration
-
-	Verbose *V
-}
-
-type V struct {
-	ID     string
-	Output bool
+	batcher.BatcherConfig
 }
 
 // InputBatch represents upstream data.
@@ -72,9 +51,15 @@ type predictionBatch struct {
 	size       int
 }
 
+// Waits for any queued batches to complete then closes underlying resources.
 func (b *Batcher) Close() error {
 	b.closeChan <- true
 	b.closed = true
+	if b.evaluator != nil {
+		// wait for any queued batches to evaluate and return
+		b.wg.Wait()
+		b.evaluator.Close()
+	}
 	return nil
 }
 
@@ -159,7 +144,11 @@ func (b *Batcher) run(batch predictionBatch) {
 	}
 
 	ctx := context.TODO()
+
+	b.wg.Add(1)
 	results, err := b.evaluator.Evaluate(ctx, batch.inputData)
+	b.wg.Done()
+
 	if b.Verbose != nil {
 		log.Printf("[%s run] results:%v", b.Verbose.ID, results)
 	}
@@ -222,7 +211,7 @@ func (b *Batcher) Dispatcher() {
 	subBatches := b.getSubBatches()
 
 	curBatches := 0
-	curBatched := 0
+	curBatchRows := 0
 
 	maxBatchWait := b.MaxBatchWait
 	var deadline *time.Timer
@@ -234,7 +223,7 @@ func (b *Batcher) Dispatcher() {
 			case <-b.closeChan:
 				// do nothing
 			case batch := <-b.q:
-				curBatched = batch.batchSize
+				curBatchRows = batch.batchSize
 				subBatches[curBatches] = batch.SubBatch
 				curBatches = 1
 
@@ -242,21 +231,21 @@ func (b *Batcher) Dispatcher() {
 					active[o] = inSlice
 				}
 
-				if curBatched >= b.MaxBatchSize || b.MaxBatchCounts == 1 {
+				if curBatchRows >= b.MaxBatchSize || b.MaxBatchCounts == 1 {
 					if b.Verbose != nil {
-						log.Printf("[%s Dispatcher] go curBatched:%d", b.Verbose.ID, curBatched)
+						log.Printf("[%s Dispatcher] go curBatched:%d", b.Verbose.ID, curBatchRows)
 					}
 
 					go b.run(predictionBatch{active, subBatches, curBatches})
 
 					curBatches = 0
-					curBatched = 0
+					curBatchRows = 0
 
 					active = b.getActive()
 					subBatches = b.getSubBatches()
 				} else {
 					if b.Verbose != nil {
-						log.Printf("[%s Dispatcher] wait curBatched:%d", b.Verbose.ID, curBatched)
+						log.Printf("[%s Dispatcher] wait curBatched:%d", b.Verbose.ID, curBatchRows)
 					}
 
 					deadline = time.NewTimer(maxBatchWait)
@@ -265,19 +254,21 @@ func (b *Batcher) Dispatcher() {
 		} else {
 			select {
 			case <-b.closeChan:
-				// nothing
+				if curBatches > 0 {
+					go b.run(predictionBatch{active, subBatches, curBatches})
+				}
 			case batch := <-b.q:
 				batchSize := batch.batchSize
-				if curBatched+batchSize > b.MaxBatchSize {
+				if curBatchRows+batchSize > b.MaxBatchSize {
 					if b.Verbose != nil {
-						log.Printf("[%s Dispatcher] go expectedBatchSize:%d", b.Verbose.ID, curBatched+batchSize)
+						log.Printf("[%s Dispatcher] go expectedBatchSize:%d", b.Verbose.ID, curBatchRows+batchSize)
 					}
 
 					// run current batch, use new batch
 					go b.run(predictionBatch{active, subBatches, curBatches})
 
 					curBatches = 0
-					curBatched = 0
+					curBatchRows = 0
 
 					subBatches = b.getSubBatches()
 					active = b.getActive()
@@ -361,19 +352,19 @@ func (b *Batcher) Dispatcher() {
 					continue
 				}
 
-				curBatched += batchSize
+				curBatchRows += batchSize
 				subBatches[curBatches] = batch.SubBatch
 				curBatches++
 
-				if curBatched >= b.MaxBatchSize || curBatches >= b.MaxBatchCounts {
+				if curBatchRows >= b.MaxBatchSize || curBatches >= b.MaxBatchCounts {
 					if b.Verbose != nil {
-						log.Printf("[%s Dispatcher] go curBatched:%d curBatches:%d", b.Verbose.ID, curBatched, curBatches)
+						log.Printf("[%s Dispatcher] go curBatched:%d curBatches:%d", b.Verbose.ID, curBatchRows, curBatches)
 					}
 
 					go b.run(predictionBatch{active, subBatches, curBatches})
 
 					curBatches = 0
-					curBatched = 0
+					curBatchRows = 0
 
 					subBatches = b.getSubBatches()
 					active = b.getActive()
@@ -390,7 +381,7 @@ func (b *Batcher) Dispatcher() {
 					go b.run(predictionBatch{active, subBatches, curBatches})
 
 					curBatches = 0
-					curBatched = 0
+					curBatchRows = 0
 
 					active = b.getActive()
 					subBatches = b.getSubBatches()
@@ -406,13 +397,7 @@ func (b *Batcher) Dispatcher() {
 	}
 }
 
-func NewBatcher(evaluator *Evaluator, inputLen int, MaxBatchSize, MaxBatchCounts int, MaxBatchWait time.Duration) *Batcher {
-	batchConfig := BatcherConfig{
-		MaxBatchSize:   MaxBatchSize,
-		MaxBatchCounts: MaxBatchCounts,
-		MaxBatchWait:   MaxBatchWait,
-	}
-
+func NewBatcher(evaluator *Evaluator, inputLen int, batchConfig batcher.BatcherConfig) *Batcher {
 	b := &Batcher{
 		evaluator: evaluator,
 		inputLen:  inputLen,
@@ -421,7 +406,7 @@ func NewBatcher(evaluator *Evaluator, inputLen int, MaxBatchSize, MaxBatchCounts
 
 		bsPool: &sync.Pool{
 			New: func() interface{} {
-				return make([]SubBatch, MaxBatchCounts)
+				return make([]SubBatch, batchConfig.MaxBatchCounts)
 			},
 		},
 
@@ -431,7 +416,7 @@ func NewBatcher(evaluator *Evaluator, inputLen int, MaxBatchSize, MaxBatchCounts
 			},
 		},
 
-		q: make(chan InputBatch, MaxBatchCounts),
+		q: make(chan InputBatch, batchConfig.MaxBatchCounts),
 
 		closeChan: make(chan bool),
 	}
