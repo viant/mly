@@ -26,13 +26,23 @@ type Request struct {
 
 	supplied map[string]struct{} // used to check if the required inputs were provided
 
-	Input  *transfer.Input          // cache metadata
-	inputs map[string]*domain.Input // type metadata
+	Input *transfer.Input // cache metadata
+
+	// type metadata from service/tfservice.Service
+	// see service/tfmodel.(*Service).reconcileIOFromSignature
+	inputs map[string]*domain.Input
 }
 
 func NewRequest(keyLen int, inputs map[string]*domain.Input) *Request {
+	inputLen := 0
+	for _, inp := range inputs {
+		if !inp.Auxiliary {
+			inputLen++
+		}
+	}
+
 	return &Request{
-		Feeds:    make([]interface{}, keyLen),
+		Feeds:    make([]interface{}, inputLen),
 		supplied: make(map[string]struct{}, keyLen),
 		Input:    &transfer.Input{},
 		inputs:   inputs,

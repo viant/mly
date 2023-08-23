@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator"
 )
@@ -20,7 +21,6 @@ type Service struct {
 	wg        sync.WaitGroup
 
 	evaluator *evaluator.Service
-	inputLen  int
 
 	bsPool *sync.Pool
 	abPool *sync.Pool
@@ -28,6 +28,10 @@ type Service struct {
 	q chan InputBatch
 
 	config.BatcherConfig
+}
+
+type ServiceMeta struct {
+	queueMetrics *gmetric.Operation
 }
 
 // InputBatch represents upstream data.
@@ -74,6 +78,7 @@ func (b *Service) getActive() []interface{} {
 	return b.abPool.Get().([]interface{})
 }
 
+// Evaluate will queue a batch and wait for results.
 func (b *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interface{}, error) {
 	sb, err := b.Queue(inputs)
 	if err != nil {
@@ -92,12 +97,14 @@ func (b *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interfa
 	return nil, fmt.Errorf("unhandled select")
 }
 
+// Queue will queue and provide channels for results.
+// TODO only used for testing... remove?
 func (b *Service) Queue(inputs []interface{}) (*SubBatch, error) {
 	if b.closed {
 		return nil, fmt.Errorf("closed")
 	}
 
-	if b.Verbose != nil {
+	if b.Verbose != nil && b.Verbose.Input {
 		log.Printf("[%s Queue] inputs:%v", b.Verbose.ID, inputs)
 	}
 
@@ -140,7 +147,7 @@ func (b *Service) Queue(inputs []interface{}) (*SubBatch, error) {
 }
 
 func (b *Service) run(batch predictionBatch) {
-	if b.Verbose != nil {
+	if b.Verbose != nil && b.Verbose.Input {
 		log.Printf("[%s run] inputData :%v", b.Verbose.ID, batch.inputData)
 	}
 
@@ -150,7 +157,7 @@ func (b *Service) run(batch predictionBatch) {
 	results, err := b.evaluator.Evaluate(ctx, batch.inputData)
 	b.wg.Done()
 
-	if b.Verbose != nil {
+	if b.Verbose != nil && b.Verbose.Output {
 		log.Printf("[%s run] results:%v", b.Verbose.ID, results)
 	}
 
@@ -207,12 +214,21 @@ func (b *Service) run(batch predictionBatch) {
 }
 
 // Dispatcher runs and gathers model prediction requests and batches them up.
+// TODO split out Dispatcher -> getActive(), getSubBatcher() <- run()
 func (b *Service) Dispatcher() {
 	active := b.getActive()
 	subBatches := b.getSubBatches()
-
 	curBatches := 0
 	curBatchRows := 0
+
+	submit := func() {
+		go b.run(predictionBatch{active, subBatches, curBatches})
+
+		curBatches = 0
+		curBatchRows = 0
+		active = b.getActive()
+		subBatches = b.getSubBatches()
+	}
 
 	maxBatchWait := b.MaxBatchWait
 	var deadline *time.Timer
@@ -237,13 +253,7 @@ func (b *Service) Dispatcher() {
 						log.Printf("[%s Dispatcher] go curBatched:%d", b.Verbose.ID, curBatchRows)
 					}
 
-					go b.run(predictionBatch{active, subBatches, curBatches})
-
-					curBatches = 0
-					curBatchRows = 0
-
-					active = b.getActive()
-					subBatches = b.getSubBatches()
+					submit()
 				} else {
 					if b.Verbose != nil {
 						log.Printf("[%s Dispatcher] wait curBatched:%d", b.Verbose.ID, curBatchRows)
@@ -257,6 +267,7 @@ func (b *Service) Dispatcher() {
 			case <-b.closeChan:
 				if curBatches > 0 {
 					go b.run(predictionBatch{active, subBatches, curBatches})
+					// no need to clear anything
 				}
 			case batch := <-b.q:
 				batchSize := batch.batchSize
@@ -265,19 +276,13 @@ func (b *Service) Dispatcher() {
 						log.Printf("[%s Dispatcher] go expectedBatchSize:%d", b.Verbose.ID, curBatchRows+batchSize)
 					}
 
-					// run current batch, use new batch
-					go b.run(predictionBatch{active, subBatches, curBatches})
-
-					curBatches = 0
-					curBatchRows = 0
-
-					subBatches = b.getSubBatches()
-					active = b.getActive()
+					submit()
 
 					// relying on GC
 					deadline = time.NewTimer(maxBatchWait)
 				}
 
+				// TODO this may result in the batch having inconsistent state
 				var err error
 				for o, inSlice := range batch.inputData {
 					if active[o] == nil {
@@ -362,13 +367,7 @@ func (b *Service) Dispatcher() {
 						log.Printf("[%s Dispatcher] go curBatched:%d curBatches:%d", b.Verbose.ID, curBatchRows, curBatches)
 					}
 
-					go b.run(predictionBatch{active, subBatches, curBatches})
-
-					curBatches = 0
-					curBatchRows = 0
-
-					subBatches = b.getSubBatches()
-					active = b.getActive()
+					submit()
 
 					deadline = nil
 				}
@@ -376,16 +375,10 @@ func (b *Service) Dispatcher() {
 				// curBatches should always be > 0
 				if curBatches > 0 {
 					if b.Verbose != nil {
-						log.Printf("[%s Dispatcher] go timeout curBatches:%d", b.Verbose.ID, curBatches)
+						log.Printf("[%s Dispatcher] go timeout curBatches:%d curBatchRows:%d", b.Verbose.ID, curBatches, curBatchRows)
 					}
 
-					go b.run(predictionBatch{active, subBatches, curBatches})
-
-					curBatches = 0
-					curBatchRows = 0
-
-					active = b.getActive()
-					subBatches = b.getSubBatches()
+					submit()
 				}
 
 				deadline = nil
@@ -401,7 +394,6 @@ func (b *Service) Dispatcher() {
 func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig config.BatcherConfig) *Service {
 	b := &Service{
 		evaluator: evaluator,
-		inputLen:  inputLen,
 
 		BatcherConfig: batchConfig,
 

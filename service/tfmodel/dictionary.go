@@ -12,6 +12,7 @@ import (
 
 // Dictionary uses domain.Signature to determine which inputs should have an encoding lookup
 // from the Tensorflow graph.
+// TODO pull out *domain.Signature, just use a slice of something.
 func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signature) (*common.Dictionary, error) {
 	var layers []string
 	for _, input := range signature.Inputs {

@@ -92,8 +92,10 @@ func (s *Service) Predict(ctx context.Context, params []interface{}) ([]interfac
 // to the inputs and outputs from reloading the model.
 // If a model reload results in changes to inputs or outputs, the resulting
 // behavior is undefined.
+// TODO restructure to test configuration signature merging.
 func (s *Service) ReloadIfNeeded(ctx context.Context) error {
-	snapshot, err := files.ModifiedSnapshot(ctx, s.fs, s.config.URL, nil)
+	config := s.config
+	snapshot, err := files.ModifiedSnapshot(ctx, s.fs, config.URL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to check changes:%w", err)
 	}
@@ -114,25 +116,25 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	}
 
 	// modifies signature.Inputs[].Vocab for Dictionary()
-	reconcileIOFromSignature(s.config, signature)
+	reconcileIOFromSignature(config, signature)
 
 	var dictionary *common.Dictionary
 
-	useDict := s.config.UseDictionary()
+	useDict := config.UseDictionary()
 	if useDict {
-		s.config.DictMeta.Error = ""
+		config.DictMeta.Error = ""
 
-		if s.config.DictURL != "" {
+		if config.DictURL != "" {
 			// Deprecated branch
-			if dictionary, err = s.loadDictionary(ctx, s.config.DictURL); err != nil {
-				s.config.DictMeta.Error = err.Error()
+			if dictionary, err = s.loadDictionary(ctx, config.DictURL); err != nil {
+				config.DictMeta.Error = err.Error()
 				return err
 			}
 		} else {
 			// extract dictionary from the graph, relies on signature being modified by reconcileIOFromSignature
 			dictionary, err = Dictionary(model.Session, model.Graph, signature)
 			if err != nil {
-				s.config.DictMeta.Error = err.Error()
+				config.DictMeta.Error = err.Error()
 				return fmt.Errorf("dictionary error:%w", err)
 			}
 		}
@@ -147,22 +149,33 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		}
 	}
 
+	// modelInputsByName is eventually used to process new requests.
 	var modelInputsByName = make(map[string]*domain.Input)
 	for i, modelInput := range signature.Inputs {
 		modelInputsByName[modelInput.Name] = &signature.Inputs[i]
 	}
 
+	// key fields may or may not contain additional inputs that are provided in the
+	// request that should not be sent to the Tensorflow model.
+	keyFieldsByName := make(map[string]string, len(config.KeyFields))
+	for _, kf := range config.KeyFields {
+		keyFieldsByName[kf] = kf
+	}
+
 	// add inputs from the config that aren't in the model
-	for _, configInput := range s.config.Inputs {
+	for _, configInput := range config.Inputs {
 		configInputName := configInput.Name
 		if _, ok := modelInputsByName[configInputName]; ok {
 			continue
 		}
 
+		_, inKeyFields := keyFieldsByName[configInputName]
+		auxiliary := configInput.Auxiliary || inKeyFields
+
 		input := &domain.Input{
 			Name:      configInputName,
 			Index:     configInput.Index,
-			Auxiliary: configInput.Auxiliary,
+			Auxiliary: auxiliary,
 		}
 
 		input.Type = configInput.RawType()
@@ -173,15 +186,16 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		modelInputsByName[configInputName] = input
 	}
 
-	if s.config.OutputType != "" {
-		signature.Output.DataType = s.config.OutputType
+	if config.OutputType != "" {
+		signature.Output.DataType = config.OutputType
 	}
 
 	newEvaluator := evaluator.NewEvaluator(signature, model.Session, *s.evaluatorMeta)
 
 	var newBatchSrv *batcher.Service
-	if s.config.Batch.MaxBatchCounts > 1 {
-		newBatchSrv = batcher.NewBatcher(newEvaluator, len(signature.Inputs), (*s.config.Batch).BatcherConfig)
+	if config.Batch.MaxBatchCounts > 1 {
+		bc := (*config.Batch).BatcherConfig
+		newBatchSrv = batcher.NewBatcher(newEvaluator, len(signature.Inputs), bc)
 	}
 
 	// modify all service objects
@@ -219,12 +233,12 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		s.dictionary = dictionary
 
 		// updates status as shown in /v1/api/config/
-		s.config.DictMeta.Hash = dictionary.Hash
-		s.config.DictMeta.Reloaded = time.Now()
+		config.DictMeta.Hash = dictionary.Hash
+		config.DictMeta.Reloaded = time.Now()
 	}
 
 	// updates status as shown in /v1/api/config/
-	s.config.Modified = snapshot
+	config.Modified = snapshot
 
 	// in theory, these should never materially change, unless the
 	// model IO changes, which will result in undefined behavior.
@@ -247,11 +261,11 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 // config.Inputs[].Auxiliary may be modified.
 // config.Outputs may be modified
 func reconcileIOFromSignature(config *config.Model, signature *domain.Signature) {
-	configuredInputsByName := config.FieldByName()
-
 	if len(signature.Inputs) == 0 {
 		return
 	}
+
+	configuredInputsByName := config.FieldByName()
 
 	// go through inputs from the model
 	for modelInputName := range signature.Inputs {
@@ -269,6 +283,7 @@ func reconcileIOFromSignature(config *config.Model, signature *domain.Signature)
 			config.Inputs = append(config.Inputs, configuredInput)
 		}
 
+		// !! MODIFICATION !!
 		modelInput.Vocab = !configuredInput.Wildcard && configuredInput.Precision <= 0
 
 		if configuredInput.DataType == "" {
@@ -297,12 +312,21 @@ func reconcileIOFromSignature(config *config.Model, signature *domain.Signature)
 		}
 	}
 
+	keyFieldsByName := make(map[string]string, len(config.KeyFields))
+	for _, kf := range config.KeyFields {
+		keyFieldsByName[kf] = kf
+	}
+
 	for k, v := range configuredInputsByName {
 		if v.DataType == "" {
 			v.SetRawType(reflect.TypeOf(""))
 		}
 
+		_, isKeyField := keyFieldsByName[k]
+
 		configuredInputsByName[k].Auxiliary = true
+		configuredInputsByName[k].Wildcard = isKeyField
+
 	}
 }
 
@@ -393,7 +417,7 @@ func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sem
 	id := cfg.ID
 
 	semaMetric := metrics.MultiOperationCounter(location, id+"Semaphore", id+" Tensorflow semaphore", time.Microsecond, time.Minute, 2, tfstat.NewSema())
-	tfMetric := metrics.MultiOperationCounter(location, id+"TFService", id+" Tensorflow performance", time.Microsecond, time.Minute, 2, tfstat.NewTfs())
+	tfMetric := metrics.MultiOperationCounter(location, id+"Eval", id+" Tensorflow evaluator performance", time.Microsecond, time.Minute, 2, tfstat.NewTfs())
 	meta := evaluator.MakeEvaluatorMeta(sema, semaMetric, tfMetric)
 
 	return &Service{

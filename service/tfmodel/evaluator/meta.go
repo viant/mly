@@ -15,6 +15,9 @@ type EvaluatorMeta struct {
 }
 
 func MakeEvaluatorMeta(semaphore *semaphore.Weighted, semaMetric, tfMetric *gmetric.Operation) EvaluatorMeta {
-	return EvaluatorMeta{semaphore, semaMetric, tfMetric}
-
+	return EvaluatorMeta{
+		semaphore:  semaphore,
+		semaMetric: semaMetric,
+		tfMetric:   tfMetric,
+	}
 }

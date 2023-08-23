@@ -25,4 +25,5 @@ type BatcherConfig struct {
 type V struct {
 	ID     string
 	Output bool
+	Input  bool
 }

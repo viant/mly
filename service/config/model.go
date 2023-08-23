@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/viant/afs/file"
+	batchconfig "github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/shared"
 	"github.com/viant/tapper/config"
 )
@@ -31,7 +32,9 @@ type Model struct {
 
 	shared.MetaInput `json:",omitempty" yaml:",inline"`
 
-	OutputType  string `json:",omitempty" yaml:",omitempty"` // Deprecated: we can infer output types from TF graph
+	// Deprecated: we can infer output types from TF graph, and there may be more than one output
+	OutputType string `json:",omitempty" yaml:",omitempty"`
+
 	Transformer string `json:",omitempty" yaml:",omitempty"`
 
 	// caching
@@ -86,6 +89,17 @@ func (m *Model) Init() {
 		m.Batch = new(BatcherConfigFile)
 	}
 	m.Batch.Init()
+	if m.Debug {
+		if m.Batch.BatcherConfig.Verbose == nil {
+			m.Batch.BatcherConfig.Verbose = &batchconfig.V{
+				Output: true,
+			}
+		}
+
+		if m.Batch.BatcherConfig.Verbose.ID == "" {
+			m.Batch.BatcherConfig.Verbose.ID = m.ID
+		}
+	}
 }
 
 // Validate validates model config

@@ -22,7 +22,12 @@ func TestServiceBatchMax(t *testing.T) {
 		MaxBatchWait:   time.Millisecond * 1,
 	})
 
-	batchSrv.Verbose = &config.V{"test", true}
+	batchSrv.Verbose = &config.V{
+		ID:     "test",
+		Input:  true,
+		Output: true,
+	}
+
 	fmt.Printf("%+v\n", batchSrv)
 
 	feeds := make([]interface{}, 0)

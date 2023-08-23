@@ -9,6 +9,7 @@ import (
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/stat"
+	"github.com/viant/mly/shared/stat/metric"
 )
 
 // Represents a TF session for running predictions.
@@ -30,15 +31,22 @@ func (e *Service) feeds(feeds []interface{}) (map[tf.Output]*tf.Tensor, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to prepare feed: %v(%v), due to %w", input.Name, feeds[input.Index], err)
 		}
+
 		result[input.Placeholder] = tensor
 	}
 	return result, nil
 }
 
 func (e *Service) acquire(ctx context.Context) (func(), error) {
-	onDone := e.semaMetric.Begin(time.Now())
+	now := time.Now()
+	onDone := e.semaMetric.Begin(now)
 	stats := stat.NewValues()
-	defer onDone(time.Now())
+	defer func() {
+		onDone(time.Now(), stats.Values()...)
+	}()
+
+	onExit := metric.EnterThenExit(e.semaMetric, now, stat.Enter, stat.Exit)
+	defer onExit()
 
 	err := e.semaphore.Acquire(ctx, 1)
 	if err != nil {
@@ -59,8 +67,9 @@ func (e *Service) Evaluate(ctx context.Context, params []interface{}) ([]interfa
 	defer release()
 
 	onDone := e.tfMetric.Begin(time.Now())
+	stats := stat.NewValues()
 	defer func() {
-		onDone(time.Now())
+		onDone(time.Now(), stats.Values()...)
 	}()
 
 	feeds, err := e.feeds(params)
@@ -68,8 +77,12 @@ func (e *Service) Evaluate(ctx context.Context, params []interface{}) ([]interfa
 		return nil, clienterr.Wrap(err)
 	}
 
+	onExit := metric.EnterThenExit(e.tfMetric, time.Now(), stat.Enter, stat.Exit)
+	defer onExit()
+
 	output, err := e.session.Run(feeds, e.fetches, e.targets)
 	if err != nil {
+		stats.Append(err)
 		return nil, err
 	}
 

@@ -8,7 +8,7 @@ import (
 
 type Input struct {
 	Name  string
-	Index int
+	Index int // Position of Tensor in model input.
 
 	Placeholder tf.Output // TODO refactor out this usage in service/domain.Signature is different from its usage in service/request.Request
 
