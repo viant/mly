@@ -16,7 +16,9 @@ import (
 	"github.com/viant/mly/service/buffer"
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/request"
+	sstat "github.com/viant/mly/service/stat"
 	"github.com/viant/mly/shared/common"
+	"github.com/viant/mly/shared/stat"
 )
 
 // Handler converts a model prediction HTTP request to its internal calls.
@@ -51,12 +53,17 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		defer httpRequest.Body.Close()
 
 		onDone := h.overheadMetrics.Begin(time.Now())
+		stats := stat.NewValues()
 		data, size, err := buffer.Read(h.pool, httpRequest.Body)
 		defer h.pool.Put(data)
 		func() {
-			defer func() { onDone(time.Now()) }()
+			defer func() { onDone(time.Now(), stats.Values()...) }()
 
 			if err != nil {
+				stats.Append(sstat.ReadError{err})
+				if isDebug {
+					log.Printf("[%v http] read error: %v\n", h.service.config.ID, err)
+				}
 				http.Error(writer, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -69,6 +76,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 			err = gojay.Unmarshal(data[:size], request)
 			if err != nil {
+				stats.Append(sstat.UnmarshalError{err})
+
 				if isDebug {
 					log.Printf("[%v http] unmarshal error: %v\n", h.service.config.ID, err)
 				}
@@ -151,6 +160,6 @@ func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration, 
 		service:         service,
 		pool:            pool,
 		maxDuration:     maxDuration,
-		overheadMetrics: m.OperationCounter(location, service.config.ID+"HTTP", service.config.ID+" HTTP startup overhead", time.Microsecond, time.Minute, 2),
+		overheadMetrics: m.MultiOperationCounter(location, service.config.ID+"SrvHTTP", service.config.ID+" server HTTP startup overhead", time.Microsecond, time.Minute, 2, sstat.NewHttp()),
 	}
 }

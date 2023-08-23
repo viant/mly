@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -630,7 +631,7 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 			postErr = err
 			if ctx.Err() != nil {
 				// stop trying if deadline exceeded or canceled
-				return nil, err
+				break
 			}
 
 			continue
@@ -682,7 +683,14 @@ func (s *Service) getHost() (*Host, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("%v:%v %w", s.Hosts[0].Name, s.Hosts[0].Port, common.ErrNodeDown)
+	addrs := make([]string, count, count)
+	for i, h := range s.Hosts {
+		addrs[i] = h.Name + ":" + strconv.Itoa(h.Port)
+	}
+
+	hostsDesc := strings.Join(addrs, ",")
+
+	return nil, fmt.Errorf("no working hosts:%s %w", hostsDesc, common.ErrNodeDown)
 }
 
 func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable Cachable, hash int) {
