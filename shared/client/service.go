@@ -51,9 +51,10 @@ type Service struct {
 	// container for Datastore gmetric objects
 	gmetrics *gmetric.Service
 
-	counter     *gmetric.Operation
-	httpCounter *gmetric.Operation
-	dictCounter *gmetric.Operation
+	counter        *gmetric.Operation
+	httpCounter    *gmetric.Operation
+	httpCliCounter *gmetric.Operation
+	dictCounter    *gmetric.Operation
 
 	ErrorHistory tracker.Tracker
 }
@@ -122,7 +123,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 	stats.Append(stat.NoSuchKey)
 	if isDebug {
-		fmt.Printf("[%s] request: %s\n", modelName, strings.Trim(string(data), " \n"))
+		log.Printf("[%s] request: %s", modelName, strings.Trim(string(data), " \n"))
 	}
 
 	body, err := func() ([]byte, error) {
@@ -132,14 +133,14 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		od := metric.EnterThenExit(s.httpCounter, time.Now(), stat.Enter, stat.Exit)
 
 		defer func() {
+			httpOnDone(time.Now(), httpStats.Values()...)
 			od()
-			httpOnDone(time.Now(), *httpStats...)
 		}()
 
 		body, err := s.postRequest(ctx, data, httpStats)
 		if isDebug {
-			fmt.Printf("[%s] response.Body:%s\n", modelName, body)
-			fmt.Printf("[%s] error:%s\n", modelName, err)
+			log.Printf("[%s] response.Body:%s", modelName, body)
+			log.Printf("[%s] error:%s", modelName, err)
 		}
 
 		if err != nil {
@@ -164,7 +165,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}
 
 	if isDebug {
-		fmt.Printf("[%v] response.Data: %s, %v\n", modelName, response.Data, err)
+		log.Printf("[%v] response.Data: %s, %v", modelName, response.Data, err)
 	}
 
 	if response.Status != common.StatusOK {
@@ -283,7 +284,8 @@ func (s *Service) init(options []Option) error {
 
 	location := reflect.TypeOf(Service{}).PkgPath()
 	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewClient())
-	s.httpCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTP", s.Model+" client HTTP performance", time.Microsecond, time.Minute, 2, stat.NewHttp())
+	s.httpCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTP", s.Model+" client HTTP overall performance", time.Microsecond, time.Minute, 2, stat.NewHttp())
+	s.httpCliCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTPCli", s.Model+" client HTTP client performance", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly())
 	s.dictCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientDict", s.Model+" client dictionary performance", time.Microsecond, time.Minute, 1, stat.ErrorOnly())
 
 	if s.ErrorHistory == nil {
@@ -581,11 +583,16 @@ func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values
 	}
 
 	var output []byte
+
 	output, err = s.httpPost(ctx, data, host)
 	if common.IsConnectionError(err) {
+		if s.Config.Debug {
+			log.Printf("[%s postRequest] connection error:%s", s.Config.Model, err)
+		}
 		mvt.Append(stat.Down)
 		host.FlagDown()
 	}
+
 	return output, err
 }
 
@@ -594,14 +601,40 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 	var postErr error
 	for i := 0; i < s.MaxRetry; i++ {
 		postErr = nil
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, evalUrl, bytes.NewReader(data))
-		if err != nil {
-			return nil, err
-		}
 
-		response, err := s.httpClient.Do(request)
+		response, err := func() (*http.Response, error) {
+			onDone := s.httpCliCounter.Begin(time.Now())
+			stats := stat.NewValues()
+
+			defer func() {
+				onDone(time.Now(), stats.Values()...)
+			}()
+
+			request, err := http.NewRequestWithContext(ctx, http.MethodPost, evalUrl, bytes.NewReader(data))
+			if err != nil {
+				stats.AppendError(err)
+				return nil, err
+			}
+
+			response, err := s.httpClient.Do(request)
+			if s.Config.Debug {
+				log.Printf("http try:%d err:%s", i, err)
+			}
+
+			if err != nil {
+				stats.AppendError(err)
+			}
+
+			return response, err
+		}()
+
 		if err != nil {
 			postErr = err
+			if ctx.Err() != nil {
+				// stop trying if deadline exceeded or canceled
+				return nil, err
+			}
+
 			continue
 		}
 
@@ -665,7 +698,7 @@ func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable
 		return
 	case reflect.Slice:
 	default:
-		fmt.Printf("unspportd target type: %T", target)
+		log.Printf("unsupported target type: %T", target)
 	}
 
 	batchSize := cachable.BatchSize()

@@ -28,7 +28,7 @@ const (
 
 const minusOne = ^uint64(0)
 
-// Implements counter.CustomerCounter so that it can be passed to Occupancy, representing
+// Implements counter.CustomCounter so that it can be passed to Occupancy, representing
 // the element side of reduce.
 func (_ Dir) Aggregate(value interface{}) {
 	// does nothing

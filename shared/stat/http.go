@@ -10,6 +10,7 @@ func (p http) Keys() []string {
 	return []string{
 		ErrorKey,
 		Pending,
+		Down,
 		Canceled,
 		DeadlineExceeded,
 	}
@@ -27,19 +28,21 @@ func (p http) Map(value interface{}) int {
 		switch val {
 		case Pending:
 			return 1
-		case Canceled:
+		case Down:
 			return 2
-		case DeadlineExceeded:
+		case Canceled:
 			return 3
+		case DeadlineExceeded:
+			return 4
 		}
-	case *Occupancy:
-		return 2
+	case Dir:
+		return 1
 	}
 
 	return -1
 }
 
-func (p http) CustomCounter() counter.CustomCounter {
+func (p http) NewCounter() counter.CustomCounter {
 	return new(Occupancy)
 }
 
