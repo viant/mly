@@ -17,7 +17,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cyningsun/heavy-hitters/misragries"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/shared/client/config"
@@ -289,8 +288,7 @@ func (s *Service) init(options []Option) error {
 	s.dictCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientDict", s.Model+" client dictionary performance", time.Microsecond, time.Minute, 1, stat.ErrorOnly())
 
 	if s.ErrorHistory == nil {
-		impl := misragries.NewMisraGries(20)
-		s.ErrorHistory = mg.New(impl)
+		s.ErrorHistory = mg.NewK(20)
 	}
 
 	if s.Config.MaxRetry == 0 {

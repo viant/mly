@@ -2,15 +2,20 @@ package client
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/viant/mly/shared/client"
 )
 
 type Options struct {
-	Host      string `short:"h" long:"host" description:"endpoint host"`
-	Port      int    `short:"p" long:"port" description:"endpoint port"`
-	Debug     bool   `long:"debug"`
-	TimeoutUs int    `short:"t" long:"timeout"`
+	Host string `long:"host" description:"endpoint host"`
+	Port int    `short:"p" long:"port" description:"endpoint port"`
+
+	Address string `long:"address" description:"address overrides host and port"`
+
+	Debug     bool `long:"debug"`
+	TimeoutUs int  `short:"t" long:"timeout"`
 
 	Model    string `short:"m" long:"model" description:"model"`
 	Storable string `short:"s" long:"storable"`
@@ -79,5 +84,33 @@ func (o *Options) Validate() error {
 }
 
 func (o *Options) Hosts() []*client.Host {
+	if o.Address != "" {
+		elems := strings.Split(o.Address, ",")
+		hosts := make([]*client.Host, len(elems))
+		for i, addr := range elems {
+			components := strings.Split(addr, ":")
+
+			var domain string
+			var port int
+			if len(components) == 1 {
+				// no port separator, assume domain only
+				domain = addr
+			} else if len(components) == 2 {
+				domain = components[0]
+				var err error
+				port, err = strconv.Atoi(components[1])
+				if err != nil {
+					panic(err)
+				}
+			} else {
+				panic(fmt.Sprintf("unknown address: %s", addr))
+			}
+
+			hosts[i] = client.NewHost(domain, port)
+		}
+
+		return hosts
+	}
+
 	return []*client.Host{{Name: o.Host, Port: o.Port}}
 }
