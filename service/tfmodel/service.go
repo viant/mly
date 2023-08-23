@@ -21,7 +21,6 @@ import (
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/files"
 	"github.com/viant/mly/service/tfmodel/batcher"
-	batchconfig "github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator"
 	"github.com/viant/mly/service/tfmodel/signature"
 	tfstat "github.com/viant/mly/service/tfmodel/stat"
@@ -40,8 +39,7 @@ type Service struct {
 	config *config.Model
 
 	evaluatorMeta *evaluator.EvaluatorMeta
-	batcherConfig *batchconfig.BatcherConfig
-	batcherMetric *gmetric.Operation
+	batcherMeta   *batcher.ServiceMeta
 
 	// transitory evaluator
 	batcher   *batcher.Service
@@ -195,7 +193,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	var newBatchSrv *batcher.Service
 	if config.Batch.MaxBatchCounts > 1 {
 		bc := (*config.Batch).BatcherConfig
-		newBatchSrv = batcher.NewBatcher(newEvaluator, len(signature.Inputs), bc)
+		newBatchSrv = batcher.NewBatcher(newEvaluator, len(signature.Inputs), bc, *s.batcherMeta)
 	}
 
 	// modify all service objects
@@ -420,8 +418,14 @@ func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sem
 	tfMetric := metrics.MultiOperationCounter(location, id+"Eval", id+" Tensorflow evaluator performance", time.Microsecond, time.Minute, 2, tfstat.NewTfs())
 	meta := evaluator.MakeEvaluatorMeta(sema, semaMetric, tfMetric)
 
+	bMeta := batcher.NewServiceMeta(
+		metrics.OperationCounter(location, id+"BatcherQueue", id+" Batcher Queue performance", time.Microsecond, time.Minute, 2),
+		metrics.MultiOperationCounter(location, id+"Dispatcher", id+" Dispatcher performance", time.Microsecond, time.Minute, 2, batcher.NewDispatcherP()),
+	)
+
 	return &Service{
 		evaluatorMeta: &meta,
+		batcherMeta:   &bMeta,
 		config:        cfg,
 		fs:            fs,
 	}

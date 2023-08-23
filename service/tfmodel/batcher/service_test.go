@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator/test"
 	"github.com/viant/toolbox"
@@ -20,7 +21,7 @@ func TestServiceBatchMax(t *testing.T) {
 		MaxBatchCounts: 3,
 		MaxBatchSize:   100,
 		MaxBatchWait:   time.Millisecond * 1,
-	})
+	}, createBSMeta())
 
 	batchSrv.Verbose = &config.V{
 		ID:     "test",
@@ -54,7 +55,7 @@ func TestServiceBatchMax(t *testing.T) {
 		wg.Add(1)
 
 		go func() {
-			sb, err := batchSrv.Queue(feeds)
+			sb, err := batchSrv.queue(feeds)
 			assert.Nil(t, err)
 
 			wait := time.Now()
@@ -73,7 +74,7 @@ func TestServiceBatchMax(t *testing.T) {
 		}()
 
 		go func() {
-			sb, err := batchSrv.Queue(feeds3)
+			sb, err := batchSrv.queue(feeds3)
 			assert.Nil(t, err)
 
 			wait := time.Now()
@@ -98,6 +99,14 @@ func TestServiceBatchMax(t *testing.T) {
 	batchSrv.Close()
 }
 
+func createBSMeta() ServiceMeta {
+	s := gmetric.New()
+	return ServiceMeta{
+		queueMetric:      s.OperationCounter("test", "queue", "", time.Microsecond, time.Minute, 2),
+		dispatcherMetric: s.MultiOperationCounter("test", "dispatcher", "", time.Microsecond, time.Minute, 2, NewDispatcherP()),
+	}
+}
+
 func BenchmarkServiceParallel(b *testing.B) {
 	bnil := func(err error) {
 		if err != nil {
@@ -113,7 +122,7 @@ func BenchmarkServiceParallel(b *testing.B) {
 		MaxBatchWait:   time.Millisecond * 1,
 	}
 
-	batcher := NewBatcher(evaluator, len(signature.Inputs), bcfg)
+	batcher := NewBatcher(evaluator, len(signature.Inputs), bcfg, createBSMeta())
 
 	feeds2 := make([]interface{}, 0)
 	feeds2 = append(feeds2, [][]string{{"a"}, {"b"}})
@@ -131,7 +140,7 @@ func BenchmarkServiceParallel(b *testing.B) {
 			wg.Add(1)
 
 			go func() {
-				sb, err := batcher.Queue(feeds2)
+				sb, err := batcher.queue(feeds2)
 				wait := time.Now()
 				select {
 				case <-sb.channel:

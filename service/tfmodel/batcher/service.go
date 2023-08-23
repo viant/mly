@@ -8,40 +8,53 @@ import (
 	"time"
 
 	"github.com/viant/gmetric"
+	"github.com/viant/gmetric/counter"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator"
+	"github.com/viant/mly/shared/stat"
 )
 
 // Service sits on top of an Evaluator and collects predictions calls
 // and attempts to merge multiple calls into a single call, if they occur
-// often enough.
+// rapidly enough.
+// This *can* be refactored into smaller types; but it's
+// really more annoying than convenient.
 type Service struct {
-	closed    bool
-	closeChan chan bool
-	wg        sync.WaitGroup
+	closed bool // prevents new batches from being queued
 
+	wg        sync.WaitGroup // waits for queued batches to start evaluation
+	q         chan inputBatch
+	bsPool    *sync.Pool
+	abPool    *sync.Pool
 	evaluator *evaluator.Service
 
-	bsPool *sync.Pool
-	abPool *sync.Pool
-
-	q chan InputBatch
-
 	config.BatcherConfig
+	ServiceMeta
 }
 
 type ServiceMeta struct {
-	queueMetrics *gmetric.Operation
+	// Measures how long it takes for a request to get queued
+	// primarily an issue is the channel is full.
+	queueMetric *gmetric.Operation
+
+	// Measures how long each batch lasts before being
+	// sent to the evaluator service.
+	dispatcherMetric *gmetric.Operation
 }
 
-// InputBatch represents upstream data.
-type InputBatch struct {
+func NewServiceMeta(q, d *gmetric.Operation) ServiceMeta {
+	return ServiceMeta{q, d}
+}
+
+// inputBatch represents upstream data.
+type inputBatch struct {
+	closed    bool
 	inputData []interface{}
-	SubBatch
+	subBatch
 }
 
-// SubBatch captures both upstream and downstream members.
-type SubBatch struct {
+// subBatch captures both upstream and downstream members.
+type subBatch struct {
 	batchSize int // memoization - this should be calculated from InputBatch.inputData
 
 	// TODO check for leaks - these should be straight forward for GC
@@ -49,28 +62,38 @@ type SubBatch struct {
 	ec      chan error
 }
 
-// predictionBatch represents downstream data.
+// predictionBatch represents downstream (to service/tfmodel/evaluator.Service) data.
 type predictionBatch struct {
 	inputData  []interface{}
-	subBatches []SubBatch
+	subBatches []subBatch
 	size       int
 }
 
 // Waits for any queued batches to complete then closes underlying resources.
 func (b *Service) Close() error {
-	b.closeChan <- true
+	// anything that passes this due to sync issues can just continue
+	// generally, we rely on upstream to stop sending traffic before
+	// calling Close()
 	b.closed = true
+
+	// make Dispatcher stop
+	b.q <- inputBatch{true, nil, subBatch{}}
+
+	// let Dispatch goroutine finish clearing queue
+	b.wg.Wait()
+
+	var err error
 	if b.evaluator != nil {
-		// wait for any queued batches to evaluate and return
-		b.wg.Wait()
-		b.evaluator.Close()
+		// the evaluator service will handle itself clearing
+		err = b.evaluator.Close()
 	}
-	return nil
+
+	return err
 }
 
 // len([]SubBatch) is fixed to MaxBatchCounts.
-func (b *Service) getSubBatches() []SubBatch {
-	return b.bsPool.Get().([]SubBatch)
+func (b *Service) getSubBatches() []subBatch {
+	return b.bsPool.Get().([]subBatch)
 }
 
 // this isn't a really helpful pool?
@@ -80,7 +103,7 @@ func (b *Service) getActive() []interface{} {
 
 // Evaluate will queue a batch and wait for results.
 func (b *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interface{}, error) {
-	sb, err := b.Queue(inputs)
+	sb, err := b.queue(inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -97,9 +120,11 @@ func (b *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interfa
 	return nil, fmt.Errorf("unhandled select")
 }
 
-// Queue will queue and provide channels for results.
-// TODO only used for testing... remove?
-func (b *Service) Queue(inputs []interface{}) (*SubBatch, error) {
+// queue will queue and provide channels for results.
+func (b *Service) queue(inputs []interface{}) (*subBatch, error) {
+	onDone := b.queueMetric.Begin(time.Now())
+	defer func() { onDone(time.Now()) }()
+
 	if b.closed {
 		return nil, fmt.Errorf("closed")
 	}
@@ -135,27 +160,28 @@ func (b *Service) Queue(inputs []interface{}) (*SubBatch, error) {
 	ch := make(chan []interface{})
 	ec := make(chan error)
 
-	sb := &SubBatch{
+	sb := &subBatch{
 		batchSize: batchSize,
 		channel:   ch,
 		ec:        ec,
 	}
 
-	b.q <- InputBatch{inputs, *sb}
+	b.q <- inputBatch{false, inputs, *sb}
 
 	return sb, nil
 }
 
 func (b *Service) run(batch predictionBatch) {
+	defer b.wg.Done()
+
 	if b.Verbose != nil && b.Verbose.Input {
 		log.Printf("[%s run] inputData :%v", b.Verbose.ID, batch.inputData)
 	}
 
+	// This is somewhat safe... unless Tensorflow C has a GLOBAL lock somewhere.
+	// Eventually we can just have the TF session run.
 	ctx := context.TODO()
-
-	b.wg.Add(1)
 	results, err := b.evaluator.Evaluate(ctx, batch.inputData)
-	b.wg.Done()
 
 	if b.Verbose != nil && b.Verbose.Output {
 		log.Printf("[%s run] results:%v", b.Verbose.ID, results)
@@ -213,50 +239,68 @@ func (b *Service) run(batch predictionBatch) {
 	}
 }
 
-// Dispatcher runs and gathers model prediction requests and batches them up.
-// TODO split out Dispatcher -> getActive(), getSubBatcher() <- run()
-func (b *Service) Dispatcher() {
-	active := b.getActive()
-	subBatches := b.getSubBatches()
+// dispatcher runs and gathers model prediction requests and batches them up.
+func (s *Service) dispatcher() {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
+	active := s.getActive()
+	subBatches := s.getSubBatches()
 	curBatches := 0
 	curBatchRows := 0
 
+	var onDone counter.OnDone
+	var stats *stat.Values
+
 	submit := func() {
-		go b.run(predictionBatch{active, subBatches, curBatches})
+		s.wg.Add(1)
+		onDone(time.Now(), stats.Values()...)
+		go s.run(predictionBatch{active, subBatches, curBatches})
 
 		curBatches = 0
 		curBatchRows = 0
-		active = b.getActive()
-		subBatches = b.getSubBatches()
+		active = s.getActive()
+		subBatches = s.getSubBatches()
+
 	}
 
-	maxBatchWait := b.MaxBatchWait
+	maxBatchWait := s.MaxBatchWait
 	var deadline *time.Timer
 
 	for {
 		if deadline == nil {
 			// empty batch queue
 			select {
-			case <-b.closeChan:
-				// do nothing
-			case batch := <-b.q:
+			case batch := <-s.q:
+				if batch.closed {
+					return
+				}
+
+				onDone = s.dispatcherMetric.Begin(time.Now())
+				stats = stat.NewValues()
+
 				curBatchRows = batch.batchSize
-				subBatches[curBatches] = batch.SubBatch
+				subBatches[curBatches] = batch.subBatch
 				curBatches = 1
 
 				for o, inSlice := range batch.inputData {
 					active[o] = inSlice
 				}
 
-				if curBatchRows >= b.MaxBatchSize || b.MaxBatchCounts == 1 {
-					if b.Verbose != nil {
-						log.Printf("[%s Dispatcher] go curBatched:%d", b.Verbose.ID, curBatchRows)
+				if curBatchRows >= s.MaxBatchSize || s.MaxBatchCounts == 1 {
+					if s.Verbose != nil {
+						log.Printf("[%s Dispatcher] go curBatched:%d", s.Verbose.ID, curBatchRows)
 					}
 
+					// in theory, if b.MaxBatchCounts == 1, an upstream would
+					// skip the batching
+					stats.Append(mkbs(FullElements, curBatchRows, curBatches))
 					submit()
+
+					// deadline will be nil since there's no batching
 				} else {
-					if b.Verbose != nil {
-						log.Printf("[%s Dispatcher] wait curBatched:%d", b.Verbose.ID, curBatchRows)
+					if s.Verbose != nil {
+						log.Printf("[%s Dispatcher] wait curBatched:%d", s.Verbose.ID, curBatchRows)
 					}
 
 					deadline = time.NewTimer(maxBatchWait)
@@ -264,19 +308,29 @@ func (b *Service) Dispatcher() {
 			}
 		} else {
 			select {
-			case <-b.closeChan:
-				if curBatches > 0 {
-					go b.run(predictionBatch{active, subBatches, curBatches})
-					// no need to clear anything
-				}
-			case batch := <-b.q:
-				batchSize := batch.batchSize
-				if curBatchRows+batchSize > b.MaxBatchSize {
-					if b.Verbose != nil {
-						log.Printf("[%s Dispatcher] go expectedBatchSize:%d", b.Verbose.ID, curBatchRows+batchSize)
+			case batch := <-s.q:
+				if batch.closed {
+					if curBatches > 0 {
+						stats.Append(mkbs(Closing, curBatchRows, curBatches))
+						s.wg.Add(1)
+						go s.run(predictionBatch{active, subBatches, curBatches})
+						onDone(time.Now(), stats.Values()...)
 					}
 
+					return
+				}
+
+				batchSize := batch.batchSize
+				if curBatchRows+batchSize > s.MaxBatchSize {
+					if s.Verbose != nil {
+						log.Printf("[%s Dispatcher] go expectedBatchSize:%d", s.Verbose.ID, curBatchRows+batchSize)
+					}
+
+					stats.Append(mkbs(FullElements, curBatchRows, curBatches))
 					submit()
+
+					onDone = s.dispatcherMetric.Begin(time.Now())
+					stats = stat.NewValues()
 
 					// relying on GC
 					deadline = time.NewTimer(maxBatchWait)
@@ -354,52 +408,60 @@ func (b *Service) Dispatcher() {
 				}
 
 				if err != nil {
-					batch.SubBatch.ec <- err
+					// TODO record
+					batch.subBatch.ec <- err
 					continue
 				}
 
 				curBatchRows += batchSize
-				subBatches[curBatches] = batch.SubBatch
+				subBatches[curBatches] = batch.subBatch
 				curBatches++
 
-				if curBatchRows >= b.MaxBatchSize || curBatches >= b.MaxBatchCounts {
-					if b.Verbose != nil {
-						log.Printf("[%s Dispatcher] go curBatched:%d curBatches:%d", b.Verbose.ID, curBatchRows, curBatches)
+				// curBatchRows should always be < s.MaxBatchSize
+				if curBatchRows >= s.MaxBatchSize || curBatches >= s.MaxBatchCounts {
+					if s.Verbose != nil {
+						log.Printf("[%s Dispatcher] go curBatched:%d curBatches:%d", s.Verbose.ID, curBatchRows, curBatches)
 					}
 
+					stats.Append(mkbs(MaxBatches, curBatchRows, curBatches))
 					submit()
 
+					onDone = nil
+					stats = nil
 					deadline = nil
 				}
 			case <-deadline.C:
 				// curBatches should always be > 0
 				if curBatches > 0 {
-					if b.Verbose != nil {
-						log.Printf("[%s Dispatcher] go timeout curBatches:%d curBatchRows:%d", b.Verbose.ID, curBatches, curBatchRows)
+					if s.Verbose != nil {
+						log.Printf("[%s Dispatcher] go timeout curBatches:%d curBatchRows:%d", s.Verbose.ID, curBatches, curBatchRows)
 					}
 
+					stats.Append(mkbs(stat.Timeout, curBatchRows, curBatches))
 					submit()
 				}
 
+				onDone = nil
+				stats = nil
 				deadline = nil
 			}
 		}
 
-		if b.closed {
+		if s.closed {
 			return
 		}
 	}
 }
 
-func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig config.BatcherConfig) *Service {
+func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig config.BatcherConfig, serviceMeta ServiceMeta) *Service {
 	b := &Service{
-		evaluator: evaluator,
-
 		BatcherConfig: batchConfig,
+		q:             make(chan inputBatch, batchConfig.MaxBatchCounts),
+		evaluator:     evaluator,
 
 		bsPool: &sync.Pool{
 			New: func() interface{} {
-				return make([]SubBatch, batchConfig.MaxBatchCounts)
+				return make([]subBatch, batchConfig.MaxBatchCounts)
 			},
 		},
 
@@ -408,12 +470,9 @@ func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig config.B
 				return make([]interface{}, inputLen)
 			},
 		},
-
-		q: make(chan InputBatch, batchConfig.MaxBatchCounts),
-
-		closeChan: make(chan bool),
+		ServiceMeta: serviceMeta,
 	}
 
-	go b.Dispatcher()
+	go b.dispatcher()
 	return b
 }
