@@ -3,6 +3,7 @@ package evaluator
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
@@ -15,6 +16,8 @@ import (
 // Represents a TF session for running predictions.
 type Service struct {
 	EvaluatorMeta
+
+	wg sync.WaitGroup
 
 	session *tf.Session
 
@@ -59,28 +62,32 @@ func (e *Service) acquire(ctx context.Context) (func(), error) {
 
 // Evaluate runs the primary model prediction via Cgo Tensorflow.
 // params is expected to be [inputs][1][batch]T - see service/request.Request.Feeds and related methods.
-func (e *Service) Evaluate(ctx context.Context, params []interface{}) ([]interface{}, error) {
-	release, err := e.acquire(ctx)
+func (s *Service) Evaluate(ctx context.Context, params []interface{}) ([]interface{}, error) {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
+	release, err := s.acquire(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
 
-	onDone := e.tfMetric.Begin(time.Now())
+	onDone := s.tfMetric.Begin(time.Now())
 	stats := stat.NewValues()
 	defer func() {
 		onDone(time.Now(), stats.Values()...)
 	}()
 
-	feeds, err := e.feeds(params)
+	feeds, err := s.feeds(params)
 	if err != nil {
 		return nil, clienterr.Wrap(err)
 	}
 
-	onExit := metric.EnterThenExit(e.tfMetric, time.Now(), stat.Enter, stat.Exit)
+	onExit := metric.EnterThenExit(s.tfMetric, time.Now(), stat.Enter, stat.Exit)
 	defer onExit()
 
-	output, err := e.session.Run(feeds, e.fetches, e.targets)
+	output, err := s.session.Run(feeds, s.fetches, s.targets)
+
 	if err != nil {
 		stats.Append(err)
 		return nil, err
@@ -94,9 +101,12 @@ func (e *Service) Evaluate(ctx context.Context, params []interface{}) ([]interfa
 	return tensorValues, nil
 }
 
-// Close closes the Tensorflow session.
-func (e *Service) Close() error {
-	return e.session.Close()
+// Close will block until all goroutines waiting on the semaphore are released,
+// and complete the Tensorflow session run, or their context errors.
+// Will then close the session.
+func (s *Service) Close() error {
+	s.wg.Wait()
+	return s.session.Close()
 }
 
 func NewEvaluator(signature *domain.Signature, session *tf.Session, meta EvaluatorMeta) *Service {
