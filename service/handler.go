@@ -25,7 +25,7 @@ type Handler struct {
 	service     *Service
 	pool        *buffer.Pool
 
-	poolMetrics *gmetric.Operation
+	overheadMetrics *gmetric.Operation
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Request) {
@@ -50,7 +50,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	} else {
 		defer httpRequest.Body.Close()
 
-		onDone := h.poolMetrics.Begin(time.Now())
+		onDone := h.overheadMetrics.Begin(time.Now())
 		data, size, err := buffer.Read(h.pool, httpRequest.Body)
 		defer h.pool.Put(data)
 		func() {
@@ -148,9 +148,9 @@ func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
 func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration, m *gmetric.Service) *Handler {
 	location := reflect.TypeOf(&Handler{}).PkgPath()
 	return &Handler{
-		service:     service,
-		pool:        pool,
-		maxDuration: maxDuration,
-		poolMetrics: m.OperationCounter(location, service.config.ID+"HttpPool", service.config.ID+" HTTP []byte Pool", time.Microsecond, time.Minute, 2),
+		service:         service,
+		pool:            pool,
+		maxDuration:     maxDuration,
+		overheadMetrics: m.OperationCounter(location, service.config.ID+"HTTP", service.config.ID+" HTTP startup overhead", time.Microsecond, time.Minute, 2),
 	}
 }
