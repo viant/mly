@@ -71,7 +71,6 @@ func RunWithOptions(options *Options) error {
 			pl := upl
 			payloadedRunner := func() error {
 				message := cli.NewMessage()
-				defer message.Release()
 
 				pl.SetBatch(message)
 				pl.Iterator(func(k string, value interface{}) error {

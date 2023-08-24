@@ -390,6 +390,8 @@ func (m *Message) isValid() bool {
 }
 
 // Release releases message to the grpcPool
+// TODO this should not be public, Service should be 100% responsible for reuse OR
+// TODO caller should be 100% responsible for reuse
 func (m *Message) Release() {
 	m.mux.Lock()
 	defer m.mux.Unlock()

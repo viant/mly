@@ -217,8 +217,8 @@ func (s *Service) readFromCacheInBatch(ctx context.Context, batchSize int, dataT
 	for k := 0; k < batchSize; k++ {
 		go func(index int) {
 			defer waitGroup.Done()
-			cacheEntry := reflect.New(dataType.Elem()).Interface()
 			key := cachable.CacheKeyAt(index)
+			cacheEntry := reflect.New(dataType.Elem()).Interface()
 			has, dictHash, e := s.readFromCache(ctx, key, cacheEntry)
 			mux.Lock()
 			defer mux.Unlock()
