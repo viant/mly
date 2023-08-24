@@ -20,35 +20,47 @@ type Handler struct {
 	baseURL string
 	debug   bool
 	fs      afs.Service
+
+	next func([]byte, http.ResponseWriter)
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	URI := r.RequestURI
 	var data []byte
 	var err error
+
 	if r.Body != nil {
 		data, err = ioutil.ReadAll(r.Body)
 		r.Body.Close()
+
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
-	machURL := h.fetchTestdata(URI)
-	output, err := h.fs.DownloadWithURL(context.TODO(), machURL)
+
+	testDataURL := h.fetchTestdata(URI)
+	output, err := h.fs.DownloadWithURL(context.TODO(), testDataURL)
+
 	if h.debug {
-		fmt.Printf("matched URL: %v %s\n", machURL, data)
+		fmt.Printf("matched URL: %v %s\n", testDataURL, data)
 		fmt.Printf("output: %s\n", output)
 	}
 
 	if err == nil {
+		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(output)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNotFound)
+}
 
+func (h *Handler) Then(next func([]byte, http.ResponseWriter)) bool {
+	old := h.next
+	h.next = next
+	return old != nil
 }
 
 func (h *Handler) fetchTestdata(URI string) string {

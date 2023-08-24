@@ -3,10 +3,10 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"path"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/viant/bintly"
@@ -24,11 +24,13 @@ type TestOutput struct {
 	Prediction float32
 }
 
+// caching
 func (t *TestOutput) EncodeBinary(stream *bintly.Writer) error {
 	stream.Float32(t.Prediction)
 	return nil
 }
 
+// caching
 func (t *TestOutput) DecodeBinary(stream *bintly.Reader) error {
 	stream.Float32(&t.Prediction)
 	return nil
@@ -37,10 +39,12 @@ func (t *TestOutput) DecodeBinary(stream *bintly.Reader) error {
 func TestService_Run(t *testing.T) {
 	baseURL := toolbox.CallerDirectory(3)
 
-	server := faker.Server{URL: path.Join(baseURL, "testdata"), Port: 8087, Debug: true}
-	go server.Start()
-	time.Sleep(time.Second)
+	selectPort := 8087
+	server := faker.Server{URL: path.Join(baseURL, "testdata"), Port: selectPort, Debug: true}
+	server.Start()
+
 	defer server.Stop()
+
 	var metaInput = shared.MetaInput{
 		Inputs: []*shared.Field{
 			{
@@ -65,28 +69,44 @@ func TestService_Run(t *testing.T) {
 		Hash: 123,
 	}, metaInput.Inputs)
 
+	hosts := []*Host{
+		{
+			Name: "localhost",
+			Port: selectPort,
+		},
+	}
+
+	makeBasicOptions := func() []Option {
+		return []Option{
+			WithRemoteConfig(&cconfig.Remote{
+				Datastore: config.Datastore{
+					Cache: &scache.Config{SizeMb: 64, Shards: 10, EntrySize: 1024},
+				},
+				MetaInput: metaInput,
+			}),
+			WithCacheScope(CacheScopeLocal),
+			WithDictionary(dictionary),
+			WithDataStorer(mock.New()),
+			WithDebug(true),
+		}
+	}
+
 	var testCases = []struct {
 		description string
 		model       string
 		options     []Option
+		prepHandler func(*faker.Handler, int)
 		initMessage func(msg *Message)
 		response    func() *Response
 		expect      interface{}
+		err         bool
+		noCache     bool
+		contextFn   func(context.Context) (context.Context, func())
 	}{
 		{
 			description: "single prediction",
 			model:       "case001",
-			options: []Option{
-				WithRemoteConfig(&cconfig.Remote{
-					Datastore: config.Datastore{
-						Cache: &scache.Config{SizeMb: 64, Shards: 10, EntrySize: 1024},
-					},
-					MetaInput: metaInput,
-				}),
-				WithCacheScope(CacheScopeLocal),
-				WithDictionary(dictionary),
-				WithDataStorer(mock.New()),
-			},
+			options:     makeBasicOptions(),
 			response: func() *Response {
 				return &Response{Data: &TestOutput{}}
 			},
@@ -100,17 +120,7 @@ func TestService_Run(t *testing.T) {
 		{
 			description: "multi prediction",
 			model:       "case002",
-			options: []Option{
-				WithRemoteConfig(&cconfig.Remote{
-					Datastore: config.Datastore{
-						Cache: &scache.Config{SizeMb: 64, Shards: 10, EntrySize: 1024},
-					},
-					MetaInput: metaInput,
-				}),
-				WithCacheScope(CacheScopeLocal),
-				WithDictionary(dictionary),
-				WithDataStorer(mock.New()),
-			},
+			options:     makeBasicOptions(),
 			response: func() *Response {
 				predictions := []*TestOutput{}
 				return &Response{Data: &predictions}
@@ -120,55 +130,104 @@ func TestService_Run(t *testing.T) {
 				msg.StringsKey("i2", []string{"v10", "v10", "v10"})
 			},
 			expect: []*TestOutput{
-				{
-					Prediction: 3.2,
-				},
-				{
-					Prediction: 4.2,
-				},
-				{
-					Prediction: 7.6,
-				},
+				{Prediction: 3.2},
+				{Prediction: 4.2},
+				{Prediction: 7.6},
 			},
+		},
+		{
+			description: "404",
+			model:       "case003",
+			options:     makeBasicOptions(),
+			response: func() *Response {
+				predictions := []*TestOutput{}
+				return &Response{Data: &predictions}
+			},
+			initMessage: func(msg *Message) {},
+			err:         true,
+		},
+		{
+			description: "400",
+			prepHandler: func(h *faker.Handler, iter int) {
+				h.Then(func(d []byte, w http.ResponseWriter) {
+					http.Error(w, "bad request", http.StatusBadRequest)
+				})
+			},
+			options: makeBasicOptions(),
+			response: func() *Response {
+				predictions := []*TestOutput{}
+				return &Response{Data: &predictions}
+			},
+			initMessage: func(msg *Message) {},
+			err:         true,
+		},
+		{
+			description: "500",
+			prepHandler: func(h *faker.Handler, iter int) {
+				h.Then(func(d []byte, w http.ResponseWriter) {
+					http.Error(w, "server error", http.StatusInternalServerError)
+				})
+			},
+			options: makeBasicOptions(),
+			response: func() *Response {
+				predictions := []*TestOutput{}
+				return &Response{Data: &predictions}
+			},
+			initMessage: func(msg *Message) {},
+			err:         true,
 		},
 	}
 
 	for _, testCase := range testCases {
-		srv, err := New(testCase.model, testHosts(), testCase.options...)
-
-		for i := 0; i < 2; i++ {
-			if !assert.Nil(t, err, testCase.description) {
-				continue
-			}
-			response := testCase.response()
-			msg := srv.NewMessage()
-			testCase.initMessage(msg)
-
-			msgs := msg.Strings()
-			fmt.Printf("MMM :%v\n", msgs)
-			err = srv.Run(context.Background(), msg, response)
-			if !assert.Nil(t, err, testCase.description) {
-				continue
-			}
-			actual := reflect.ValueOf(response.Data).Elem().Interface()
-			assert.EqualValues(t, testCase.expect, actual, testCase.description)
-			expectStatus := common.StatusOK
-			if i == 1 {
-				expectStatus = common.StatusCached
-			}
-			assert.EqualValues(t, expectStatus, response.Status, fmt.Sprintf("%s - status", testCase.description))
-			time.Sleep(300 * time.Microsecond)
+		srv, err := New(testCase.model, hosts, testCase.options...)
+		if !assert.Nil(t, err, testCase.description) {
+			return
 		}
 
-	}
+		for i := 0; i < 2; i++ {
+			if testCase.prepHandler != nil {
+				testCase.prepHandler(server.Handler, i)
+			}
 
-}
+			func() {
+				caseDesc := fmt.Sprintf("%s model:%s %d", testCase.description, testCase.model, i)
 
-func testHosts() []*Host {
-	return []*Host{
-		{
-			Name: "localhost",
-			Port: 8087,
-		},
+				msg := srv.NewMessage()
+				testCase.initMessage(msg)
+
+				msgs := msg.Strings()
+				fmt.Printf("Message:%v\n", msgs)
+
+				ctx := context.Background()
+				if testCase.contextFn != nil {
+					var dfn func()
+					ctx, dfn = testCase.contextFn(ctx)
+					defer dfn()
+				}
+
+				response := testCase.response()
+				err = srv.Run(ctx, msg, response)
+				if testCase.err {
+					assert.NotNil(t, err, caseDesc)
+					return
+				}
+
+				if !assert.Nil(t, err, caseDesc) {
+					return
+				}
+
+				fmt.Printf("response.Data:%+V\n", response.Data)
+
+				// unwrap pointer
+				actual := reflect.ValueOf(response.Data).Elem().Interface()
+				assert.EqualValues(t, testCase.expect, actual, caseDesc)
+
+				expectStatus := common.StatusOK
+				if !testCase.noCache && i == 1 {
+					expectStatus = common.StatusCached
+				}
+				assert.EqualValues(t, expectStatus, response.Status, fmt.Sprintf("%s - status", caseDesc))
+			}()
+		}
 	}
 }

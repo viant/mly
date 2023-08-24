@@ -597,11 +597,10 @@ func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values
 
 func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte, error) {
 	evalUrl := host.evalURL(s.Model)
+	var terminate bool
 	var postErr error
 	for i := 0; i < s.MaxRetry; i++ {
-		postErr = nil
-
-		response, err := func() (*http.Response, error) {
+		data, err := func() ([]byte, error) {
 			onDone := s.httpCliCounter.Begin(time.Now())
 			stats := stat.NewValues()
 
@@ -622,35 +621,40 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 
 			if err != nil {
 				stats.AppendError(err)
+				return nil, err
 			}
 
-			return response, err
+			var data []byte
+			if response.StatusCode != http.StatusOK {
+				// as long as this func is run synchronously,
+				// this is safe
+				terminate = true
+
+				return nil, fmt.Errorf("invalid response: %v, %s", response.StatusCode, data)
+			}
+
+			if response.Body != nil {
+				data, err = io.ReadAll(response.Body)
+				_ = response.Body.Close()
+
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			return data, nil
 		}()
 
 		if err != nil {
 			postErr = err
-			if ctx.Err() != nil {
-				// stop trying if deadline exceeded or canceled
-				break
-			}
-
-			continue
 		}
 
-		var data []byte
-		if response.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("invalid response: %v, %s", response.StatusCode, data)
+		if terminate || ctx.Err() != nil {
+			// stop trying if deadline exceeded or canceled
+			break
 		}
 
-		if response.Body != nil {
-			data, err = io.ReadAll(response.Body)
-			_ = response.Body.Close()
-
-			if err != nil {
-				postErr = err
-				continue
-			}
-
+		if data != nil {
 			return data, nil
 		}
 	}
