@@ -28,7 +28,7 @@ type Request struct {
 
 	Input *transfer.Input // cache metadata
 
-	// type metadata from service/tfservice.Service
+	// type metadata from service/tfservice.Service.inputs
 	// see service/tfmodel.(*Service).reconcileIOFromSignature
 	inputs map[string]*domain.Input
 }
@@ -244,18 +244,19 @@ func (r *Request) NKeys() int {
 // Validate is only used server-side.
 // Extra fields are ignored.
 func (r *Request) Validate() error {
-	// TODO this isn't super accurate but it works as a quick check
-	if len(r.inputs) != len(r.supplied) {
-		missing := make([]string, 0)
-		for _, input := range r.inputs {
-			if _, ok := r.supplied[input.Name]; !ok {
-				missing = append(missing, input.Name)
-			}
+	missing := make([]string, 0)
+	for _, input := range r.inputs {
+		if input.Auxiliary {
+			continue
 		}
 
-		if len(missing) > 0 {
-			return fmt.Errorf("failed to build request due to missing fields: %v", missing)
+		if _, ok := r.supplied[input.Name]; !ok {
+			missing = append(missing, input.Name)
 		}
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("failed to build request due to missing fields: %v", missing)
 	}
 
 	return nil

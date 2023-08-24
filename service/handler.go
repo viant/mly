@@ -41,10 +41,12 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 	// TODO this context isn't guaranteed to leak - the model can change in the
 	// middle of a request
-	request := h.service.NewRequest()
+	var request *request.Request
 
 	response := &Response{Status: common.StatusOK, started: time.Now()}
 	if httpRequest.Method == http.MethodGet {
+
+		request = h.service.NewRequest()
 		if err := h.buildRequestFromQuery(httpRequest, request); err != nil {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
@@ -64,10 +66,13 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 				if isDebug {
 					log.Printf("[%v http] read error: %v\n", h.service.config.ID, err)
 				}
+
+				// TODO if buffer is too small, it should be a 413
 				http.Error(writer, err.Error(), http.StatusInternalServerError)
 				return
 			}
 
+			request = h.service.NewRequest()
 			request.Body = data[:size]
 			if isDebug {
 				trimmed := strings.Trim(string(request.Body), " \n\r")
