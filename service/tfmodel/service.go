@@ -410,7 +410,7 @@ func (s *Service) Close() error {
 // NewService creates an unprepared Service.
 // This service isn't ready until RelodIfNeeded() is called.
 func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sema *semaphore.Weighted) *Service {
-	location := reflect.TypeOf(&Service{}).PkgPath()
+	location := reflect.TypeOf(evaluator.Service{}).PkgPath()
 
 	id := cfg.ID
 
@@ -418,9 +418,10 @@ func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sem
 	tfMetric := metrics.MultiOperationCounter(location, id+"Eval", id+" Tensorflow evaluator performance", time.Microsecond, time.Minute, 2, tfstat.NewTfs())
 	meta := evaluator.MakeEvaluatorMeta(sema, semaMetric, tfMetric)
 
+	batcherLocation := reflect.TypeOf(batcher.ServiceMeta{}).PkgPath()
 	bMeta := batcher.NewServiceMeta(
-		metrics.OperationCounter(location, id+"BatcherQueue", id+" Batcher Queue performance", time.Microsecond, time.Minute, 2),
-		metrics.MultiOperationCounter(location, id+"Dispatcher", id+" Dispatcher performance", time.Microsecond, time.Minute, 2, batcher.NewDispatcherP()),
+		metrics.OperationCounter(batcherLocation, id+"BatcherQueue", id+" Batcher Queue performance", time.Microsecond, time.Minute, 2),
+		metrics.MultiOperationCounter(batcherLocation, id+"Dispatcher", id+" Dispatcher performance", time.Microsecond, time.Minute, 2, batcher.NewDispatcherP()),
 	)
 
 	return &Service{

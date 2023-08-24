@@ -101,7 +101,7 @@ func (h *metaHandler) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 func NewMetaHandler(srv *service.Service, datastoreList *sconfig.DatastoreList, gmetrics *gmetric.Service) *metaHandler {
 	cfg := srv.Config()
-	location := reflect.TypeOf(&metaHandler{}).PkgPath()
+	location := reflect.TypeOf(metaHandler{}).PkgPath()
 	handler := &metaHandler{
 		modelService: srv,
 		datastore:    assembleConfig(datastoreList, cfg.DataStore),

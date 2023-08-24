@@ -155,7 +155,7 @@ func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
 
 // NewHandler creates a new HTTP service Handler
 func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration, m *gmetric.Service) *Handler {
-	location := reflect.TypeOf(&Handler{}).PkgPath()
+	location := reflect.TypeOf(Handler{}).PkgPath()
 	return &Handler{
 		service:         service,
 		pool:            pool,
