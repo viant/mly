@@ -24,6 +24,7 @@ type Options struct {
 	NoHashCheck bool `long:"nohash"`
 
 	Concurrent int `long:"concurrent"`
+	Repeats    int `long:"repeats" description:"times to repeat all payloads"`
 
 	PayloadStr   []string `short:"a" long:"payload"`
 	PayloadPause int      `long:"pause" description:"pause seconds between payloads"`

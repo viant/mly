@@ -61,82 +61,89 @@ func RunWithOptions(options *Options) error {
 
 	concurrency := options.Concurrent
 
-	for i, upl := range pls {
-		pl := upl
-		payloadedRunner := func() error {
-			message := cli.NewMessage()
-			defer message.Release()
+	times := 1
+	if options.Repeats > 0 {
+		times = options.Repeats
+	}
 
-			pl.SetBatch(message)
-			pl.Iterator(func(k string, value interface{}) error {
-				return pl.Bind(k, value, message)
-			})
+	for r := 0; r < times; r++ {
+		for i, upl := range pls {
+			pl := upl
+			payloadedRunner := func() error {
+				message := cli.NewMessage()
+				defer message.Release()
 
-			response := &client.Response{}
+				pl.SetBatch(message)
+				pl.Iterator(func(k string, value interface{}) error {
+					return pl.Bind(k, value, message)
+				})
 
-			storableSrv := storable.Singleton()
-			maker, err := storableSrv.Lookup(options.Storable)
-			if err != nil {
-				if options.Debug {
-					fmt.Printf("could not find Storable:\"%s\", building dynamically\n", options.Storable)
-				}
+				response := &client.Response{}
 
-				maker = checker.Generated(cli.Config.Datastore.MetaInput.Outputs, pl.Batch, false)
-			}
-
-			response.Data = maker()
-
-			ctx := context.Background()
-			cancel := func() {}
-			if options.TimeoutUs > 0 {
-				ctx, cancel = context.WithTimeout(ctx, time.Duration(options.TimeoutUs)*time.Microsecond)
-			}
-
-			err = cli.Run(ctx, message, response)
-
-			if err != nil && !options.SkipError {
-				cancel()
-				return err
-			}
-
-			cancel()
-
-			if !options.NoOutput {
-				toolbox.Dump(response)
-			}
-
-			return nil
-		}
-
-		errs := make([]error, concurrency)
-
-		wg := new(sync.WaitGroup)
-		wg.Add(concurrency)
-
-		for wi := 0; wi < concurrency; wi++ {
-			go func(wi int) {
-				defer wg.Done()
-
-				time.Sleep(1)
-
-				err = payloadedRunner()
-
+				storableSrv := storable.Singleton()
+				maker, err := storableSrv.Lookup(options.Storable)
 				if err != nil {
-					errs[wi] = err
+					if options.Debug {
+						fmt.Printf("could not find Storable:\"%s\", building dynamically\n", options.Storable)
+					}
+
+					maker = checker.Generated(cli.Config.Datastore.MetaInput.Outputs, pl.Batch, false)
 				}
-			}(wi)
-		}
 
-		wg.Wait()
+				response.Data = maker()
 
-		for wi, err := range errs {
-			if err != nil {
-				return fmt.Errorf("%d:%w", wi, err)
+				ctx := context.Background()
+				cancel := func() {}
+				if options.TimeoutUs > 0 {
+					ctx, cancel = context.WithTimeout(ctx, time.Duration(options.TimeoutUs)*time.Microsecond)
+				}
+
+				err = cli.Run(ctx, message, response)
+
+				if err != nil && !options.SkipError {
+					cancel()
+					return err
+				}
+
+				cancel()
+
+				if !options.NoOutput {
+					toolbox.Dump(response)
+				}
+
+				return nil
 			}
-		}
 
-		if i < lp-1 && pPause > 0 {
-			time.Sleep(pPause * time.Second)
+			errs := make([]error, concurrency)
+
+			wg := new(sync.WaitGroup)
+			wg.Add(concurrency)
+
+			for wi := 0; wi < concurrency; wi++ {
+				go func(wi int) {
+					defer wg.Done()
+
+					time.Sleep(1)
+
+					err = payloadedRunner()
+
+					if err != nil {
+						errs[wi] = err
+					}
+				}(wi)
+			}
+
+			wg.Wait()
+
+			for wi, err := range errs {
+				if err != nil {
+					return fmt.Errorf("%d:%w", wi, err)
+				}
+			}
+
+			if i < lp-1 && pPause > 0 {
+				time.Sleep(pPause * time.Second)
+			}
 		}
 	}
 
