@@ -73,7 +73,7 @@ func (h *Host) isConnectionUp() bool {
 
 func (h *Host) Init() {
 	if h.Breaker == nil {
-		h.Breaker = circut.New(h.reqeustTimeout, h)
+		h.Breaker = circut.New(h.RequestTimeout, h)
 	}
 
 	proto := "http://"
