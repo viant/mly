@@ -11,45 +11,49 @@ import (
 	"github.com/viant/mly/shared/common"
 )
 
-var requestTimeout = 50 * time.Millisecond
+var defaultRequestTimeout = 50 * time.Millisecond
 
 //Host represents endpoint host
 type Host struct {
-	Name string
-	Port int
-	mux  sync.RWMutex
+	name string
+	port int
+
+	// used as both a check to see if a host is down
+	// and to pause requests to prevent downstream overload
+	RequestTimeout time.Duration
+
+	mux sync.RWMutex
 	*circut.Breaker
+
+	// memoization
+	prefix string
+}
+
+func isSecurePort(port int) bool {
+	return port == 443 || port == 1443
 }
 
 //IsSecurePort() returns true if secure port
 func (h *Host) IsSecurePort() bool {
-	return h.Port%1000 == 443
+	return isSecurePort(h.port)
 }
 
 //URL returns model eval URL
 func (h *Host) evalURL(model string) string {
-	if h.IsSecurePort() {
-		return "https://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.ModelURI, model)
-	}
-	return "http://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.ModelURI, model)
+	return h.prefix + fmt.Sprintf(common.ModelURI, model)
 }
 
 //URL returns meta config model eval URL
 func (h *Host) metaConfigURL(model string) string {
-	if h.IsSecurePort() {
-		return "https://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.MetaConfigURI, model)
-	}
-	return "http://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.MetaConfigURI, model)
+	return h.prefix + fmt.Sprintf(common.MetaConfigURI, model)
 }
 
 //URL returns meta config model eval URL
 func (h *Host) metaDictionaryURL(model string) string {
-	if h.IsSecurePort() {
-		return "https://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.MetaDictionaryURI, model)
-	}
-	return "http://" + h.Name + ":" + strconv.Itoa(h.Port) + fmt.Sprintf(common.MetaDictionaryURI, model)
+	return h.prefix + fmt.Sprintf(common.MetaDictionaryURI, model)
 }
 
+// called by shared/circuit.(*Breaker).resetIfDue()
 func (h *Host) Probe() {
 	if h.isConnectionUp() {
 		h.FlagUp()
@@ -59,7 +63,7 @@ func (h *Host) Probe() {
 
 func (h *Host) isConnectionUp() bool {
 	port := h.Port
-	connection, err := net.DialTimeout("tcp", fmt.Sprintf("%v:%v", h.Name, port), requestTimeout)
+	connection, err := net.DialTimeout("tcp", fmt.Sprintf("%v:%v", h.Name, port), h.RequestTimeout)
 	if err != nil {
 		return false
 	}
@@ -69,23 +73,43 @@ func (h *Host) isConnectionUp() bool {
 
 func (h *Host) Init() {
 	if h.Breaker == nil {
-		h.Breaker = circut.New(requestTimeout, h)
+		h.Breaker = circut.New(h.reqeustTimeout, h)
 	}
+
+	proto := "http://"
+	if h.IsSecurePort() {
+		proto = "https://"
+	}
+
+	h.prefix = proto + h.name + ":" + strconv.Itoa(h.port)
+}
+
+// Name aka domain name
+func (h *Host) Name() string {
+	return h.name
+}
+
+func (h *Host) Port() int {
+	return h.port
 }
 
 //NewHost returns new host
 func NewHost(name string, port int) *Host {
-	if port == 0 {
+	if port <= 0 {
 		port = 80
 	}
-	return &Host{Name: name, Port: port}
+
+	return &Host{
+		name: name,
+		port: port,
+	}
 }
 
 //NewHosts creates hosts
 func NewHosts(port int, names []string) []*Host {
 	var result = make([]*Host, 0)
 	for _, name := range names {
-		result = append(result, &Host{Name: name, Port: port})
+		result = append(result, &Host{name: name, port: port})
 	}
 	return result
 }

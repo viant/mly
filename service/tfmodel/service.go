@@ -192,6 +192,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 
 	var newBatchSrv *batcher.Service
 	if config.Batch.MaxBatchCounts > 1 {
+		log.Printf("[%s] batch mode %+v", config.ID, config.Batch)
 		bc := (*config.Batch).BatcherConfig
 		newBatchSrv = batcher.NewBatcher(newEvaluator, len(signature.Inputs), bc, *s.batcherMeta)
 	}

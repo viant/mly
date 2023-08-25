@@ -478,6 +478,7 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 	for i := range hosts {
 		hosts[i].Init()
 	}
+
 	aClient := &Service{
 		Config: Config{
 			Model: model,
@@ -670,10 +671,11 @@ func (s *Service) getHost() (*Host, error) {
 	case 1:
 		candidate := s.Hosts[0]
 		if !candidate.IsUp() {
-			return nil, fmt.Errorf("%v:%v %w", candidate.Name, candidate.Port, common.ErrNodeDown)
+			return nil, fmt.Errorf("%v:%v %w", candidate.Name(), candidate.Port(), common.ErrNodeDown)
 		}
 		return candidate, nil
 	default:
+		// TODO introduce a fallback mode
 		index := atomic.AddInt64(&s.hostIndex, 1) % int64(count)
 		candidate := s.Hosts[index]
 		if candidate.IsUp() {
@@ -689,7 +691,7 @@ func (s *Service) getHost() (*Host, error) {
 
 	addrs := make([]string, count, count)
 	for i, h := range s.Hosts {
-		addrs[i] = h.Name + ":" + strconv.Itoa(h.Port)
+		addrs[i] = h.Name() + ":" + strconv.Itoa(h.Port())
 	}
 
 	hostsDesc := strings.Join(addrs, ",")

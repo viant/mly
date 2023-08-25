@@ -20,7 +20,7 @@ func (o *cacheSizeOpt) Apply(c *Service) {
 	c.Config.CacheSizeMb = o.sizeMB
 }
 
-// WithCacheSize returns cache size MB
+// WithCacheSize overrides the cache size provided by the server.
 func WithCacheSize(sizeMB int) Option {
 	return &cacheSizeOpt{sizeMB: sizeMB}
 }
@@ -33,7 +33,7 @@ func (o *gmetricsOpt) Apply(c *Service) {
 	c.gmetrics = o.gmetrics
 }
 
-// WithGmetrics returns gmetric options
+// WithGmetrics binds the *gmetric.Service to the client.
 func WithGmetrics(gmetrics *gmetric.Service) Option {
 	return &gmetricsOpt{gmetrics: gmetrics}
 }
@@ -46,7 +46,7 @@ func (o *dictHashValidationOpt) Apply(c *Service) {
 	c.Config.DictHashValidation = o.enable
 }
 
-// WithHashValidation creates a new dict has validation
+// WithHashValidation overrides DictHashValidation.
 func WithHashValidation(enable bool) Option {
 	return &dictHashValidationOpt{enable: enable}
 }
@@ -59,6 +59,7 @@ func (o *withDebug) Apply(c *Service) {
 	c.Config.Debug = o.enable
 }
 
+// WithDebug sets debugging.
 func WithDebug(enable bool) Option {
 	return &withDebug{enable: enable}
 }
@@ -85,6 +86,8 @@ func (o *clientRemoteOption) Apply(c *Service) {
 	c.Config.Datastore.Init()
 }
 
+// WithRemoteConfig will provide a coded configuration instead of sending a request
+// to the mly server to fetch the configuration.
 func WithRemoteConfig(config *cconfig.Remote) Option {
 	return &clientRemoteOption{config: config}
 }
@@ -97,7 +100,7 @@ func (o *dictionaryOption) Apply(c *Service) {
 	c.dict = o.dictionary
 }
 
-// WithDictionary creates dictionary option
+// WithDictionary overwrites the initial dictionary.
 func WithDictionary(dictionary *Dictionary) Option {
 	return &dictionaryOption{dictionary: dictionary}
 }
@@ -110,6 +113,8 @@ func (o *storerOption) Apply(c *Service) {
 	c.datastore = o.storer
 }
 
+// WithDataStorer will provide a coded instane of datastore instead of
+// determining it based off configuration values.
 func WithDataStorer(storer datastore.Storer) Option {
 	return &storerOption{storer: storer}
 }

@@ -74,10 +74,7 @@ func (s *Service) SelfTest() error {
 	numModels := len(s.config.ModelList.Models)
 	waitGroup.Add(numModels)
 
-	hosts := []*client.Host{{
-		Name: "localhost",
-		Port: s.config.Endpoint.Port,
-	}}
+	hosts := client.NewHosts(s.config.Endpoint.Port, []string{"localhost"})
 
 	timeout := time.Duration(s.config.Endpoint.ReadTimeoutMs) * time.Millisecond
 
