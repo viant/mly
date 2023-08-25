@@ -6,12 +6,20 @@ import (
 
 //Config represents a client config
 type Config struct {
-	Hosts              []*Host
-	Model              string
-	CacheSizeMb        int
-	CacheScope         *CacheScope
-	Datastore          *config.Remote
-	MaxRetry           int
+	Hosts []*Host
+	Model string
+
+	CacheSizeMb int
+
+	// CacheScope limits which caches are available to this client.
+	CacheScope *CacheScope
+
+	Datastore *config.Remote
+
+	// MaxRetry defines the maximum number of HTTP requests that should be sent
+	// during a shared/client.(*Service).Run()
+	MaxRetry int
+
 	Debug              bool
 	DictHashValidation bool
 }

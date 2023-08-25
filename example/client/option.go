@@ -113,5 +113,5 @@ func (o *Options) Hosts() []*client.Host {
 		return hosts
 	}
 
-	return []*client.Host{{Name: o.Host, Port: o.Port}}
+	return []*client.Host{client.NewHost(o.Host, o.Port)}
 }
