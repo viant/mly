@@ -94,6 +94,10 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		}()
 	}
 
+	if request == nil {
+		return
+	}
+
 	err := h.handleAppRequest(ctx, writer, request, response)
 	if isDebug {
 		data, merr := json.Marshal(response.Data)

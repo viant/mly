@@ -90,7 +90,7 @@ func (s *Service) Predict(ctx context.Context, params []interface{}) ([]interfac
 // to the inputs and outputs from reloading the model.
 // If a model reload results in changes to inputs or outputs, the resulting
 // behavior is undefined.
-// TODO restructure to test configuration signature merging.
+// TODO restructure to easily test configuration signature merging.
 func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	config := s.config
 	snapshot, err := files.ModifiedSnapshot(ctx, s.fs, config.URL, nil)
@@ -227,6 +227,8 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		}
 	}()
 
+	// there is a minor risk here of the dictionary changing mid-request
+	// this would result in some cached values incorrectly OOV
 	if dictionary != nil {
 		s.dictionary = dictionary
 

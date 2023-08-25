@@ -142,16 +142,16 @@ func (s *Service) SelfTest() error {
 
 // Registers Shutdown() on interrupt.
 func (s *Service) shutdownOnInterrupt() {
-	closed := make(chan struct{})
 	go func() {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, os.Interrupt)
+
 		<-sigint
+
 		// We received an interrupt signal, shut down.
 		if err := s.Shutdown(context.Background()); err != nil {
 			log.Printf("HTTP Service Shutdown: %v", err)
 		}
-		close(closed)
 	}()
 }
 
