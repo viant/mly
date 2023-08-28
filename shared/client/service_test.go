@@ -70,10 +70,7 @@ func TestService_Run(t *testing.T) {
 	}, metaInput.Inputs)
 
 	hosts := []*Host{
-		{
-			Name: "localhost",
-			Port: selectPort,
-		},
+		NewHost("localhost", selectPort),
 	}
 
 	makeBasicOptions := func() []Option {

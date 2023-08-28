@@ -62,8 +62,8 @@ func (h *Host) Probe() {
 }
 
 func (h *Host) isConnectionUp() bool {
-	port := h.Port
-	connection, err := net.DialTimeout("tcp", fmt.Sprintf("%v:%v", h.Name, port), h.RequestTimeout)
+	port := h.port
+	connection, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", h.name, port), h.RequestTimeout)
 	if err != nil {
 		return false
 	}
@@ -100,8 +100,9 @@ func NewHost(name string, port int) *Host {
 	}
 
 	return &Host{
-		name: name,
-		port: port,
+		name:           name,
+		port:           port,
+		RequestTimeout: defaultRequestTimeout,
 	}
 }
 
