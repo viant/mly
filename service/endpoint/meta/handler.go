@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"reflect"
 	"strings"
@@ -88,6 +89,14 @@ func (h *metaHandler) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		err = h.handleConfigRequest(writer)
 		specValues.Append(err)
 		values.Append(Config)
+	} else if strings.HasSuffix(request.RequestURI, "/stats") {
+		stats := h.modelService.Stats()
+		data, err := json.Marshal(stats)
+		if err != nil {
+			log.Printf("%v", err)
+		}
+		writer.Header().Set("Content-type", "application/json")
+		_, err = io.Copy(writer, bytes.NewReader(data))
 	} else {
 		values.Append(NotFound)
 		http.NotFound(writer, request)

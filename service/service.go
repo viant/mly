@@ -80,6 +80,12 @@ func (s *Service) Dictionary() *common.Dictionary {
 	return s.tfService.Dictionary()
 }
 
+func (s *Service) Stats() map[string]interface{} {
+	st := make(map[string]interface{})
+	s.tfService.Stats(st)
+	return st
+}
+
 func (s *Service) Do(ctx context.Context, request *request.Request, response *Response) error {
 	err := s.do(ctx, request, response)
 	if err != nil {

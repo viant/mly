@@ -402,6 +402,12 @@ func (s *Service) Dictionary() *common.Dictionary {
 	return s.dictionary
 }
 
+func (s *Service) Stats(r map[string]interface{}) {
+	if s.batcher != nil && s.batcher.Adjust != nil {
+		s.batcher.Adjust.Stats(r)
+	}
+}
+
 func (s *Service) Close() error {
 	if s.evaluator == nil {
 		return nil

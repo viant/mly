@@ -9,6 +9,7 @@ import (
 
 	"github.com/viant/gmetric"
 	"github.com/viant/gmetric/counter"
+	"github.com/viant/mly/service/tfmodel/batcher/adjust"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator"
 	"github.com/viant/mly/shared/stat"
@@ -27,11 +28,13 @@ type Service struct {
 	bsPool    *sync.Pool
 	abPool    *sync.Pool
 	evaluator *evaluator.Service
+	Adjust    *adjust.Adjust
 
 	config.BatcherConfig
 	ServiceMeta
 }
 
+// ServiceMeta contains things that should live longer than the life of a Service.
 type ServiceMeta struct {
 	// Measures how long it takes for a request to get queued
 	// primarily an issue is the channel is full.
@@ -264,7 +267,13 @@ func (s *Service) dispatcher() {
 
 	}
 
-	maxBatchWait := s.MaxBatchWait
+	var timeout *time.Duration
+	if s.Adjust == nil {
+		timeout = &s.MaxBatchWait
+	} else {
+		timeout = &s.Adjust.CurrentTimeout
+	}
+
 	var deadline *time.Timer
 
 	for {
@@ -295,6 +304,10 @@ func (s *Service) dispatcher() {
 					// in theory, if b.MaxBatchCounts == 1, an upstream would
 					// skip the batching
 					stats.Append(mkbs(FullElements, curBatchRows, curBatches))
+					if s.Adjust != nil {
+						s.Adjust.Count()
+					}
+
 					submit()
 
 					// deadline will be nil since there's no batching
@@ -303,7 +316,7 @@ func (s *Service) dispatcher() {
 						log.Printf("[%s Dispatcher] wait curBatched:%d", s.Verbose.ID, curBatchRows)
 					}
 
-					deadline = time.NewTimer(maxBatchWait)
+					deadline = time.NewTimer(*timeout)
 				}
 			}
 		} else {
@@ -332,8 +345,12 @@ func (s *Service) dispatcher() {
 					onDone = s.dispatcherMetric.Begin(time.Now())
 					stats = stat.NewValues()
 
+					if s.Adjust != nil {
+						s.Adjust.Count()
+					}
+
 					// relying on GC
-					deadline = time.NewTimer(maxBatchWait)
+					deadline = time.NewTimer(*timeout)
 				}
 
 				// TODO this may result in the batch having inconsistent state
@@ -426,6 +443,10 @@ func (s *Service) dispatcher() {
 					stats.Append(mkbs(MaxBatches, curBatchRows, curBatches))
 					submit()
 
+					if s.Adjust != nil {
+						s.Adjust.Count()
+					}
+
 					onDone = nil
 					stats = nil
 					deadline = nil
@@ -439,6 +460,10 @@ func (s *Service) dispatcher() {
 
 					stats.Append(mkbs(stat.Timeout, curBatchRows, curBatches))
 					submit()
+
+					if s.Adjust != nil {
+						s.Adjust.IncTimeout()
+					}
 				}
 
 				onDone = nil
@@ -454,6 +479,16 @@ func (s *Service) dispatcher() {
 }
 
 func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig config.BatcherConfig, serviceMeta ServiceMeta) *Service {
+	var adj *adjust.Adjust
+
+	ta := batchConfig.TimeoutAdjustments
+	if ta != nil {
+		if batchConfig.Verbose != nil {
+			log.Printf("[%s NewBatcher] auto-adjust enabled %+v", batchConfig.Verbose.ID, ta)
+		}
+		adj = adjust.NewAdjust(ta)
+	}
+
 	b := &Service{
 		BatcherConfig: batchConfig,
 		q:             make(chan inputBatch, batchConfig.MaxBatchCounts),
@@ -470,7 +505,9 @@ func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig config.B
 				return make([]interface{}, inputLen)
 			},
 		},
+
 		ServiceMeta: serviceMeta,
+		Adjust:      adj,
 	}
 
 	go b.dispatcher()

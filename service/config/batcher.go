@@ -44,4 +44,8 @@ func (b *BatcherConfigFile) Init() {
 	if b.MaxBatchWait <= 0 {
 		b.MaxBatchWait = time.Millisecond * time.Duration(1)
 	}
+
+	if b.TimeoutAdjustments != nil {
+		b.TimeoutAdjustments.Init()
+	}
 }

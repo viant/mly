@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"time"
+
+	"github.com/viant/mly/service/tfmodel/batcher/adjust"
+)
 
 type BatcherConfig struct {
 	// MaxBatchSize defines the limit of batch size (input rows) that can be
@@ -18,6 +22,8 @@ type BatcherConfig struct {
 	// batch collection.
 	// This is not a rolling window.
 	MaxBatchWait time.Duration `json:",omitempty" yaml:",omitempty"`
+
+	TimeoutAdjustments *adjust.AdjustConfig `json:",omitempty" yaml:",omitempty"`
 
 	Verbose *V `json:",omitempty" yaml:",omitempty"`
 }
