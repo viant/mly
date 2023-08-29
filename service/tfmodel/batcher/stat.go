@@ -11,6 +11,7 @@ const (
 	Closing      = "closing"
 	MaxBatches   = "maxBatches"
 	FullElements = "fullElements"
+	Waiting      = "waiting"
 
 	elements = "elements"
 )
@@ -47,6 +48,7 @@ func (d dispatcherStats) Keys() []string {
 		Closing,
 		MaxBatches,
 		FullElements,
+		Waiting,
 	}
 }
 
@@ -66,6 +68,8 @@ func (d dispatcherStats) Map(value interface{}) int {
 			return 2
 		case FullElements:
 			return 3
+		case Waiting:
+			return 4
 		}
 	case *batchStat:
 		switch v.key {
@@ -77,6 +81,8 @@ func (d dispatcherStats) Map(value interface{}) int {
 			return 2
 		case FullElements:
 			return 3
+		case Waiting:
+			return 4
 		}
 	}
 

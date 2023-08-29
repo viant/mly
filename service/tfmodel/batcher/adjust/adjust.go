@@ -46,6 +46,10 @@ func (a *Adjust) IncTimeout() {
 	a.total++
 }
 
+func (a *Adjust) IncOverloaded() {
+
+}
+
 func (a *Adjust) Count() {
 	a.total++
 }

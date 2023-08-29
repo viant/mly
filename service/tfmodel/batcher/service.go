@@ -8,11 +8,9 @@ import (
 	"time"
 
 	"github.com/viant/gmetric"
-	"github.com/viant/gmetric/counter"
 	"github.com/viant/mly/service/tfmodel/batcher/adjust"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator"
-	"github.com/viant/mly/shared/stat"
 )
 
 // Service sits on top of an Evaluator and collects predictions calls
@@ -27,8 +25,16 @@ type Service struct {
 	q         chan inputBatch
 	bsPool    *sync.Pool
 	abPool    *sync.Pool
-	evaluator *evaluator.Service
-	Adjust    *adjust.Adjust
+	evaluator evaluator.Evaluator
+
+	// since dispatcher runs in a single goroutine, we use this
+	// to communicate that there are free evaluator "slots"
+	waiting    chan struct{}
+	free       chan struct{}
+	active     uint32
+	activeLock *sync.RWMutex
+
+	Adjust *adjust.Adjust
 
 	config.BatcherConfig
 	ServiceMeta
@@ -92,6 +98,17 @@ func (b *Service) Close() error {
 	}
 
 	return err
+}
+
+func (s *Service) isBusy() (busy bool) {
+	s.activeLock.RLock()
+	defer s.activeLock.RUnlock()
+	if s.MaxEvaluatorConcurrency > 0 && s.active >= s.MaxEvaluatorConcurrency {
+		busy = true
+		s.waiting <- struct{}{}
+	}
+
+	return busy
 }
 
 // len([]SubBatch) is fixed to MaxBatchCounts.
@@ -170,33 +187,49 @@ func (b *Service) queue(inputs []interface{}) (*subBatch, error) {
 	}
 
 	b.q <- inputBatch{false, inputs, *sb}
-
 	return sb, nil
 }
 
-func (b *Service) run(batch predictionBatch) {
-	defer b.wg.Done()
+func (s *Service) run(batch predictionBatch) {
+	defer s.wg.Done()
 
-	if b.Verbose != nil && b.Verbose.Input {
-		log.Printf("[%s run] inputData :%v", b.Verbose.ID, batch.inputData)
+	if s.Verbose != nil && s.Verbose.Input {
+		log.Printf("[%s run] inputData :%v", s.Verbose.ID, batch.inputData)
 	}
 
 	// This is somewhat safe... unless Tensorflow C has a GLOBAL lock somewhere.
 	// Eventually we can just have the TF session run.
 	ctx := context.TODO()
-	results, err := b.evaluator.Evaluate(ctx, batch.inputData)
 
-	if b.Verbose != nil && b.Verbose.Output {
-		log.Printf("[%s run] results:%v", b.Verbose.ID, results)
+	s.activeLock.Lock()
+	s.active++
+	s.activeLock.Unlock()
+
+	results, err := s.evaluator.Evaluate(ctx, batch.inputData)
+
+	s.activeLock.Lock()
+	if s.active > 0 {
+		s.active--
 	}
 
-	defer b.bsPool.Put(batch.subBatches)
+	select {
+	case <-s.waiting:
+		s.free <- struct{}{}
+	default:
+	}
+	s.activeLock.Unlock()
+
+	if s.Verbose != nil && s.Verbose.Output {
+		log.Printf("[%s run] results:%v", s.Verbose.ID, results)
+	}
+
+	defer s.bsPool.Put(batch.subBatches)
 	defer func() {
 		for i := range batch.inputData {
 			batch.inputData[i] = nil
 		}
 
-		b.abPool.Put(batch.inputData)
+		s.abPool.Put(batch.inputData)
 	}()
 
 	// result shape is [0][input][outputs]
@@ -233,8 +266,8 @@ func (b *Service) run(batch predictionBatch) {
 			}
 		}
 
-		if b.Verbose != nil && b.Verbose.Output {
-			log.Printf("[%s run] o:%d batchResult:%v", b.Verbose.ID, o, batchResult)
+		if s.Verbose != nil && s.Verbose.Output {
+			log.Printf("[%s run] o:%d batchResult:%v", s.Verbose.ID, o, batchResult)
 		}
 
 		inputBatchMeta.channel <- batchResult
@@ -247,238 +280,31 @@ func (s *Service) dispatcher() {
 	s.wg.Add(1)
 	defer s.wg.Done()
 
-	active := s.getActive()
-	subBatches := s.getSubBatches()
-	curBatches := 0
-	curBatchRows := 0
-
-	var onDone counter.OnDone
-	var stats *stat.Values
-
-	submit := func() {
-		s.wg.Add(1)
-		onDone(time.Now(), stats.Values()...)
-		go s.run(predictionBatch{active, subBatches, curBatches})
-
-		curBatches = 0
-		curBatchRows = 0
-		active = s.getActive()
-		subBatches = s.getSubBatches()
-
-	}
-
 	var timeout *time.Duration
 	if s.Adjust == nil {
-		timeout = &s.MaxBatchWait
+		timeout = &s.MinBatchWait
 	} else {
 		timeout = &s.Adjust.CurrentTimeout
 	}
 
-	var deadline *time.Timer
+	dspr := &dispatcher{
+		Service:    s,
+		timeout:    timeout,
+		active:     s.getActive(),
+		subBatches: s.getSubBatches(),
+	}
 
-	for {
-		if deadline == nil {
-			// empty batch queue
-			select {
-			case batch := <-s.q:
-				if batch.closed {
-					return
-				}
+	var terminate bool
+	for !terminate {
+		terminate = dspr.dispatch()
+	}
 
-				onDone = s.dispatcherMetric.Begin(time.Now())
-				stats = stat.NewValues()
-
-				curBatchRows = batch.batchSize
-				subBatches[curBatches] = batch.subBatch
-				curBatches = 1
-
-				for o, inSlice := range batch.inputData {
-					active[o] = inSlice
-				}
-
-				if curBatchRows >= s.MaxBatchSize || s.MaxBatchCounts == 1 {
-					if s.Verbose != nil {
-						log.Printf("[%s Dispatcher] go curBatched:%d", s.Verbose.ID, curBatchRows)
-					}
-
-					// in theory, if b.MaxBatchCounts == 1, an upstream would
-					// skip the batching
-					stats.Append(mkbs(FullElements, curBatchRows, curBatches))
-					if s.Adjust != nil {
-						s.Adjust.Count()
-					}
-
-					submit()
-
-					// deadline will be nil since there's no batching
-				} else {
-					if s.Verbose != nil {
-						log.Printf("[%s Dispatcher] wait curBatched:%d", s.Verbose.ID, curBatchRows)
-					}
-
-					deadline = time.NewTimer(*timeout)
-				}
-			}
-		} else {
-			select {
-			case batch := <-s.q:
-				if batch.closed {
-					if curBatches > 0 {
-						stats.Append(mkbs(Closing, curBatchRows, curBatches))
-						s.wg.Add(1)
-						go s.run(predictionBatch{active, subBatches, curBatches})
-						onDone(time.Now(), stats.Values()...)
-					}
-
-					return
-				}
-
-				batchSize := batch.batchSize
-				if curBatchRows+batchSize > s.MaxBatchSize {
-					if s.Verbose != nil {
-						log.Printf("[%s Dispatcher] go expectedBatchSize:%d", s.Verbose.ID, curBatchRows+batchSize)
-					}
-
-					stats.Append(mkbs(FullElements, curBatchRows, curBatches))
-					submit()
-
-					onDone = s.dispatcherMetric.Begin(time.Now())
-					stats = stat.NewValues()
-
-					if s.Adjust != nil {
-						s.Adjust.Count()
-					}
-
-					// relying on GC
-					deadline = time.NewTimer(*timeout)
-				}
-
-				// TODO this may result in the batch having inconsistent state
-				var err error
-				for o, inSlice := range batch.inputData {
-					if active[o] == nil {
-						active[o] = inSlice
-						continue
-					}
-
-					// TODO maybe use xSlice
-					switch slicedActive := active[o].(type) {
-					case [][]int32:
-						switch aat := inSlice.(type) {
-						case [][]int32:
-							for _, untyped := range aat {
-								slicedActive = append(slicedActive, untyped)
-							}
-						default:
-							err = fmt.Errorf("inner expected int32 got %v", aat)
-							break
-						}
-						active[o] = slicedActive
-					case [][]int64:
-						switch aat := inSlice.(type) {
-						case [][]int64:
-							for _, untyped := range aat {
-								slicedActive = append(slicedActive, untyped)
-							}
-						default:
-							err = fmt.Errorf("inner expected int64 got %v", aat)
-							break
-						}
-						active[o] = slicedActive
-					case [][]float32:
-						switch aat := inSlice.(type) {
-						case [][]float32:
-							for _, untyped := range aat {
-								slicedActive = append(slicedActive, untyped)
-							}
-						default:
-							err = fmt.Errorf("inner expected float32 got %v", aat)
-							break
-						}
-						active[o] = slicedActive
-					case [][]float64:
-						switch aat := inSlice.(type) {
-						case [][]float64:
-							for _, untyped := range aat {
-								slicedActive = append(slicedActive, untyped)
-							}
-						default:
-							err = fmt.Errorf("inner expected float64 got %v", aat)
-							break
-						}
-						active[o] = slicedActive
-					case [][]string:
-						switch aat := inSlice.(type) {
-						case [][]string:
-							for _, untyped := range aat {
-								slicedActive = append(slicedActive, untyped)
-							}
-						default:
-							err = fmt.Errorf("inner expected string got %v", aat)
-							break
-						}
-						active[o] = slicedActive
-					default:
-						err = fmt.Errorf("unexpected initial value: %v", slicedActive)
-						break
-					}
-				}
-
-				if err != nil {
-					// TODO record
-					batch.subBatch.ec <- err
-					continue
-				}
-
-				curBatchRows += batchSize
-				subBatches[curBatches] = batch.subBatch
-				curBatches++
-
-				// curBatchRows should always be < s.MaxBatchSize
-				if curBatchRows >= s.MaxBatchSize || curBatches >= s.MaxBatchCounts {
-					if s.Verbose != nil {
-						log.Printf("[%s Dispatcher] go curBatched:%d curBatches:%d", s.Verbose.ID, curBatchRows, curBatches)
-					}
-
-					stats.Append(mkbs(MaxBatches, curBatchRows, curBatches))
-					submit()
-
-					if s.Adjust != nil {
-						s.Adjust.Count()
-					}
-
-					onDone = nil
-					stats = nil
-					deadline = nil
-				}
-			case <-deadline.C:
-				// curBatches should always be > 0
-				if curBatches > 0 {
-					if s.Verbose != nil {
-						log.Printf("[%s Dispatcher] go timeout curBatches:%d curBatchRows:%d", s.Verbose.ID, curBatches, curBatchRows)
-					}
-
-					stats.Append(mkbs(stat.Timeout, curBatchRows, curBatches))
-					submit()
-
-					if s.Adjust != nil {
-						s.Adjust.IncTimeout()
-					}
-				}
-
-				onDone = nil
-				stats = nil
-				deadline = nil
-			}
-		}
-
-		if s.closed {
-			return
-		}
+	if s.Verbose != nil {
+		log.Printf("[%s dispatcher] terminated", s.Verbose.ID)
 	}
 }
 
-func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig config.BatcherConfig, serviceMeta ServiceMeta) *Service {
+func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.BatcherConfig, serviceMeta ServiceMeta) *Service {
 	var adj *adjust.Adjust
 
 	ta := batchConfig.TimeoutAdjustments
@@ -490,24 +316,27 @@ func NewBatcher(evaluator *evaluator.Service, inputLen int, batchConfig config.B
 	}
 
 	b := &Service{
-		BatcherConfig: batchConfig,
-		q:             make(chan inputBatch, batchConfig.MaxBatchCounts),
-		evaluator:     evaluator,
-
+		q: make(chan inputBatch, batchConfig.MinBatchCounts),
 		bsPool: &sync.Pool{
 			New: func() interface{} {
-				return make([]subBatch, batchConfig.MaxBatchCounts)
+				return make([]subBatch, batchConfig.MinBatchCounts)
 			},
 		},
-
 		abPool: &sync.Pool{
 			New: func() interface{} {
 				return make([]interface{}, inputLen)
 			},
 		},
+		evaluator: evaluator,
 
-		ServiceMeta: serviceMeta,
-		Adjust:      adj,
+		waiting:    make(chan struct{}, 1),
+		free:       make(chan struct{}, 1),
+		activeLock: new(sync.RWMutex),
+
+		Adjust: adj,
+
+		BatcherConfig: batchConfig,
+		ServiceMeta:   serviceMeta,
 	}
 
 	go b.dispatcher()

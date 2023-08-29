@@ -13,6 +13,14 @@ import (
 	"github.com/viant/mly/shared/stat/metric"
 )
 
+type Evaluator interface {
+	// Evaluate should take the unstructured input params and produce an expected
+	// output.
+	Evaluate(ctx context.Context, params []interface{}) ([]interface{}, error)
+
+	Close() error
+}
+
 // Represents a TF session for running predictions.
 type Service struct {
 	EvaluatorMeta

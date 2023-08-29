@@ -15,12 +15,110 @@ import (
 	"github.com/viant/toolbox"
 )
 
+type mockEvaluator struct {
+	Triggered sync.WaitGroup
+	Waiter    chan struct{}
+}
+
+func (m *mockEvaluator) Evaluate(ctx context.Context, params []interface{}) ([]interface{}, error) {
+	m.Triggered.Done()
+	fmt.Println("mock trigger done")
+	<-m.Waiter
+	return []interface{}{}, nil
+}
+
+func (m mockEvaluator) Close() error {
+	return nil
+}
+
+func TestServiceConcurrencyMax(t *testing.T) {
+	mockEval := &mockEvaluator{
+		Waiter: make(chan struct{}),
+	}
+
+	mockTrigger := &mockEval.Triggered
+	mockWait := mockEval.Waiter
+
+	bc := config.BatcherConfig{
+		MinBatchCounts:          1,
+		MaxEvaluatorConcurrency: 1,
+	}
+
+	// TODO instead of using the batcher.Service API to test this, use the
+	// dispatcher API
+	batchSrv := NewBatcher(mockEval, 3, bc, createBSMeta())
+	batchSrv.Verbose = &config.V{
+		ID:     "test",
+		Input:  true,
+		Output: true,
+	}
+
+	feeds := make([]interface{}, 0)
+	feeds = append(feeds, [][]string{{"a"}, {"b"}})
+
+	mockTrigger.Add(1)
+
+	blockerWg := new(sync.WaitGroup)
+	blockerWg.Add(1)
+	go func() {
+		sb, err := batchSrv.queue(feeds)
+		assert.Nil(t, err)
+		blockerWg.Done()
+
+		select {
+		case <-sb.channel:
+			blockerWg.Done()
+		case err = <-sb.ec:
+		}
+
+	}()
+
+	fmt.Println("wait for blocker to queue")
+	blockerWg.Wait()
+
+	fmt.Println("wait for blocker to eval")
+	mockTrigger.Wait()
+
+	fmt.Println("queue for blocked")
+	blockedWg := new(sync.WaitGroup)
+	blockedWg.Add(1)
+	go func() {
+		sb, err := batchSrv.queue(feeds)
+		assert.Nil(t, err)
+		time.Sleep(1)
+		blockedWg.Done()
+
+		select {
+		case <-sb.channel:
+			blockedWg.Done()
+		case err = <-sb.ec:
+		}
+
+	}()
+
+	fmt.Println("wait for blocked to queue")
+	blockedWg.Wait()
+	fmt.Printf("blocked wg:%+v\n", blockedWg)
+	blockedWg.Add(1)
+
+	blockerWg.Add(1)
+
+	fmt.Println("mock finished waiting")
+
+	mockTrigger.Add(1)
+	mockWait <- struct{}{}
+
+	mockWait <- struct{}{}
+
+	blockedWg.Wait()
+}
+
 func TestServiceBatchMax(t *testing.T) {
 	signature, evaluator, met := test.TLoadEvaluator(t, "example/model/string_lookups_int_model")
 	batchSrv := NewBatcher(evaluator, len(signature.Inputs), config.BatcherConfig{
-		MaxBatchCounts: 3,
-		MaxBatchSize:   100,
-		MaxBatchWait:   time.Millisecond * 1,
+		MinBatchCounts: 3,
+		MinBatchSize:   100,
+		MinBatchWait:   time.Millisecond * 1,
 	}, createBSMeta())
 
 	batchSrv.Verbose = &config.V{
@@ -117,9 +215,9 @@ func BenchmarkServiceParallel(b *testing.B) {
 	signature, evaluator, _ := test.LoadEvaluator("example/model/string_lookups_int_model", bnil, bnil)
 
 	bcfg := config.BatcherConfig{
-		MaxBatchSize:   100,
-		MaxBatchCounts: 80,
-		MaxBatchWait:   time.Millisecond * 1,
+		MinBatchSize:   100,
+		MinBatchCounts: 80,
+		MinBatchWait:   time.Millisecond * 1,
 	}
 
 	batcher := NewBatcher(evaluator, len(signature.Inputs), bcfg, createBSMeta())
