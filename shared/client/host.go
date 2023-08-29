@@ -2,15 +2,16 @@ package client
 
 import (
 	"fmt"
-	"github.com/viant/mly/shared/circut"
-	"github.com/viant/mly/shared/common"
 	"net"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/viant/mly/shared/circut"
+	"github.com/viant/mly/shared/common"
 )
 
-var requestTimeout = 5 * time.Second
+var requestTimeout = 50 * time.Millisecond
 
 //Host represents endpoint host
 type Host struct {
