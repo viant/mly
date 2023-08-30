@@ -242,15 +242,11 @@ func (r *Request) NKeys() int {
 }
 
 // Validate is only used server-side.
-// Extra fields are ignored.
 func (r *Request) Validate() error {
 	missing := make([]string, 0)
 	for _, input := range r.inputs {
-		if input.Auxiliary {
-			continue
-		}
-
-		if _, ok := r.supplied[input.Name]; !ok {
+		_, ok := r.supplied[input.Name]
+		if !ok {
 			missing = append(missing, input.Name)
 		}
 	}

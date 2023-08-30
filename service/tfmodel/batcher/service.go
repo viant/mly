@@ -329,8 +329,8 @@ func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.
 		},
 		evaluator: evaluator,
 
-		waiting:    make(chan struct{}, 1),
-		free:       make(chan struct{}, 1),
+		waiting:    make(chan struct{}, 0),
+		free:       make(chan struct{}, 0),
 		activeLock: new(sync.RWMutex),
 
 		Adjust: adj,

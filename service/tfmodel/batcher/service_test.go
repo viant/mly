@@ -16,14 +16,14 @@ import (
 )
 
 type mockEvaluator struct {
-	Triggered sync.WaitGroup
-	Waiter    chan struct{}
+	Entered chan struct{}
+	Exited  chan struct{}
 }
 
 func (m *mockEvaluator) Evaluate(ctx context.Context, params []interface{}) ([]interface{}, error) {
-	m.Triggered.Done()
+	m.Entered <- struct{}{}
 	fmt.Println("mock trigger done")
-	<-m.Waiter
+	m.Exited <- struct{}{}
 	return []interface{}{}, nil
 }
 
@@ -33,11 +33,12 @@ func (m mockEvaluator) Close() error {
 
 func TestServiceConcurrencyMax(t *testing.T) {
 	mockEval := &mockEvaluator{
-		Waiter: make(chan struct{}),
+		Entered: make(chan struct{}, 0),
+		Exited:  make(chan struct{}, 0),
 	}
 
-	mockTrigger := &mockEval.Triggered
-	mockWait := mockEval.Waiter
+	mockIn := mockEval.Entered
+	mockOut := mockEval.Exited
 
 	bc := config.BatcherConfig{
 		MinBatchCounts:          1,
@@ -48,15 +49,13 @@ func TestServiceConcurrencyMax(t *testing.T) {
 	// dispatcher API
 	batchSrv := NewBatcher(mockEval, 3, bc, createBSMeta())
 	batchSrv.Verbose = &config.V{
-		ID:     "test",
+		ID:     "test-concurrency",
 		Input:  true,
 		Output: true,
 	}
 
 	feeds := make([]interface{}, 0)
 	feeds = append(feeds, [][]string{{"a"}, {"b"}})
-
-	mockTrigger.Add(1)
 
 	blockerWg := new(sync.WaitGroup)
 	blockerWg.Add(1)
@@ -77,9 +76,9 @@ func TestServiceConcurrencyMax(t *testing.T) {
 	blockerWg.Wait()
 
 	fmt.Println("wait for blocker to eval")
-	mockTrigger.Wait()
+	<-mockIn
 
-	fmt.Println("queue for blocked")
+	fmt.Println("queue blocked")
 	blockedWg := new(sync.WaitGroup)
 	blockedWg.Add(1)
 	go func() {
@@ -98,17 +97,29 @@ func TestServiceConcurrencyMax(t *testing.T) {
 
 	fmt.Println("wait for blocked to queue")
 	blockedWg.Wait()
+
 	fmt.Printf("blocked wg:%+v\n", blockedWg)
+	// blockeR finishes
+	blockerWg.Add(1)
+	// blockeD finishes
 	blockedWg.Add(1)
 
-	blockerWg.Add(1)
+	// should trigger blocker to finish
+	<-mockOut
 
-	fmt.Println("mock finished waiting")
+	select {
+	case <-mockIn:
+		t.Error("dispatcher should not have sent")
+	case <-mockOut:
+		t.Error("weird ordering")
+	default:
+	}
 
-	mockTrigger.Add(1)
-	mockWait <- struct{}{}
+	// triggered by blocker
+	<-mockIn
 
-	mockWait <- struct{}{}
+	// should trigger blocked to finish
+	<-mockOut
 
 	blockedWg.Wait()
 }

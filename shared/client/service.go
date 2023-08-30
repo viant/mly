@@ -118,6 +118,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 	data, err := Marshal(input, modelName)
 	if err != nil {
+		stats.AppendError(err)
 		return err
 	}
 
@@ -161,6 +162,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 	err = gojay.Unmarshal(body, response)
 	if err != nil {
+		stats.AppendError(err)
 		return fmt.Errorf("failed to unmarshal: '%s'; due to %w", body, err)
 	}
 
@@ -173,6 +175,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}
 
 	if err = s.handleResponse(ctx, response.Data, cached, cachable); err != nil {
+		stats.AppendError(err)
 		return fmt.Errorf("failed to handle resp: %w", err)
 	}
 
@@ -577,6 +580,7 @@ func (s *Service) refreshMetadata() {
 }
 
 func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values) ([]byte, error) {
+	// TODO per-host counters
 	host, err := s.getHost()
 	if err != nil {
 		return nil, err
