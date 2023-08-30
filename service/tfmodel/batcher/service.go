@@ -248,7 +248,8 @@ func (s *Service) run(batch predictionBatch) {
 		r := o + inputBatchMeta.batchSize
 		batchResult := make([]interface{}, len(results))
 
-		// len(results) == 1
+		// usually len(results) == 1
+		// TODO investigate other cases
 		for resOffset, resSlice := range results {
 			switch typedSlice := resSlice.(type) {
 			case [][]int32:
@@ -261,8 +262,18 @@ func (s *Service) run(batch predictionBatch) {
 				batchResult[resOffset] = typedSlice[o:r]
 			case [][]string:
 				batchResult[resOffset] = typedSlice[o:r]
+			case []int32:
+				batchResult[resOffset] = typedSlice[o:r]
+			case []int64:
+				batchResult[resOffset] = typedSlice[o:r]
+			case []float32:
+				batchResult[resOffset] = typedSlice[o:r]
+			case []float64:
+				batchResult[resOffset] = typedSlice[o:r]
+			case []string:
+				batchResult[resOffset] = typedSlice[o:r]
 			default:
-				inputBatchMeta.ec <- fmt.Errorf("unhandled output type:%v", typedSlice)
+				inputBatchMeta.ec <- fmt.Errorf("batching unhandled output type:%V", typedSlice)
 			}
 		}
 
@@ -329,7 +340,7 @@ func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.
 		},
 		evaluator: evaluator,
 
-		waiting:    make(chan struct{}, 0),
+		waiting:    make(chan struct{}, 1),
 		free:       make(chan struct{}, 0),
 		activeLock: new(sync.RWMutex),
 
