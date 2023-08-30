@@ -13,7 +13,13 @@ type MisraGries struct {
 	l  *sync.Mutex
 }
 
-func New(mg *misragries.MisraGries) tracker.Tracker {
+func NewK(k int) MisraGries {
+	impl := misragries.NewMisraGries(k)
+	return New(impl)
+
+}
+
+func New(mg *misragries.MisraGries) MisraGries {
 	return MisraGries{mg: mg, l: new(sync.Mutex)}
 }
 

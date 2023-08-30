@@ -1,4 +1,4 @@
-package layers
+package tfmodel
 
 import (
 	"fmt"
@@ -7,12 +7,12 @@ import (
 
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/domain"
-	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/shared/common"
 )
 
 // Dictionary uses domain.Signature to determine which inputs should have an encoding lookup
 // from the Tensorflow graph.
+// TODO pull out *domain.Signature, just use a slice of something.
 func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signature) (*common.Dictionary, error) {
 	var layers []string
 	for _, input := range signature.Inputs {
@@ -35,7 +35,7 @@ func Dictionary(session *tf.Session, graph *tf.Graph, signature *domain.Signatur
 func DiscoverDictionary(session *tf.Session, graph *tf.Graph, layers []string) (*common.Dictionary, error) {
 	var result = new(common.Dictionary)
 	for _, name := range layers {
-		exported, err := tfmodel.Export(session, graph, name)
+		exported, err := Export(session, graph, name)
 		if err != nil {
 			return nil, err
 		}

@@ -1,12 +1,9 @@
 {
   "Counters": [
-    {},
-    {},
-    {},
-    {},
     {
+      "@indexBy@": "Value",
       "Value": "invalid",
-      "Count": 1
+      "Count": 3
     }
   ]
 }

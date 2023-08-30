@@ -74,10 +74,7 @@ func (s *Service) SelfTest() error {
 	numModels := len(s.config.ModelList.Models)
 	waitGroup.Add(numModels)
 
-	hosts := []*client.Host{{
-		Name: "localhost",
-		Port: s.config.Endpoint.Port,
-	}}
+	hosts := client.NewHosts(s.config.Endpoint.Port, []string{"localhost"})
 
 	timeout := time.Duration(s.config.Endpoint.ReadTimeoutMs) * time.Millisecond
 
@@ -142,16 +139,16 @@ func (s *Service) SelfTest() error {
 
 // Registers Shutdown() on interrupt.
 func (s *Service) shutdownOnInterrupt() {
-	closed := make(chan struct{})
 	go func() {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, os.Interrupt)
+
 		<-sigint
+
 		// We received an interrupt signal, shut down.
 		if err := s.Shutdown(context.Background()); err != nil {
 			log.Printf("HTTP Service Shutdown: %v", err)
 		}
-		close(closed)
 	}()
 }
 

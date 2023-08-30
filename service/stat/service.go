@@ -18,6 +18,7 @@ func (e service) Keys() []string {
 		stat.ErrorKey,
 		Evaluate,
 		Pending,
+		// Deprecated
 		stat.Timeout,
 		Invalid,
 		stat.Canceled,
@@ -40,6 +41,7 @@ func (e service) Map(value interface{}) int {
 		case Pending:
 			return 2
 		case stat.Timeout:
+			// Deprecated
 			return 3
 		case Invalid:
 			return 4

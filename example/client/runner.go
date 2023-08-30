@@ -3,157 +3,252 @@ package client
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/endpoint/checker"
 	"github.com/viant/mly/shared/client"
+	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/toolbox"
 )
 
-func RunWithOptions(options *Options) error {
-	options.Init()
-	if err := options.Validate(); err != nil {
+func RunWithOptions(runOpts *Options) error {
+	runOpts.Init()
+	if err := runOpts.Validate(); err != nil {
 		return err
 	}
 
-	if options.Model == "" {
+	if runOpts.Model == "" {
 		return fmt.Errorf("could not determine model")
 	}
 
-	pls, err := options.Payloads()
+	payloads, err := runOpts.Payloads()
 	if err != nil {
 		return err
 	}
 
-	if options.Debug {
-		fmt.Printf("payloads:%v\n", pls)
+	if runOpts.Debug {
+		fmt.Printf("payloads:%v\n", payloads)
 	}
 
 	gm := gmetric.New()
 
-	opts := []client.Option{
-		client.WithDebug(options.Debug),
+	cliOpts := []client.Option{
+		client.WithDebug(runOpts.Debug),
 		client.WithGmetrics(gm),
 	}
 
-	if options.CacheMB > 0 {
-		opts = append(opts, client.WithCacheSize(options.CacheMB))
+	if runOpts.CacheMB > 0 {
+		cliOpts = append(cliOpts, client.WithCacheSize(runOpts.CacheMB))
 	}
 
-	if !options.NoHashCheck {
-		opts = append(opts, client.WithHashValidation(true))
+	if !runOpts.NoHashCheck {
+		cliOpts = append(cliOpts, client.WithHashValidation(true))
 	}
 
-	cli, err := client.New(options.Model, options.Hosts(), opts...)
+	cli, err := client.New(runOpts.Model, runOpts.Hosts(), cliOpts...)
 	if err != nil {
 		return err
 	}
 
-	if options.PayloadDelay > 0 {
-		time.Sleep(time.Duration(options.PayloadDelay) * time.Second)
+	if runOpts.PayloadDelay > 0 {
+		time.Sleep(time.Duration(runOpts.PayloadDelay) * time.Second)
 	}
 
-	pPause := time.Duration(options.PayloadPause)
-	lp := len(pls)
+	storableSrv := storable.Singleton()
 
-	concurrency := options.Concurrent
-
-	for i, upl := range pls {
-		pl := upl
-		payloadedRunner := func() error {
-			message := cli.NewMessage()
-			defer message.Release()
-
-			pl.SetBatch(message)
-			pl.Iterator(func(k string, value interface{}) error {
-				return pl.Bind(k, value, message)
-			})
-
-			response := &client.Response{}
-
-			storableSrv := storable.Singleton()
-			maker, err := storableSrv.Lookup(options.Storable)
-			if err != nil {
-				if options.Debug {
-					fmt.Printf("could not find Storable:\"%s\", building dynamically\n", options.Storable)
-				}
-
-				maker = checker.Generated(cli.Config.Datastore.MetaInput.Outputs, pl.Batch, false)
-			}
-
-			response.Data = maker()
-
-			ctx := context.Background()
-			cancel := func() {}
-			if options.TimeoutUs > 0 {
-				ctx, cancel = context.WithTimeout(ctx, time.Duration(options.TimeoutUs)*time.Microsecond)
-			}
-
-			err = cli.Run(ctx, message, response)
-
-			if err != nil && !options.SkipError {
-				cancel()
-				return err
-			}
-
-			cancel()
-
-			if !options.NoOutput {
-				toolbox.Dump(response)
-			}
-
-			return nil
+	var maker func(int) func() common.Storable
+	storableMaker, err := storableSrv.Lookup(runOpts.Storable)
+	if err != nil {
+		if runOpts.Debug {
+			log.Printf("could not find Storable:\"%s\", building dynamically", runOpts.Storable)
 		}
 
-		errs := make([]error, concurrency)
-
-		wg := new(sync.WaitGroup)
-		wg.Add(concurrency)
-
-		for wi := 0; wi < concurrency; wi++ {
-			go func(wi int) {
-				defer wg.Done()
-
-				time.Sleep(1)
-
-				err = payloadedRunner()
-
-				if err != nil {
-					errs[wi] = err
-				}
-			}(wi)
+		maker = func(batch int) func() common.Storable {
+			return checker.Generated(cli.Config.Datastore.MetaInput.Outputs, batch, false)
 		}
 
-		wg.Wait()
-
-		for wi, err := range errs {
-			if err != nil {
-				return fmt.Errorf("%d:%w", wi, err)
-			}
-		}
-
-		if i < lp-1 && pPause > 0 {
-			time.Sleep(pPause * time.Second)
+		err = nil
+	} else {
+		maker = func(int) func() common.Storable {
+			return storableMaker
 		}
 	}
 
-	if options.Metrics {
-		ctrs := gm.OperationCounters()
-		toolbox.Dump(ctrs)
+	lenPayloads := len(payloads)
+
+	fullyCompleted := new(sync.WaitGroup)
+	fullyCompleted.Add(lenPayloads * runOpts.Repeats)
+
+	fchan := make(chan runContext, 1)
+	closed := make(chan struct{}, 1)
+
+	numWorkers := runOpts.Workers
+
+	var echan chan error
+	if !runOpts.SkipError {
+		echan = make(chan error, numWorkers)
+	}
+
+	concurrency := runOpts.Concurrent
+	for w := 0; w < numWorkers; w++ {
+		go worker(w, echan, fchan, closed, concurrency, fullyCompleted)
+	}
+
+	report := Report{
+		Start: time.Now(),
+		Runs:  make([]RepeatSet, runOpts.Repeats),
+	}
+
+	pause := time.Duration(runOpts.PayloadPause)
+	for r := 0; r < runOpts.Repeats; r++ {
+		report.Runs[r] = RepeatSet{r, make([]WorkerPayload, lenPayloads)}
+		rs := &report.Runs[r]
+
+		for i, pload := range payloads {
+			rs.WPayloads[i] = WorkerPayload{Payload: pload}
+			rd := &rs.WPayloads[i]
+			payloadedRunner := makePayloadRunner(cli, pload, runOpts, maker)
+
+			fchan <- runContext{
+				WP: rd,
+				Fn: payloadedRunner,
+			}
+
+			if echan != nil {
+				select {
+				case err = <-echan:
+					return err
+				default:
+				}
+			}
+
+			if i < lenPayloads-1 && pause > 0 {
+				time.Sleep(pause * time.Second)
+			}
+		}
+	}
+
+	if echan != nil {
+		waitErr := make(chan struct{}, 0)
+		go func() {
+			fullyCompleted.Wait()
+			waitErr <- struct{}{}
+		}()
+		select {
+		case err = <-echan:
+			return err
+		case <-waitErr:
+		}
+	} else {
+		fullyCompleted.Wait()
+	}
+
+	for w := 0; w < numWorkers; w++ {
+		closed <- struct{}{}
 	}
 
 	cli.Close()
 
-	if options.ErrorHistory {
+	report.End = time.Now()
+
+	opcs := gm.OperationCounters()
+	report.Metrics = opcs
+
+	if runOpts.Metrics {
+		toolbox.Dump(opcs)
+	}
+
+	if runOpts.ErrorHistory {
 		tops := cli.ErrorHistory.TopK()
 		for _, t := range tops {
 			fmt.Printf("%d %s\n", t.Count, string(t.Data))
 		}
+	}
 
+	if runOpts.Report {
+		toolbox.Dump(report)
 	}
 
 	return err
+}
+
+type runContext struct {
+	WP *WorkerPayload
+	Fn func() (*client.Response, error)
+}
+
+func worker(worker int, echan chan error, fchan chan runContext, closed chan struct{},
+	concurrency int, allDone *sync.WaitGroup) {
+
+	for {
+		select {
+		case rc := <-fchan:
+			wg := new(sync.WaitGroup)
+			wg.Add(concurrency)
+
+			wp := rc.WP
+			wp.Worker = worker
+			wp.Runs = make([]WPRun, concurrency)
+
+			payloadedRunner := rc.Fn
+			for wi := 0; wi < concurrency; wi++ {
+				go func(wi int) {
+					resp, err := payloadedRunner()
+					if echan != nil && err != nil {
+						echan <- err
+					}
+
+					wp.Runs[wi] = WPRun{resp, err}
+					wg.Done()
+				}(wi)
+			}
+			wg.Wait()
+
+			allDone.Done()
+		case <-closed:
+			break
+		}
+	}
+}
+
+func makePayloadRunner(cli *client.Service, pl *CliPayload, runOpts *Options,
+	builder func(int) func() common.Storable) func() (*client.Response, error) {
+
+	maker := builder(pl.Batch)
+
+	return func() (*client.Response, error) {
+		message := cli.NewMessage()
+
+		pl.SetBatch(message)
+		pl.Iterator(func(k string, value interface{}) error {
+			return pl.Bind(k, value, message)
+		})
+
+		response := &client.Response{}
+		response.Data = maker()
+
+		ctx := context.Background()
+		cancel := func() {}
+		if runOpts.TimeoutUs > 0 {
+			ctx, cancel = context.WithTimeout(ctx, time.Duration(runOpts.TimeoutUs)*time.Microsecond)
+		}
+
+		err := cli.Run(ctx, message, response)
+
+		cancel()
+
+		if err != nil {
+			return nil, err
+		}
+
+		if !runOpts.NoOutput {
+			toolbox.Dump(response)
+		}
+
+		return response, nil
+	}
 }

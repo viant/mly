@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"reflect"
 	"strings"
@@ -88,6 +89,14 @@ func (h *metaHandler) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 		err = h.handleConfigRequest(writer)
 		specValues.Append(err)
 		values.Append(Config)
+	} else if strings.HasSuffix(request.RequestURI, "/stats") {
+		stats := h.modelService.Stats()
+		data, err := json.Marshal(stats)
+		if err != nil {
+			log.Printf("%v", err)
+		}
+		writer.Header().Set("Content-type", "application/json")
+		_, err = io.Copy(writer, bytes.NewReader(data))
 	} else {
 		values.Append(NotFound)
 		http.NotFound(writer, request)
@@ -101,14 +110,14 @@ func (h *metaHandler) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 
 func NewMetaHandler(srv *service.Service, datastoreList *sconfig.DatastoreList, gmetrics *gmetric.Service) *metaHandler {
 	cfg := srv.Config()
-	location := reflect.TypeOf(&metaHandler{}).PkgPath()
+	location := reflect.TypeOf(metaHandler{}).PkgPath()
 	handler := &metaHandler{
 		modelService: srv,
 		datastore:    assembleConfig(datastoreList, cfg.DataStore),
 
-		handlerMetrics: gmetrics.MultiOperationCounter(location, cfg.ID+"MetaHandler", cfg.ID+" meta handler performance", time.Microsecond, time.Minute, 2, NewServiceVP()),
-		dictMetrics:    gmetrics.MultiOperationCounter(location, cfg.ID+"DictMeta", cfg.ID+" dictionary service performance", time.Microsecond, time.Minute, 2, NewProvider()),
-		cfgMetrics:     gmetrics.MultiOperationCounter(location, cfg.ID+"CfgMeta", cfg.ID+" configuration service performance", time.Microsecond, time.Minute, 2, NewProvider()),
+		handlerMetrics: gmetrics.MultiOperationCounter(location, cfg.ID+"MetaHandler", cfg.ID+" meta handler performance", time.Microsecond, time.Minute, 1, NewServiceVP()),
+		dictMetrics:    gmetrics.MultiOperationCounter(location, cfg.ID+"DictMeta", cfg.ID+" dictionary service performance", time.Microsecond, time.Minute, 1, NewProvider()),
+		cfgMetrics:     gmetrics.MultiOperationCounter(location, cfg.ID+"CfgMeta", cfg.ID+" configuration service performance", time.Microsecond, time.Minute, 1, NewProvider()),
 	}
 
 	handler.datastore.MetaInput = cfg.MetaInput

@@ -1,14 +1,14 @@
 package buffer
 
 import (
-	"github.com/stretchr/testify/assert"
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRead(t *testing.T) {
-
 	useCases := []struct {
 		description string
 		bufferSize  int
@@ -60,5 +60,4 @@ func TestRead(t *testing.T) {
 		pool.Put(data)
 
 	}
-
 }

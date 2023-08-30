@@ -78,22 +78,28 @@ func runApp(config *Config, wg *sync.WaitGroup) error {
 
 	server := make(chan error)
 
-	m := sync.Mutex{}
-	m.Lock()
+	startServerWg := new(sync.WaitGroup)
+	startServerWg.Add(1)
 
+	var startErr error
 	// run server in background
 	go func() {
 		l, err := srv.Listen()
 		if err != nil {
-			server <- err
+			startErr = err
+			startServerWg.Done()
+			return
 		}
 
-		m.Unlock()
+		startServerWg.Done()
 		server <- srv.Serve(l)
 	}()
 
-	m.Lock()
-	defer m.Unlock()
+	startServerWg.Wait()
+
+	if startErr != nil {
+		return startErr
+	}
 
 	err = srv.SelfTest()
 	if err != nil {

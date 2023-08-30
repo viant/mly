@@ -12,12 +12,12 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/cyningsun/heavy-hitters/misragries"
 	"github.com/francoispqt/gojay"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/shared/client/config"
@@ -26,6 +26,7 @@ import (
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
 	"github.com/viant/mly/shared/stat"
+	"github.com/viant/mly/shared/stat/metric"
 	"github.com/viant/mly/shared/tracker"
 	"github.com/viant/mly/shared/tracker/mg"
 	"github.com/viant/xunsafe"
@@ -50,9 +51,10 @@ type Service struct {
 	// container for Datastore gmetric objects
 	gmetrics *gmetric.Service
 
-	counter     *gmetric.Operation
-	httpCounter *gmetric.Operation
-	dictCounter *gmetric.Operation
+	counter        *gmetric.Operation
+	httpCounter    *gmetric.Operation
+	httpCliCounter *gmetric.Operation
+	dictCounter    *gmetric.Operation
 
 	ErrorHistory tracker.Tracker
 }
@@ -116,26 +118,30 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 	data, err := Marshal(input, modelName)
 	if err != nil {
+		stats.AppendError(err)
 		return err
 	}
 
 	stats.Append(stat.NoSuchKey)
 	if isDebug {
-		fmt.Printf("[%s] request: %s\n", modelName, strings.Trim(string(data), " \n"))
+		log.Printf("[%s] request: %s", modelName, strings.Trim(string(data), " \n"))
 	}
 
 	body, err := func() ([]byte, error) {
 		httpOnDone := s.httpCounter.Begin(time.Now())
 		httpStats := stat.NewValues()
 
+		od := metric.EnterThenExit(s.httpCounter, time.Now(), stat.Enter, stat.Exit)
+
 		defer func() {
-			httpOnDone(time.Now(), *httpStats...)
+			httpOnDone(time.Now(), httpStats.Values()...)
+			od()
 		}()
 
-		body, err := s.postRequest(ctx, data)
+		body, err := s.postRequest(ctx, data, httpStats)
 		if isDebug {
-			fmt.Printf("[%s] response.Body:%s\n", modelName, body)
-			fmt.Printf("[%s] error:%s\n", modelName, err)
+			log.Printf("[%s] response.Body:%s", modelName, body)
+			log.Printf("[%s] error:%s", modelName, err)
 		}
 
 		if err != nil {
@@ -156,11 +162,12 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 	err = gojay.Unmarshal(body, response)
 	if err != nil {
+		stats.AppendError(err)
 		return fmt.Errorf("failed to unmarshal: '%s'; due to %w", body, err)
 	}
 
 	if isDebug {
-		fmt.Printf("[%v] response.Data: %s, %v\n", modelName, response.Data, err)
+		log.Printf("[%v] response.Data: %s, %v", modelName, response.Data, err)
 	}
 
 	if response.Status != common.StatusOK {
@@ -168,6 +175,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}
 
 	if err = s.handleResponse(ctx, response.Data, cached, cachable); err != nil {
+		stats.AppendError(err)
 		return fmt.Errorf("failed to handle resp: %w", err)
 	}
 
@@ -212,8 +220,8 @@ func (s *Service) readFromCacheInBatch(ctx context.Context, batchSize int, dataT
 	for k := 0; k < batchSize; k++ {
 		go func(index int) {
 			defer waitGroup.Done()
-			cacheEntry := reflect.New(dataType.Elem()).Interface()
 			key := cachable.CacheKeyAt(index)
+			cacheEntry := reflect.New(dataType.Elem()).Interface()
 			has, dictHash, e := s.readFromCache(ctx, key, cacheEntry)
 			mux.Lock()
 			defer mux.Unlock()
@@ -279,12 +287,12 @@ func (s *Service) init(options []Option) error {
 
 	location := reflect.TypeOf(Service{}).PkgPath()
 	s.counter = s.gmetrics.MultiOperationCounter(location, s.Model+"Client", s.Model+" client performance", time.Microsecond, time.Minute, 2, stat.NewClient())
-	s.httpCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTP", s.Model+" client HTTP performance", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly())
+	s.httpCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTP", s.Model+" client HTTP overall performance", time.Microsecond, time.Minute, 2, stat.NewHttp())
+	s.httpCliCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTPCli", s.Model+" client HTTP client performance", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly())
 	s.dictCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientDict", s.Model+" client dictionary performance", time.Microsecond, time.Minute, 1, stat.ErrorOnly())
 
 	if s.ErrorHistory == nil {
-		impl := misragries.NewMisraGries(20)
-		s.ErrorHistory = mg.New(impl)
+		s.ErrorHistory = mg.NewK(20)
 	}
 
 	if s.Config.MaxRetry == 0 {
@@ -446,6 +454,7 @@ func (s *Service) initDatastore() error {
 		if err := remoteCfg.FieldsDescriptor(remoteCfg.Fields); err != nil {
 			return err
 		}
+
 		s.newStorable = func() common.Storable {
 			return storable.New(remoteCfg.Fields)
 		}
@@ -472,6 +481,7 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 	for i := range hosts {
 		hosts[i].Init()
 	}
+
 	aClient := &Service{
 		Config: Config{
 			Model: model,
@@ -569,49 +579,87 @@ func (s *Service) refreshMetadata() {
 	}
 }
 
-func (s *Service) postRequest(ctx context.Context, data []byte) ([]byte, error) {
+func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values) ([]byte, error) {
+	// TODO per-host counters
 	host, err := s.getHost()
 	if err != nil {
 		return nil, err
 	}
+
 	var output []byte
+
 	output, err = s.httpPost(ctx, data, host)
 	if common.IsConnectionError(err) {
+		if s.Config.Debug {
+			log.Printf("[%s postRequest] connection error:%s", s.Config.Model, err)
+		}
+		mvt.Append(stat.Down)
 		host.FlagDown()
 	}
+
 	return output, err
 }
 
 func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte, error) {
 	evalUrl := host.evalURL(s.Model)
+	var terminate bool
 	var postErr error
 	for i := 0; i < s.MaxRetry; i++ {
-		postErr = nil
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, evalUrl, bytes.NewReader(data))
-		if err != nil {
-			return nil, err
-		}
+		data, err := func() ([]byte, error) {
+			onDone := s.httpCliCounter.Begin(time.Now())
+			stats := stat.NewValues()
 
-		response, err := s.httpClient.Do(request)
-		if err != nil {
-			postErr = err
-			continue
-		}
+			defer func() {
+				onDone(time.Now(), stats.Values()...)
+			}()
 
-		var data []byte
-		if response.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("invalid response: %v, %s", response.StatusCode, data)
-		}
-
-		if response.Body != nil {
-			data, err = io.ReadAll(response.Body)
-			_ = response.Body.Close()
-
+			request, err := http.NewRequestWithContext(ctx, http.MethodPost, evalUrl, bytes.NewReader(data))
 			if err != nil {
-				postErr = err
-				continue
+				stats.AppendError(err)
+				return nil, err
 			}
 
+			response, err := s.httpClient.Do(request)
+			if s.Config.Debug {
+				log.Printf("http try:%d err:%s", i, err)
+			}
+
+			if err != nil {
+				stats.AppendError(err)
+				return nil, err
+			}
+
+			var data []byte
+			if response.StatusCode != http.StatusOK {
+				// as long as this func is run synchronously,
+				// this is safe
+				terminate = true
+
+				return nil, fmt.Errorf("invalid response: %v, %s", response.StatusCode, data)
+			}
+
+			if response.Body != nil {
+				data, err = io.ReadAll(response.Body)
+				_ = response.Body.Close()
+
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			return data, nil
+		}()
+
+		if err != nil {
+			postErr = err
+		}
+
+		if terminate || ctx.Err() != nil {
+			// stop trying if deadline exceeded or canceled
+			break
+		}
+
+		if data != nil {
 			return data, nil
 		}
 	}
@@ -623,26 +671,36 @@ func (s *Service) getHost() (*Host, error) {
 	count := len(s.Hosts)
 	switch count {
 	case 0:
-
+		return nil, fmt.Errorf("no hosts configured")
 	case 1:
 		candidate := s.Hosts[0]
 		if !candidate.IsUp() {
-			return nil, fmt.Errorf("%v:%v %w", candidate.Name, candidate.Port, common.ErrNodeDown)
+			return nil, fmt.Errorf("%v:%v %w", candidate.Name(), candidate.Port(), common.ErrNodeDown)
 		}
 		return candidate, nil
 	default:
+		// TODO introduce a fallback mode
 		index := atomic.AddInt64(&s.hostIndex, 1) % int64(count)
 		candidate := s.Hosts[index]
 		if candidate.IsUp() {
 			return candidate, nil
 		}
+
 		for i := 0; i < len(s.Hosts); i++ {
 			if s.Hosts[i].IsUp() {
 				return s.Hosts[i], nil
 			}
 		}
 	}
-	return nil, fmt.Errorf("%v:%v %w", s.Hosts[0].Name, s.Hosts[0].Port, common.ErrNodeDown)
+
+	addrs := make([]string, count, count)
+	for i, h := range s.Hosts {
+		addrs[i] = h.Name() + ":" + strconv.Itoa(h.Port())
+	}
+
+	hostsDesc := strings.Join(addrs, ",")
+
+	return nil, fmt.Errorf("no working hosts:%s %w", hostsDesc, common.ErrNodeDown)
 }
 
 func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable Cachable, hash int) {
@@ -656,7 +714,7 @@ func (s *Service) updatedCache(ctx context.Context, target interface{}, cachable
 		return
 	case reflect.Slice:
 	default:
-		fmt.Printf("unspportd target type: %T", target)
+		log.Printf("unsupported target type: %T", target)
 	}
 
 	batchSize := cachable.BatchSize()

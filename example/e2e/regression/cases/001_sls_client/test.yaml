@@ -7,8 +7,8 @@ pipeline:
     target: $target
     checkError: true
     commands:
-      - /tmp/e2e/mlyc -m sli -a 'sa:a;sl:a;aux:test'
-      - /tmp/e2e/mlyc -m sli -a 'sa:a;sl:a;aux:test'
+      - /tmp/e2e/mlyc -m sli -a 'sa:a;sl:a;aux:test;kf:k'
+      - /tmp/e2e/mlyc -m sli -a 'sa:a;sl:a;aux:test;kf:k'
 
   assert:
     action: validator:assert

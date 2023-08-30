@@ -17,23 +17,40 @@ var exists struct{} = struct{}{}
 // There is no strict struct for request payload since some of the keys of the request are dynamically generated based on the model inputs.
 // See shared/client.Message for client-side perspective.
 type Request struct {
-	Body     []byte // usually the POST JSON content
-	Feeds    []interface{}
-	inputs   map[string]*domain.Input
-	supplied map[string]struct{}
-	Input    *transfer.Input
+	Body []byte // usually the POST JSON content
+
+	// Passed through to Evaluator.
+	// This is expected to be [numInputs][1][batchSize]T.
+	// TODO consider scenario when the second slice does not have length 1.
+	Feeds []interface{}
+
+	supplied map[string]struct{} // used to check if the required inputs were provided
+
+	Input *transfer.Input // cache metadata
+
+	// type metadata from service/tfservice.Service.inputs
+	// see service/tfmodel.(*Service).reconcileIOFromSignature
+	inputs map[string]*domain.Input
 }
 
 func NewRequest(keyLen int, inputs map[string]*domain.Input) *Request {
+	inputLen := 0
+	for _, inp := range inputs {
+		if !inp.Auxiliary {
+			inputLen++
+		}
+	}
+
 	return &Request{
-		inputs:   inputs,
-		Feeds:    make([]interface{}, keyLen),
-		Input:    &transfer.Input{},
+		Feeds:    make([]interface{}, inputLen),
 		supplied: make(map[string]struct{}, keyLen),
+		Input:    &transfer.Input{},
+		inputs:   inputs,
 	}
 }
 
 // Put is used when constructing a request NOT using gojay.
+// Deprecated - no longer support this option.
 func (r *Request) Put(key string, value string) error {
 	if input, ok := r.inputs[key]; ok {
 		r.supplied[key] = exists
@@ -225,20 +242,17 @@ func (r *Request) NKeys() int {
 }
 
 // Validate is only used server-side.
-// Extra fields are ignored.
 func (r *Request) Validate() error {
-	// TODO this isn't super accurate but it works as a quick check
-	if len(r.inputs) != len(r.supplied) {
-		missing := make([]string, 0)
-		for _, input := range r.inputs {
-			if _, ok := r.supplied[input.Name]; !ok {
-				missing = append(missing, input.Name)
-			}
+	missing := make([]string, 0)
+	for _, input := range r.inputs {
+		_, ok := r.supplied[input.Name]
+		if !ok {
+			missing = append(missing, input.Name)
 		}
+	}
 
-		if len(missing) > 0 {
-			return fmt.Errorf("failed to build request due to missing fields: %v", missing)
-		}
+	if len(missing) > 0 {
+		return fmt.Errorf("failed to build request due to missing fields: %v", missing)
 	}
 
 	return nil

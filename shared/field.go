@@ -7,14 +7,21 @@ import (
 type (
 	Field struct {
 		Name     string
-		Index    int
+		Index    int    // Position in cache key.
 		DataType string `json:",omitempty" yaml:",omitempty"`
 
 		// Indicates not an input for the model, but is eligible to
-		// be passed in a payload, and is NOT used as a key.
+		// be passed in a payload.
 		Auxiliary bool `json:",omitempty" yaml:",omitempty"`
-		Wildcard  bool `json:",omitempty" yaml:",omitempty"`
-		Precision int  `json:",omitempty" yaml:",omitempty"`
+
+		// Indicates, on its own, that it is an input for the model,
+		// and that it should be directly input as a cache key.
+		// Applies to string inputs.
+		Wildcard bool `json:",omitempty" yaml:",omitempty"`
+
+		// Indicates, on its own, that it is an input for the model,
+		// and that it should be directly input as a cache key.
+		Precision int `json:",omitempty" yaml:",omitempty"`
 
 		rawType reflect.Type
 	}
@@ -105,13 +112,13 @@ func (m *MetaInput) Init() {
 			}
 		}
 	}
+
 	for i, input := range m.Inputs {
-		if input.Auxiliary { //this is an input for post model prediction transformer
-			m.Inputs[i].Index = -1 //unknown fields
-		}
 		if input.rawType == nil {
+			// default input type is string
 			input.rawType = reflect.TypeOf("")
 		}
+
 		m.Inputs[i].Index = i
 	}
 }

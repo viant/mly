@@ -7,14 +7,18 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/francoispqt/gojay"
+	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/buffer"
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/request"
+	sstat "github.com/viant/mly/service/stat"
 	"github.com/viant/mly/shared/common"
+	"github.com/viant/mly/shared/stat"
 )
 
 // Handler converts a model prediction HTTP request to its internal calls.
@@ -22,6 +26,8 @@ type Handler struct {
 	maxDuration time.Duration
 	service     *Service
 	pool        *buffer.Pool
+
+	overheadMetrics *gmetric.Operation
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Request) {
@@ -33,38 +39,63 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 	isDebug := h.service.config.Debug
 
-	request := h.service.NewRequest()
+	// TODO this context isn't guaranteed to leak - the model can change in the
+	// middle of a request
+	var request *request.Request
+
 	response := &Response{Status: common.StatusOK, started: time.Now()}
 	if httpRequest.Method == http.MethodGet {
+
+		request = h.service.NewRequest()
 		if err := h.buildRequestFromQuery(httpRequest, request); err != nil {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
 		}
 	} else {
 		defer httpRequest.Body.Close()
+
+		onDone := h.overheadMetrics.Begin(time.Now())
+		stats := stat.NewValues()
 		data, size, err := buffer.Read(h.pool, httpRequest.Body)
 		defer h.pool.Put(data)
-		if err != nil {
-			http.Error(writer, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		func() {
+			defer func() { onDone(time.Now(), stats.Values()...) }()
 
-		request.Body = data[:size]
-		if isDebug {
-			trimmed := strings.Trim(string(request.Body), " \n\r")
-			log.Printf("[%v http] input: %s\n", h.service.config.ID, trimmed)
-		}
+			if err != nil {
+				stats.Append(sstat.ReadError{err})
+				if isDebug {
+					log.Printf("[%v http] read error: %v\n", h.service.config.ID, err)
+				}
 
-		err = gojay.Unmarshal(data[:size], request)
-		if err != nil {
-			if isDebug {
-				log.Printf("[%v http] unmarshal error: %v\n", h.service.config.ID, err)
+				// TODO if buffer is too small, it should be a 413
+				http.Error(writer, err.Error(), http.StatusInternalServerError)
+				return
 			}
 
-			rmsg := fmt.Sprintf("%s (are your input types correct?)", err.Error())
-			http.Error(writer, rmsg, http.StatusBadRequest)
-			return
-		}
+			request = h.service.NewRequest()
+			request.Body = data[:size]
+			if isDebug {
+				trimmed := strings.Trim(string(request.Body), " \n\r")
+				log.Printf("[%v http] input: %s\n", h.service.config.ID, trimmed)
+			}
+
+			err = gojay.Unmarshal(data[:size], request)
+			if err != nil {
+				stats.Append(sstat.UnmarshalError{err})
+
+				if isDebug {
+					log.Printf("[%v http] unmarshal error: %v\n", h.service.config.ID, err)
+				}
+
+				rmsg := fmt.Sprintf("%s (are your input types correct?)", err.Error())
+				http.Error(writer, rmsg, http.StatusBadRequest)
+				return
+			}
+		}()
+	}
+
+	if request == nil {
+		return
 	}
 
 	err := h.handleAppRequest(ctx, writer, request, response)
@@ -131,11 +162,13 @@ func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
 	return err
 }
 
-//NewHandler creates a new HTTP service Handler
-func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration) *Handler {
+// NewHandler creates a new HTTP service Handler
+func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration, m *gmetric.Service) *Handler {
+	location := reflect.TypeOf(Handler{}).PkgPath()
 	return &Handler{
-		service:     service,
-		pool:        pool,
-		maxDuration: maxDuration,
+		service:         service,
+		pool:            pool,
+		maxDuration:     maxDuration,
+		overheadMetrics: m.MultiOperationCounter(location, service.config.ID+"SrvHTTP", service.config.ID+" server HTTP startup overhead", time.Microsecond, time.Minute, 2, sstat.NewHttp()),
 	}
 }

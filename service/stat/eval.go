@@ -8,7 +8,6 @@ import (
 type eval struct{}
 
 const Pending = "pending"
-const RLockEvaluator = "waitEvalLock"
 
 // implements github.com/viant/gmetric/counter.Provider
 func (p eval) Keys() []string {
@@ -16,7 +15,6 @@ func (p eval) Keys() []string {
 		stat.ErrorKey,
 		stat.Timeout,
 		Pending,
-		RLockEvaluator,
 	}
 }
 
@@ -35,22 +33,13 @@ func (p eval) Map(value interface{}) int {
 			return 1
 		case Pending:
 			return 2
-		case RLockEvaluator:
-			return 3
 		}
 	case stat.Dir:
 		return 2
-	case RLockDir:
-		return 3
 	}
 
 	return -1
 }
-
-type RLockDir stat.Dir
-
-// Does nothing but implement counter.CustomCounter
-func (_ RLockDir) Aggregate(interface{}) {}
 
 func (p eval) NewCounter() counter.CustomCounter {
 	return new(stat.Occupancy)

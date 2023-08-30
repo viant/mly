@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/viant/afs/file"
+	batchconfig "github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/shared"
 	"github.com/viant/tapper/config"
 )
@@ -20,14 +21,21 @@ type Model struct {
 	Dir      string
 	URL      string
 
+	Batch *BatcherConfigFile `json:",omitempty" yaml:",omitempty"`
+
+	// for TF SavedModel
 	Tags []string
 
 	// IO and caching
-	UseDict          *bool  `json:",omitempty" yaml:",omitempty"`
-	DictURL          string // Deprecated: we usually extract the dictionary/vocabulary from TF graph
+	UseDict *bool  `json:",omitempty" yaml:",omitempty"`
+	DictURL string // Deprecated: we usually extract the dictionary/vocabulary from TF graph
+
 	shared.MetaInput `json:",omitempty" yaml:",inline"`
-	OutputType       string `json:",omitempty" yaml:",omitempty"` // Deprecated: we can infer output types from TF graph
-	Transformer      string `json:",omitempty" yaml:",omitempty"`
+
+	// Deprecated: we can infer output types from TF graph, and there may be more than one output
+	OutputType string `json:",omitempty" yaml:",omitempty"`
+
+	Transformer string `json:",omitempty" yaml:",omitempty"`
 
 	// caching
 	DataStore string `json:",omitempty" yaml:",omitempty"`
@@ -66,12 +74,32 @@ func (m *Model) Init() {
 	if len(m.Tags) == 0 {
 		m.Tags = []string{"serve"}
 	}
+
 	if m.Location == "" {
 		m.Location = path.Join(os.TempDir(), m.ID+m.Dir)
 	}
+
 	_ = os.MkdirAll(m.Location, file.DefaultDirOsMode)
+
 	m.Modified = &Modified{}
+
 	m.MetaInput.Init()
+
+	if m.Batch == nil {
+		m.Batch = new(BatcherConfigFile)
+	}
+	m.Batch.Init()
+	if m.Debug {
+		if m.Batch.BatcherConfig.Verbose == nil {
+			m.Batch.BatcherConfig.Verbose = &batchconfig.V{
+				Output: true,
+			}
+		}
+
+		if m.Batch.BatcherConfig.Verbose.ID == "" {
+			m.Batch.BatcherConfig.Verbose.ID = m.ID
+		}
+	}
 }
 
 // Validate validates model config
@@ -79,8 +107,10 @@ func (m *Model) Validate() error {
 	if m.ID == "" {
 		return fmt.Errorf("model.ID was empty")
 	}
+
 	if m.URL == "" {
 		return fmt.Errorf("model.URL was empty")
 	}
+
 	return nil
 }
