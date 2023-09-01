@@ -191,8 +191,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	newEvaluator := evaluator.NewEvaluator(signature, model.Session, *s.evaluatorMeta)
 
 	var newBatchSrv *batcher.Service
-	if config.Batch.MinBatchCounts > 1 {
-		log.Printf("[%s] batch mode %+v", config.ID, config.Batch)
+	if config.Batch != nil {
 		bc := (*config.Batch).BatcherConfig
 		newBatchSrv = batcher.NewBatcher(newEvaluator, len(signature.Inputs), bc, *s.batcherMeta)
 	}

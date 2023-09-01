@@ -8,12 +8,12 @@ import (
 
 type BatcherConfigFile struct {
 	config.BatcherConfig
-	MaxBatchWaitMicros int
+	BatchWaitMicros int
 }
 
 func (b *BatcherConfigFile) Init() {
-	if b.MaxBatchWaitMicros > 0 {
-		b.MinBatchWait = time.Microsecond * time.Duration(b.MaxBatchWaitMicros)
+	if b.BatchWaitMicros > 0 {
+		b.BatchWait = time.Microsecond * time.Duration(b.BatchWaitMicros)
 	}
 
 	b.BatcherConfig.Init()

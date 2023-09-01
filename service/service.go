@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"reflect"
@@ -14,6 +15,7 @@ import (
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
+	serrs "github.com/viant/mly/service/errors"
 	"github.com/viant/mly/service/gtlyop"
 	"github.com/viant/mly/service/request"
 	"github.com/viant/mly/service/stat"
@@ -118,8 +120,12 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 
 	tensorValues, err := s.evaluate(ctx, request)
 	if err != nil {
-		stats.AppendError(err)
-		log.Printf("[%v do] eval error:(%+v) request:(%+v)", s.config.ID, err, request)
+		if errors.Is(err, serrs.OverloadedError) {
+			stats.Append(stat.Overloaded)
+		} else {
+			stats.AppendError(err)
+			log.Printf("[%v do] eval error:(%+v) request:(%+v)", s.config.ID, err, request)
+		}
 		return err
 	}
 

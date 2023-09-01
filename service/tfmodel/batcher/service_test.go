@@ -41,7 +41,7 @@ func TestServiceConcurrencyMax(t *testing.T) {
 	mockOut := mockEval.Exited
 
 	bc := config.BatcherConfig{
-		MinBatchCounts:          1,
+		MaxBatchSize:            1,
 		MaxEvaluatorConcurrency: 1,
 	}
 
@@ -127,9 +127,8 @@ func TestServiceConcurrencyMax(t *testing.T) {
 func TestServiceBatchMax(t *testing.T) {
 	signature, evaluator, met := test.TLoadEvaluator(t, "example/model/string_lookups_int_model")
 	batchSrv := NewBatcher(evaluator, len(signature.Inputs), config.BatcherConfig{
-		MinBatchCounts: 3,
-		MinBatchSize:   100,
-		MinBatchWait:   time.Millisecond * 1,
+		MaxBatchSize: 100,
+		BatchWait:    time.Millisecond * 1,
 	}, createBSMeta())
 
 	batchSrv.Verbose = &config.V{
@@ -226,9 +225,8 @@ func BenchmarkServiceParallel(b *testing.B) {
 	signature, evaluator, _ := test.LoadEvaluator("example/model/string_lookups_int_model", bnil, bnil)
 
 	bcfg := config.BatcherConfig{
-		MinBatchSize:   100,
-		MinBatchCounts: 80,
-		MinBatchWait:   time.Millisecond * 1,
+		MaxBatchSize: 100,
+		BatchWait:    time.Millisecond * 1,
 	}
 
 	batcher := NewBatcher(evaluator, len(signature.Inputs), bcfg, createBSMeta())

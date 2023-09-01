@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	Evaluate = "eval"
-	Invalid  = "invalid"
+	Evaluate   = "eval"
+	Invalid    = "invalid"
+	Overloaded = "overloaded"
 )
 
 type service struct{}
@@ -23,6 +24,7 @@ func (e service) Keys() []string {
 		Invalid,
 		stat.Canceled,
 		stat.DeadlineExceeded,
+		Overloaded,
 	}
 }
 
@@ -49,6 +51,8 @@ func (e service) Map(value interface{}) int {
 			return 5
 		case stat.DeadlineExceeded:
 			return 6
+		case Overloaded:
+			return 7
 		}
 	}
 

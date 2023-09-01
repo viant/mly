@@ -85,21 +85,21 @@ func (m *Model) Init() {
 
 	m.MetaInput.Init()
 
-	if m.Batch == nil {
-		m.Batch = new(BatcherConfigFile)
-	}
-	m.Batch.Init()
-	if m.Debug {
-		if m.Batch.BatcherConfig.Verbose == nil {
-			m.Batch.BatcherConfig.Verbose = &batchconfig.V{
-				Output: true,
+	if m.Batch != nil {
+		m.Batch.Init()
+		if m.Debug {
+			if m.Batch.BatcherConfig.Verbose == nil {
+				m.Batch.BatcherConfig.Verbose = &batchconfig.V{
+					Output: true,
+				}
+			}
+
+			if m.Batch.BatcherConfig.Verbose.ID == "" {
+				m.Batch.BatcherConfig.Verbose.ID = m.ID
 			}
 		}
-
-		if m.Batch.BatcherConfig.Verbose.ID == "" {
-			m.Batch.BatcherConfig.Verbose.ID = m.ID
-		}
 	}
+
 }
 
 // Validate validates model config

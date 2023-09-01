@@ -1,7 +1,9 @@
 package batcher
 
 import (
+	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/viant/gmetric/counter"
@@ -11,11 +13,15 @@ import (
 // dispatcher represents a state after an iteration of pulling from
 // the dispatcher queue.
 type dispatcher struct {
-	busy     bool
 	deadline *time.Timer
 
-	active        []interface{}
-	subBatches    []subBatch
+	// shared with Service
+	bsPool *sync.Pool
+	abPool *sync.Pool
+
+	active     []interface{}
+	subBatches []subBatch
+
 	curBatchCount int
 	curBatchRows  int
 
@@ -31,38 +37,32 @@ type batchFull uint32
 const (
 	BatchNotFull = batchFull(0)
 	BatchIsFull  = batchFull(1)
-	BatchTooMany = batchFull(2)
+	BatchMaxHit  = batchFull(2)
 )
 
-func (d *dispatcher) run() {
-	go d.Service.run(predictionBatch{d.active, d.subBatches, d.curBatchCount})
-}
-
 func (d *dispatcher) full() batchFull {
-	if d.curBatchRows >= d.MinBatchSize {
+	if d.curBatchRows >= d.Service.BatcherConfig.MaxBatchSize {
 		return BatchIsFull
-	}
-
-	if d.curBatchCount >= d.MinBatchCounts {
-		return BatchTooMany
 	}
 
 	return BatchNotFull
 }
 
-// TODO change it so that we check if we're not busy, rather than checking that
-// we are busy, as we know we are busy when we run a prediction.
 func (d *dispatcher) checkBusy() bool {
-	if d.busy {
-		return true
-	}
-
-	d.busy = d.Service.isBusy()
-	return d.busy
+	return d.Service.BatcherConfig.MaxQueuedBatches > 0 &&
+		len(d.Service.batchQ) >= d.Service.BatcherConfig.MaxQueuedBatches
 }
 
 func (d *dispatcher) appendStat(key string) {
 	d.stats.Append(mkbs(key, d.curBatchRows, d.curBatchCount))
+}
+
+func (d *dispatcher) getSubBatches() []subBatch {
+	return d.bsPool.Get().([]subBatch)
+}
+
+func (d *dispatcher) getActive() []interface{} {
+	return d.abPool.Get().([]interface{})
 }
 
 func (d *dispatcher) startStats() {
@@ -77,6 +77,10 @@ func (d *dispatcher) resetStats() {
 
 func (d *dispatcher) endStats() {
 	d.onDone(time.Now(), d.stats.Values()...)
+}
+
+func (d *dispatcher) zeroDeadline() bool {
+	return *d.timeout <= 1
 }
 
 func (d *dispatcher) newDeadline() {
@@ -104,50 +108,44 @@ func (d *dispatcher) appendBatch(batch inputBatch) error {
 	return err
 }
 
-func (d *dispatcher) debug(action string) {
+func (d *dispatcher) debug(desc string, pfvargs ...interface{}) {
 	if d.Service.Verbose != nil {
-		log.Printf("[%s dispatcher] %s timeout:%v busy:%v size:%d, count:%d", d.Service.Verbose.ID, action,
-			d.timeout, d.busy, d.curBatchRows, d.curBatchCount)
+		if len(pfvargs) > 0 {
+			desc = fmt.Sprintf(desc, pfvargs...)
+		}
+
+		log.Printf("[%s dispatcher] %s timeout:%v size:%d, count:%d",
+			d.Service.Verbose.ID, desc, d.timeout, d.curBatchRows, d.curBatchCount)
 	}
+}
+
+func (d *dispatcher) resetSlices() {
+	d.active = d.getActive()
+	d.subBatches = d.getSubBatches()
 }
 
 func (d *dispatcher) submit() {
 	d.wg.Add(1)
-	d.run()
+
+	d.Service.queueBatch(predictionBatch{d.active, d.subBatches, d.curBatchCount})
 	d.endStats()
 
 	d.curBatchCount = 0
 	d.curBatchRows = 0
 
-	d.active = d.Service.getActive()
-	d.subBatches = d.Service.getSubBatches()
+	d.resetSlices()
 }
 
 // return value represents if we should terminate the loop
-//
-// notBusyNoDeadline -> terminate
-// notBusyNoDeadline -> notBusyNoDeadline + empty
-// notBusyNoDeadline -> busyWithDeadline + start
-// notBusyNoDeadline -> notBusyWithDeadline + start
-//
-// notBusyWithDeadline -> terminate
-// notBusyWithDeadline -> notBusyNoDeadline + empty
-// notBusyWithDeadline -> notBusyWithDeadline + active
-// notBusyWithDeadline -> busyNoDeadline + active
-// notBusyWithDeadline -> busyWithDeadline
-//
-// busyNoDeadline -> notBusyNoDeadline + empty
-// busyNoDeadline -> busyWithDeadline
-//
-// busyWithDeadline -> notBusyWithDeadline + empty
-// busyWithDeadline -> busyNoDeadline
-// busyWithDeadline -> busyWithDeadline (repeat)
 func (d *dispatcher) dispatch() bool {
-	if !d.busy && d.deadline == nil {
-		d.debug("notBusyNoDeadline")
+	isBusy := d.checkBusy()
+	hasDeadline := d.deadline != nil
+
+	d.debug("busy:%v hasDeadline:%v", isBusy, hasDeadline)
+	if !isBusy && !hasDeadline {
 		// in all cases we reach this point, the active batch should be empty
 		select {
-		case batch := <-d.q:
+		case batch := <-d.inputQ:
 			if batch.closed {
 				// terminate
 				return true
@@ -156,36 +154,28 @@ func (d *dispatcher) dispatch() bool {
 			d.startStats()
 			d.appendBatch(batch)
 
-			if f := d.full(); f != BatchNotFull && !d.checkBusy() {
+			if f := d.full(); f != BatchNotFull || d.zeroDeadline() {
 				d.debug("push")
+				// TODO stats
 				d.appendStat(FullElements)
-				if d.Adjust != nil {
-					d.Adjust.Count()
-				}
 				d.submit()
 				d.resetStats()
-				// should go back to notBusyNoDeadline
+
+				// go to (back to) notBusyNoDeadline or busyNoDeadline
 				return false
 			}
 
-			// we know we're not full or busy
-			// go to either busyWithDeadline or notBusyWithDeadline
 			d.newDeadline()
+			// go to notBusyWithDeadline
 		}
-	} else if !d.busy && d.deadline != nil {
-		d.debug("notBusyWithDeadline")
+	} else if !isBusy && hasDeadline {
+		// aka notBusyWithDeadline
 
 		// We are waiting for a timeout, will collect requests if
 		// they come in often enough.
 		select {
-		case batch := <-d.q:
+		case batch := <-d.inputQ:
 			if batch.closed {
-				if d.checkBusy() {
-					d.deadline = nil
-					// go to busyNoDeadline
-					return false
-				}
-
 				if d.curBatchCount > 0 {
 					d.debug("closed")
 					d.appendStat(Closing)
@@ -200,61 +190,45 @@ func (d *dispatcher) dispatch() bool {
 				return false
 			}
 
-			if f := d.full(); f != BatchNotFull && !d.checkBusy() {
+			if f := d.full(); f != BatchNotFull {
 				d.debug("go")
 
-				// TODO wrong stat
+				// TODO stat
 				d.appendStat(MaxBatches)
-				if d.Adjust != nil {
-					d.Adjust.Count()
-				}
 				d.submit()
 				d.resetStats()
+
 				d.deadline = nil
-				// in this case we would go to notBusyNoDeadline
+				// go to notBusyNoDeadline or busyNoDeadline
 			}
-			// else we go to busyWithDeadline or back to notBusyWithDeadline
+			// else go to (back to) notBusyWithDeadline or busyWithDeadline
 		case <-d.deadline.C:
 			// d.curBatchCount can be 0 if we were busy and now we're not but
-			// the deadline hadn't expired when we received <-d.free
+			// the deadline hadn't expired when we received <-d.bqFree
 			if d.curBatchCount > 0 {
-				if !d.checkBusy() {
-					d.debug("timeout")
-					d.appendStat(stat.Timeout)
-					if d.Adjust != nil {
-						d.Adjust.IncTimeout()
-					}
-
-					d.submit()
-					d.resetStats()
-					// in this case we'd end in notBusyNoDeadline
-				}
-				// we'd end in busyNoDeadline
+				d.debug("timeout")
+				d.appendStat(stat.Timeout)
+				d.submit()
+				d.resetStats()
+				// go to notBusyNoDeadline or busyNoDeadline
 			} else {
 				// TODO track times we get 0 batch timeouts
-				// end in notBusyNoDeadline
+				// go to notBusyNoDeadline
 			}
 
 			d.deadline = nil
 		}
-	} else if d.busy && d.deadline == nil {
-		d.debug("busyNoDeadline")
-
+	} else if isBusy && !hasDeadline {
+		// aka busyNoDeadline
 		// A deadline expired yet we are still busy, or we're closed and busy.
 		select {
-		case <-d.free:
-			// as far as we know we are no longer busy
-			d.busy = false
+		case <-d.bqFree:
 			d.debug("waited")
 			d.appendStat(Waiting)
-			if d.Adjust != nil {
-				d.Adjust.IncOverloaded()
-			}
 			d.submit()
 			d.resetStats()
-
-			// go to notBusyNoDeadline
-		case batch := <-d.q:
+			// go to notBusyNoDeadline or busyNoDeadline
+		case batch := <-d.inputQ:
 			if batch.closed {
 				// do nothing since we need to wait for a "free worker"
 				// go to busyNoDeadline
@@ -267,6 +241,10 @@ func (d *dispatcher) dispatch() bool {
 			}
 
 			if f := d.full(); f != BatchNotFull {
+				if f == BatchMaxHit {
+					// TODO enter shedding
+					d.setShedding(true)
+				}
 				// TODO track that we should've submitted a batch but couldn't
 			}
 
@@ -274,7 +252,7 @@ func (d *dispatcher) dispatch() bool {
 			// go to busyWithDeadline
 		}
 	} else {
-		d.debug("busyWithDeadline")
+		// aka busyWithDeadline
 
 		// We are still busy yet a deadline has not expired.
 		// This happens because:
@@ -285,20 +263,16 @@ func (d *dispatcher) dispatch() bool {
 		// the deadline should've expired anyway.
 
 		select {
-		case <-d.free:
-			d.busy = false
+		case <-d.bqFree:
 			d.debug("waited")
 			d.appendStat(Waiting)
-			if d.Adjust != nil {
-				d.Adjust.IncOverloaded()
-			}
 			d.submit()
 			d.resetStats()
 
 			// whenever we full submit, we reset the deadline
 			d.deadline = nil
-			// go to notBusyNoDeadline
-		case batch := <-d.q:
+			// go to notBusyNoDeadline or busyNoDeadline
+		case batch := <-d.inputQ:
 			if batch.closed {
 				d.deadline = nil
 				// go to busyNoDeadline
@@ -311,12 +285,17 @@ func (d *dispatcher) dispatch() bool {
 			}
 
 			if f := d.full(); f != BatchNotFull {
+				if f == BatchMaxHit {
+					// TODO enter shedding
+					d.setShedding(true)
+				}
 				// TODO track that we should've submitted a batch but couldn't
 			}
 
 			// go back to busyWithDeadline
 		case <-d.deadline.C:
 			// just let the deadline expire
+			// TODO count
 			d.deadline = nil
 			// go to busyNoDeadline
 		}

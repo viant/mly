@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/viant/gmetric"
+	"github.com/viant/mly/service/errors"
 	"github.com/viant/mly/service/tfmodel/batcher/adjust"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator"
@@ -19,23 +20,39 @@ import (
 // This *can* be refactored into smaller types; but it's
 // really more annoying than convenient.
 type Service struct {
-	closed bool // prevents new batches from being queued
+	closed bool            // prevents new batches from being queued
+	wg     *sync.WaitGroup // waits for everything to finish
 
-	wg        sync.WaitGroup // waits for queued batches to start evaluation
-	q         chan inputBatch
-	bsPool    *sync.Pool
-	abPool    *sync.Pool
-	evaluator evaluator.Evaluator
+	// shedding is true if MaxQueuedBatches AND MaxEvaluatorConcurrency are hit
+	shedding     bool
+	sheddingLock *sync.RWMutex
 
-	// since dispatcher runs in a single goroutine, we use this
-	// to communicate that there are free evaluator "slots"
-	waiting    chan struct{}
-	free       chan struct{}
+	// batcher (dispatcher) reads from here and pushes to batchQ
+	inputQ chan inputBatch
+
+	// indicates the dispatcher is waiting for the batch queue to be available
+	bqWaiting chan struct{}
+	// indicates that the batch queue became available
+	bqFree chan struct{}
+
+	// batch queue reads from here and spawn evaluator goroutines
+	batchQ chan predictionBatch
+
+	// indicates that the batch queue is waiting for a free evaluator
+	waiting chan struct{}
+	// batch queue listens to this to continue queueing
+	free chan struct{}
+
+	// busy memoization of active >= BatcherConfig.MaxEvaluatorConcurrency
+	busy bool
+	// number of running evaluators
 	active     uint32
 	activeLock *sync.RWMutex
+	evaluator  evaluator.Evaluator
+	bsPool     *sync.Pool
+	abPool     *sync.Pool
 
-	Adjust *adjust.Adjust
-
+	Adjust *adjust.Adjust // shared for metrics exposure
 	config.BatcherConfig
 	ServiceMeta
 }
@@ -86,7 +103,9 @@ func (b *Service) Close() error {
 	b.closed = true
 
 	// make Dispatcher stop
-	b.q <- inputBatch{true, nil, subBatch{}}
+	b.inputQ <- inputBatch{true, nil, subBatch{}}
+
+	b.batchQ <- predictionBatch{nil, nil, -1}
 
 	// let Dispatch goroutine finish clearing queue
 	b.wg.Wait()
@@ -100,25 +119,12 @@ func (b *Service) Close() error {
 	return err
 }
 
-func (s *Service) isBusy() (busy bool) {
-	s.activeLock.RLock()
-	defer s.activeLock.RUnlock()
-	if s.MaxEvaluatorConcurrency > 0 && s.active >= s.MaxEvaluatorConcurrency {
-		busy = true
-		s.waiting <- struct{}{}
-	}
-
-	return busy
+func (s *Service) isBusy() bool {
+	return s.busy
 }
 
-// len([]SubBatch) is fixed to MaxBatchCounts.
-func (b *Service) getSubBatches() []subBatch {
-	return b.bsPool.Get().([]subBatch)
-}
-
-// this isn't a really helpful pool?
-func (b *Service) getActive() []interface{} {
-	return b.abPool.Get().([]interface{})
+func (s *Service) setNotBusy() {
+	s.busy = false
 }
 
 // Evaluate will queue a batch and wait for results.
@@ -140,13 +146,35 @@ func (b *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interfa
 	return nil, fmt.Errorf("unhandled select")
 }
 
+func (s *Service) setShedding(shedding bool) {
+	s.sheddingLock.Lock()
+	defer s.sheddingLock.Unlock()
+	s.shedding = shedding
+}
+
+func (s *Service) checkShedding() error {
+	s.sheddingLock.RLock()
+	defer s.sheddingLock.RUnlock()
+	if s.shedding {
+		return errors.OverloadedError
+	}
+
+	return nil
+}
+
 // queue will queue and provide channels for results.
 func (b *Service) queue(inputs []interface{}) (*subBatch, error) {
+	// TODO add overloaded?
 	onDone := b.queueMetric.Begin(time.Now())
 	defer func() { onDone(time.Now()) }()
 
 	if b.closed {
 		return nil, fmt.Errorf("closed")
+	}
+
+	err := b.checkShedding()
+	if err != nil {
+		return nil, err
 	}
 
 	if b.Verbose != nil && b.Verbose.Input {
@@ -186,8 +214,53 @@ func (b *Service) queue(inputs []interface{}) (*subBatch, error) {
 		ec:        ec,
 	}
 
-	b.q <- inputBatch{false, inputs, *sb}
+	b.inputQ <- inputBatch{false, inputs, *sb}
 	return sb, nil
+}
+
+func (s *Service) queueBatch(batch predictionBatch) {
+	select {
+	case s.batchQ <- batch:
+	default:
+		// TODO handle this case
+		// this should be an error, since we shouldn't be
+		// queueing a batch if the queue is full
+		go func() { s.batchQ <- batch }()
+	}
+}
+
+func (s *Service) batchQueuer() {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
+	for {
+		if s.busy {
+			<-s.free
+		}
+
+		select {
+		case pb := <-s.batchQ:
+			if pb.size < 0 {
+				return
+			}
+
+			s.activeLock.Lock()
+			s.active++
+			if s.active >= s.BatcherConfig.MaxEvaluatorConcurrency {
+				s.busy = true
+				s.waiting <- struct{}{}
+			}
+
+			if s.shedding {
+				// we now have a batch queue slot open
+				s.setShedding(false)
+			}
+
+			go s.run(pb)
+
+			s.activeLock.Unlock()
+		}
+	}
 }
 
 func (s *Service) run(batch predictionBatch) {
@@ -197,13 +270,7 @@ func (s *Service) run(batch predictionBatch) {
 		log.Printf("[%s run] inputData :%v", s.Verbose.ID, batch.inputData)
 	}
 
-	// This is somewhat safe... unless Tensorflow C has a GLOBAL lock somewhere.
-	// Eventually we can just have the TF session run.
 	ctx := context.TODO()
-
-	s.activeLock.Lock()
-	s.active++
-	s.activeLock.Unlock()
 
 	results, err := s.evaluator.Evaluate(ctx, batch.inputData)
 
@@ -287,23 +354,26 @@ func (s *Service) run(batch predictionBatch) {
 }
 
 // dispatcher runs and gathers model prediction requests and batches them up.
+// this should run in a goroutine
 func (s *Service) dispatcher() {
 	s.wg.Add(1)
 	defer s.wg.Done()
 
 	var timeout *time.Duration
 	if s.Adjust == nil {
-		timeout = &s.MinBatchWait
+		timeout = &s.BatchWait
 	} else {
 		timeout = &s.Adjust.CurrentTimeout
 	}
 
 	dspr := &dispatcher{
-		Service:    s,
-		timeout:    timeout,
-		active:     s.getActive(),
-		subBatches: s.getSubBatches(),
+		Service: s,
+		timeout: timeout,
+		abPool:  s.abPool,
+		bsPool:  s.bsPool,
 	}
+
+	dspr.resetSlices()
 
 	var terminate bool
 	for !terminate {
@@ -326,30 +396,50 @@ func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.
 		adj = adjust.NewAdjust(ta)
 	}
 
+	inputQSize := batchConfig.MaxBatchSize
+	if inputQSize < 0 {
+		inputQSize = 0
+	}
+
+	bsPool := &sync.Pool{
+		New: func() interface{} {
+			return make([]subBatch, 100)
+		},
+	}
+
+	abPool := &sync.Pool{
+		New: func() interface{} {
+			return make([]interface{}, inputLen)
+		},
+	}
+
+	bqSize := batchConfig.MaxQueuedBatches
+
 	b := &Service{
-		q: make(chan inputBatch, batchConfig.MinBatchCounts),
-		bsPool: &sync.Pool{
-			New: func() interface{} {
-				return make([]subBatch, batchConfig.MinBatchCounts)
-			},
-		},
-		abPool: &sync.Pool{
-			New: func() interface{} {
-				return make([]interface{}, inputLen)
-			},
-		},
-		evaluator: evaluator,
+		wg: new(sync.WaitGroup),
 
-		waiting:    make(chan struct{}, 1),
-		free:       make(chan struct{}, 0),
+		sheddingLock: new(sync.RWMutex),
+
+		inputQ: make(chan inputBatch, inputQSize),
+
+		bqWaiting: make(chan struct{}, 1),
+		bqFree:    make(chan struct{}, 0),
+		batchQ:    make(chan predictionBatch, bqSize),
+
+		waiting: make(chan struct{}, 1),
+		free:    make(chan struct{}, 0),
+
 		activeLock: new(sync.RWMutex),
+		evaluator:  evaluator,
+		bsPool:     bsPool,
+		abPool:     abPool,
 
-		Adjust: adj,
-
+		Adjust:        adj,
 		BatcherConfig: batchConfig,
 		ServiceMeta:   serviceMeta,
 	}
 
 	go b.dispatcher()
+	go b.batchQueuer()
 	return b
 }
