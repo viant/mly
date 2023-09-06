@@ -8,12 +8,9 @@ import (
 )
 
 const (
-	Closing      = "closing"
-	MaxBatches   = "maxBatches"
-	FullElements = "fullElements"
-	Waiting      = "waiting"
-
-	elements = "elements"
+	Closing   = "closing"
+	FullBatch = "full"
+	InstantQ  = "instant"
 )
 
 type batchStat struct {
@@ -46,9 +43,8 @@ func (d dispatcherStats) Keys() []string {
 	return []string{
 		stat.Timeout,
 		Closing,
-		MaxBatches,
-		FullElements,
-		Waiting,
+		FullBatch,
+		InstantQ,
 	}
 }
 
@@ -64,12 +60,8 @@ func (d dispatcherStats) Map(value interface{}) int {
 			return 0
 		case Closing:
 			return 1
-		case MaxBatches:
-			return 2
-		case FullElements:
+		case FullBatch:
 			return 3
-		case Waiting:
-			return 4
 		}
 	case *batchStat:
 		switch v.key {
@@ -77,12 +69,8 @@ func (d dispatcherStats) Map(value interface{}) int {
 			return 0
 		case Closing:
 			return 1
-		case MaxBatches:
-			return 2
-		case FullElements:
+		case FullBatch:
 			return 3
-		case Waiting:
-			return 4
 		}
 	}
 

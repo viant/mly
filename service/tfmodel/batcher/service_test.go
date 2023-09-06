@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator/test"
@@ -22,8 +23,9 @@ type mockEvaluator struct {
 
 func (m *mockEvaluator) Evaluate(ctx context.Context, params []interface{}) ([]interface{}, error) {
 	m.Entered <- struct{}{}
-	fmt.Println("mock trigger done")
+	fmt.Println("mock entered")
 	m.Exited <- struct{}{}
+	fmt.Println("mock exited")
 	return []interface{}{}, nil
 }
 
@@ -31,7 +33,15 @@ func (m mockEvaluator) Close() error {
 	return nil
 }
 
-func TestServiceConcurrencyMax(t *testing.T) {
+func createBSMeta() ServiceMeta {
+	s := gmetric.New()
+	return ServiceMeta{
+		queueMetric:      s.OperationCounter("test", "queue", "", time.Microsecond, time.Minute, 2),
+		dispatcherMetric: s.MultiOperationCounter("test", "dispatcher", "", time.Microsecond, time.Minute, 2, NewDispatcherP()),
+	}
+}
+
+func TestServiceShedding(t *testing.T) {
 	mockEval := &mockEvaluator{
 		Entered: make(chan struct{}, 0),
 		Exited:  make(chan struct{}, 0),
@@ -42,90 +52,91 @@ func TestServiceConcurrencyMax(t *testing.T) {
 
 	bc := config.BatcherConfig{
 		MaxBatchSize:            1,
+		MaxQueuedBatches:        1,
 		MaxEvaluatorConcurrency: 1,
 	}
 
-	// TODO instead of using the batcher.Service API to test this, use the
-	// dispatcher API
-	batchSrv := NewBatcher(mockEval, 3, bc, createBSMeta())
+	batchSrv := NewBatcher(mockEval, 1, bc, createBSMeta())
 	batchSrv.Verbose = &config.V{
-		ID:     "test-concurrency",
+		ID:     "test-shedding",
 		Input:  true,
 		Output: true,
 	}
 
+	qs := batchSrv.newQueueService()
+	ds := batchSrv.newDispatcher()
+
 	feeds := make([]interface{}, 0)
 	feeds = append(feeds, [][]string{{"a"}, {"b"}})
 
-	blockerWg := new(sync.WaitGroup)
-	blockerWg.Add(1)
-	go func() {
-		sb, err := batchSrv.queue(feeds)
-		assert.Nil(t, err)
-		blockerWg.Done()
+	ctx := context.Background()
 
-		select {
-		case <-sb.channel:
-			blockerWg.Done()
-		case err = <-sb.ec:
-		}
+	// this will read from inputQ
+	go ds.dispatch()
+	// this will write to inputQ and wait for blockQ
+	b1, err := batchSrv.queue(ctx, feeds)
+	// this means ds.dispatch() is done
+	require.Nil(t, err)
 
-	}()
+	// once ds.dispatch() is done, batchQ is full
+	qs.dispatch()
 
-	fmt.Println("wait for blocker to queue")
-	blockerWg.Wait()
-
-	fmt.Println("wait for blocker to eval")
 	<-mockIn
+	// this means evaluator should have started, so shedding should be clear
 
-	fmt.Println("queue blocked")
-	blockedWg := new(sync.WaitGroup)
-	blockedWg.Add(1)
-	go func() {
-		sb, err := batchSrv.queue(feeds)
-		assert.Nil(t, err)
-		time.Sleep(1)
-		blockedWg.Done()
+	go ds.dispatch()
+	b2, err := batchSrv.queue(ctx, feeds)
+	require.Nil(t, err)
 
-		select {
-		case <-sb.channel:
-			blockedWg.Done()
-		case err = <-sb.ec:
-		}
-
-	}()
-
-	fmt.Println("wait for blocked to queue")
-	blockedWg.Wait()
-
-	fmt.Printf("blocked wg:%+v\n", blockedWg)
-	// blockeR finishes
-	blockerWg.Add(1)
-	// blockeD finishes
-	blockedWg.Add(1)
-
-	// should trigger blocker to finish
-	<-mockOut
+	// this will block for free evaluator
+	// and activate shedding
+	go qs.dispatch()
 
 	select {
 	case <-mockIn:
-		t.Error("dispatcher should not have sent")
-	case <-mockOut:
-		t.Error("weird ordering")
+		t.Error("should not have run evaluator")
 	default:
 	}
 
-	// triggered by blocker
-	<-mockIn
+	shedBatch, err := batchSrv.queue(ctx, feeds)
+	// this fails due to shedding being on
+	require.NotNil(t, err)
+	require.Nil(t, shedBatch)
 
-	// should trigger blocked to finish
 	<-mockOut
+	// Evaluator finished, should unblocks qs
+	<-b1.channel
 
-	blockedWg.Wait()
+	// this will block until the go qs.dispatch() from earlier finishes
+	fmt.Println("b2 <-mockIn")
+	<-mockIn
+	// this means evaluator should have started, so shedding should be clear
+	// b2 should be in eval mode
+
+	// this should make qs wait for free
+	go qs.dispatch()
+
+	go ds.dispatch()
+	b3, err := batchSrv.queue(ctx, feeds)
+	require.Nil(t, err)
+	// b3 should've been dispatched
+
+	<-mockOut
+	// b2 should finish
+	fmt.Println("b2 wait")
+	<-b2.channel
+
+	fmt.Println("b3 done")
+	<-mockIn
+	<-mockOut
+	fmt.Println("b3 wait")
+	go qs.dispatch()
+	<-b3.channel
 }
 
 func TestServiceBatchMax(t *testing.T) {
 	signature, evaluator, met := test.TLoadEvaluator(t, "example/model/string_lookups_int_model")
+
 	batchSrv := NewBatcher(evaluator, len(signature.Inputs), config.BatcherConfig{
 		MaxBatchSize: 100,
 		BatchWait:    time.Millisecond * 1,
@@ -136,6 +147,7 @@ func TestServiceBatchMax(t *testing.T) {
 		Input:  true,
 		Output: true,
 	}
+	batchSrv.Start()
 
 	fmt.Printf("%+v\n", batchSrv)
 
@@ -157,13 +169,15 @@ func TestServiceBatchMax(t *testing.T) {
 
 	wg := new(sync.WaitGroup)
 
+	ctx := context.Background()
+
 	var errors int32
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
 		wg.Add(1)
 
 		go func() {
-			sb, err := batchSrv.queue(feeds)
+			sb, err := batchSrv.queue(ctx, feeds)
 			assert.Nil(t, err)
 
 			wait := time.Now()
@@ -182,7 +196,7 @@ func TestServiceBatchMax(t *testing.T) {
 		}()
 
 		go func() {
-			sb, err := batchSrv.queue(feeds3)
+			sb, err := batchSrv.queue(ctx, feeds3)
 			assert.Nil(t, err)
 
 			wait := time.Now()
@@ -202,17 +216,11 @@ func TestServiceBatchMax(t *testing.T) {
 	}
 
 	assert.Equal(t, int32(0), errors, "got errors")
+
 	wg.Wait()
 	toolbox.Dump(met)
-	batchSrv.Close()
-}
 
-func createBSMeta() ServiceMeta {
-	s := gmetric.New()
-	return ServiceMeta{
-		queueMetric:      s.OperationCounter("test", "queue", "", time.Microsecond, time.Minute, 2),
-		dispatcherMetric: s.MultiOperationCounter("test", "dispatcher", "", time.Microsecond, time.Minute, 2, NewDispatcherP()),
-	}
+	batchSrv.Close()
 }
 
 func BenchmarkServiceParallel(b *testing.B) {
@@ -230,6 +238,7 @@ func BenchmarkServiceParallel(b *testing.B) {
 	}
 
 	batcher := NewBatcher(evaluator, len(signature.Inputs), bcfg, createBSMeta())
+	batcher.Start()
 
 	feeds2 := make([]interface{}, 0)
 	feeds2 = append(feeds2, [][]string{{"a"}, {"b"}})
@@ -238,6 +247,7 @@ func BenchmarkServiceParallel(b *testing.B) {
 	evaluator.Evaluate(context.Background(), feeds2)
 
 	preQ := time.Now()
+	ctx := context.Background()
 
 	wg := new(sync.WaitGroup)
 
@@ -247,7 +257,7 @@ func BenchmarkServiceParallel(b *testing.B) {
 			wg.Add(1)
 
 			go func() {
-				sb, err := batcher.queue(feeds2)
+				sb, err := batcher.queue(ctx, feeds2)
 				wait := time.Now()
 				select {
 				case <-sb.channel:

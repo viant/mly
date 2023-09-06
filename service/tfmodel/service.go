@@ -194,6 +194,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	if config.Batch != nil {
 		bc := (*config.Batch).BatcherConfig
 		newBatchSrv = batcher.NewBatcher(newEvaluator, len(signature.Inputs), bc, *s.batcherMeta)
+		newBatchSrv.Start()
 	}
 
 	// modify all service objects

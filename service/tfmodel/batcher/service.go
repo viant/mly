@@ -28,7 +28,8 @@ type Service struct {
 	sheddingLock *sync.RWMutex
 
 	// batcher (dispatcher) reads from here and pushes to batchQ
-	inputQ chan inputBatch
+	inputQ   chan inputBatch
+	blockInQ chan struct{}
 
 	// indicates the dispatcher is waiting for the batch queue to be available
 	bqWaiting chan struct{}
@@ -74,9 +75,12 @@ func NewServiceMeta(q, d *gmetric.Operation) ServiceMeta {
 
 // inputBatch represents upstream data.
 type inputBatch struct {
-	closed    bool
 	inputData []interface{}
 	subBatch
+}
+
+func (ib inputBatch) closed() bool {
+	return ib.subBatch.batchSize < 0
 }
 
 // subBatch captures both upstream and downstream members.
@@ -103,7 +107,7 @@ func (b *Service) Close() error {
 	b.closed = true
 
 	// make Dispatcher stop
-	b.inputQ <- inputBatch{true, nil, subBatch{}}
+	b.inputQ <- inputBatch{nil, subBatch{-1, nil, nil}}
 
 	b.batchQ <- predictionBatch{nil, nil, -1}
 
@@ -119,17 +123,18 @@ func (b *Service) Close() error {
 	return err
 }
 
-func (s *Service) isBusy() bool {
-	return s.busy
-}
-
-func (s *Service) setNotBusy() {
-	s.busy = false
-}
-
 // Evaluate will queue a batch and wait for results.
-func (b *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interface{}, error) {
-	sb, err := b.queue(inputs)
+// This is safe to run in any number of goroutines.
+//
+// Evaluate will send the input to be (further) batched to a dispatcher, via the inputQ.
+// See dispatcher.dispatch(), which will then call Service.queueBatch(), which
+// pushes to batchQ.
+// dispatcher also determines if waiting to send to batchQ is appropriate.
+// See queueService.dispatch(), which reads from batchQ which will then finally run
+// evaluator.Evaluator.Evaluate() when appropriate and return the response
+// via a dedicated channel for the goroutine that called Service.Evaluate.
+func (s *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interface{}, error) {
+	sb, err := s.queue(ctx, inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +157,20 @@ func (s *Service) setShedding(shedding bool) {
 	s.shedding = shedding
 }
 
+func (s *Service) setNotShedding() {
+	s.sheddingLock.RLock()
+	if s.shedding {
+		if s.Verbose != nil {
+			log.Printf("[%s setNotShedding]", s.Verbose.ID)
+		}
+		s.sheddingLock.RUnlock()
+		s.setShedding(false)
+	} else {
+		s.sheddingLock.RUnlock()
+	}
+}
+
+// technically this should wait until a dispatch cycle runs
 func (s *Service) checkShedding() error {
 	s.sheddingLock.RLock()
 	defer s.sheddingLock.RUnlock()
@@ -162,25 +181,7 @@ func (s *Service) checkShedding() error {
 	return nil
 }
 
-// queue will queue and provide channels for results.
-func (b *Service) queue(inputs []interface{}) (*subBatch, error) {
-	// TODO add overloaded?
-	onDone := b.queueMetric.Begin(time.Now())
-	defer func() { onDone(time.Now()) }()
-
-	if b.closed {
-		return nil, fmt.Errorf("closed")
-	}
-
-	err := b.checkShedding()
-	if err != nil {
-		return nil, err
-	}
-
-	if b.Verbose != nil && b.Verbose.Input {
-		log.Printf("[%s Queue] inputs:%v", b.Verbose.ID, inputs)
-	}
-
+func determineBatchSize(inputs []interface{}) (int, error) {
 	var batchSize int
 	for _, iSlice := range inputs {
 		switch typedSlice := iSlice.(type) {
@@ -201,8 +202,36 @@ func (b *Service) queue(inputs []interface{}) (*subBatch, error) {
 		break
 	}
 
+	var err error
 	if batchSize == 0 {
-		return nil, fmt.Errorf("could not determine batch size")
+		err = fmt.Errorf("could not determine batch size")
+	}
+
+	return batchSize, err
+}
+
+// queue for requests i.e. input batch
+func (s *Service) queue(ctx context.Context, inputs []interface{}) (*subBatch, error) {
+	onDone := s.queueMetric.Begin(time.Now())
+	defer func() { onDone(time.Now()) }()
+
+	if s.closed {
+		return nil, fmt.Errorf("closed")
+	}
+
+	err := s.checkShedding()
+	if err != nil {
+		// TODO metric
+		return nil, err
+	}
+
+	if s.Verbose != nil && s.Verbose.Input {
+		log.Printf("[%s Queue] inputs:%v", s.Verbose.ID, inputs)
+	}
+
+	batchSize, err := determineBatchSize(inputs)
+	if err != nil {
+		return nil, err
 	}
 
 	ch := make(chan []interface{})
@@ -214,75 +243,105 @@ func (b *Service) queue(inputs []interface{}) (*subBatch, error) {
 		ec:        ec,
 	}
 
-	b.inputQ <- inputBatch{false, inputs, *sb}
+	// See dispatcher.dispatch() for the consumer side.
+	s.inputQ <- inputBatch{inputs, *sb}
+	// The reason this synchronization mechanism exists is because the
+	// dispatcher may sometimes have to contend with a deadline (for
+	// batching timeout).
+	// If that wasn't the case, we could inline and effectively have
+	// synchronous batch dispatching.
+	select {
+	case <-s.blockInQ:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	return sb, nil
 }
 
-func (s *Service) queueBatch(batch predictionBatch) {
+func (s *Service) queueBatch(batch predictionBatch) (shedding bool) {
 	select {
 	case s.batchQ <- batch:
 	default:
-		// TODO handle this case
-		// this should be an error, since we shouldn't be
-		// queueing a batch if the queue is full
-		go func() { s.batchQ <- batch }()
+		s.setShedding(true)
+		if s.Verbose != nil {
+			log.Printf("[%s queueBatch] full batchQ len:%d (+1)", s.Verbose.ID, len(s.batchQ))
+		}
+
+		go func() {
+			s.batchQ <- batch
+			if s.Verbose != nil {
+				log.Printf("[%s queueBatch] +1 done", s.Verbose.ID)
+			}
+		}()
+
+		return true
 	}
+
+	return false
 }
 
-func (s *Service) batchQueuer() {
-	s.wg.Add(1)
-	defer s.wg.Done()
+func (s *Service) newQueueService() *queueService {
+	qsrv := &queueService{
+		run:            s.run,
+		setNotShedding: s.setNotShedding,
 
-	for {
-		if s.busy {
-			<-s.free
-		}
+		active:     &s.active,
+		activeLock: s.activeLock,
 
-		select {
-		case pb := <-s.batchQ:
-			if pb.size < 0 {
-				return
-			}
+		batchQ:  s.batchQ,
+		waiting: s.waiting,
+		free:    s.free,
 
-			s.activeLock.Lock()
-			s.active++
-			if s.active >= s.BatcherConfig.MaxEvaluatorConcurrency {
-				s.busy = true
-				s.waiting <- struct{}{}
-			}
+		BatcherConfig: s.BatcherConfig,
+	}
 
-			if s.shedding {
-				// we now have a batch queue slot open
-				s.setShedding(false)
-			}
+	return qsrv
+}
 
-			go s.run(pb)
+func (s *Service) startBatchQueueing() {
+	qsrv := s.newQueueService()
 
-			s.activeLock.Unlock()
-		}
+	run := true
+	for run {
+		run = qsrv.dispatch()
 	}
 }
 
 func (s *Service) run(batch predictionBatch) {
 	defer s.wg.Done()
-
 	if s.Verbose != nil && s.Verbose.Input {
 		log.Printf("[%s run] inputData :%v", s.Verbose.ID, batch.inputData)
 	}
 
 	ctx := context.TODO()
-
 	results, err := s.evaluator.Evaluate(ctx, batch.inputData)
 
 	s.activeLock.Lock()
 	if s.active > 0 {
+		// Should have been incremented in queueService.dispatch().
 		s.active--
 	}
 
 	select {
 	case <-s.waiting:
+		// This means that queueService may or may not be waiting for
+		// the Evaluator to finish.
+
+		// See queueService.dispatch() for consumer.
+		// This is going to block until the queueService.dispatch()
+		// runs again.
+		if s.Verbose != nil {
+			log.Printf("[%s run] free <- struct{}{} start", s.Verbose.ID)
+		}
 		s.free <- struct{}{}
+		if s.Verbose != nil {
+			log.Printf("[%s run] free <- struct{}{} done", s.Verbose.ID)
+		}
 	default:
+		if s.Verbose != nil {
+			log.Printf("[%s run] default", s.Verbose.ID)
+		}
 	}
 	s.activeLock.Unlock()
 
@@ -353,27 +412,13 @@ func (s *Service) run(batch predictionBatch) {
 	}
 }
 
-// dispatcher runs and gathers model prediction requests and batches them up.
+// startDispatcher runs and gathers model prediction requests and batches them up.
 // this should run in a goroutine
-func (s *Service) dispatcher() {
+func (s *Service) startDispatcher() {
 	s.wg.Add(1)
 	defer s.wg.Done()
 
-	var timeout *time.Duration
-	if s.Adjust == nil {
-		timeout = &s.BatchWait
-	} else {
-		timeout = &s.Adjust.CurrentTimeout
-	}
-
-	dspr := &dispatcher{
-		Service: s,
-		timeout: timeout,
-		abPool:  s.abPool,
-		bsPool:  s.bsPool,
-	}
-
-	dspr.resetSlices()
+	dspr := s.newDispatcher()
 
 	var terminate bool
 	for !terminate {
@@ -383,6 +428,40 @@ func (s *Service) dispatcher() {
 	if s.Verbose != nil {
 		log.Printf("[%s dispatcher] terminated", s.Verbose.ID)
 	}
+}
+
+func (s *Service) newDispatcher() *dispatcher {
+	var timeout *time.Duration
+	if s.Adjust == nil {
+		timeout = &s.BatchWait
+	} else {
+		timeout = &s.Adjust.CurrentTimeout
+	}
+
+	dspr := &dispatcher{
+		timeout: timeout,
+
+		wg:     s.wg,
+		inputQ: s.inputQ,
+		blockQ: s.blockInQ,
+		batchQ: s.batchQ,
+
+		abPool: s.abPool,
+		bsPool: s.bsPool,
+
+		queueBatch: s.queueBatch,
+
+		BatcherConfig: s.BatcherConfig,
+		ServiceMeta:   s.ServiceMeta,
+	}
+
+	dspr.resetSlices()
+	return dspr
+}
+
+func (s *Service) Start() {
+	go s.startDispatcher()
+	go s.startBatchQueueing()
 }
 
 func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.BatcherConfig, serviceMeta ServiceMeta) *Service {
@@ -414,17 +493,25 @@ func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.
 	}
 
 	bqSize := batchConfig.MaxQueuedBatches
+	if bqSize > 0 {
+		// this is bqSize - 1 because we queue before checking it is full
+		// so if the queue fails because it is full then we add 1 batch
+		// via a goroutine to make it a total of bqSize waiting batches.
+		bqSize = bqSize - 1
+	}
 
 	b := &Service{
 		wg: new(sync.WaitGroup),
 
 		sheddingLock: new(sync.RWMutex),
 
-		inputQ: make(chan inputBatch, inputQSize),
+		inputQ:   make(chan inputBatch, inputQSize),
+		blockInQ: make(chan struct{}, 0),
 
 		bqWaiting: make(chan struct{}, 1),
 		bqFree:    make(chan struct{}, 0),
-		batchQ:    make(chan predictionBatch, bqSize),
+
+		batchQ: make(chan predictionBatch, bqSize),
 
 		waiting: make(chan struct{}, 1),
 		free:    make(chan struct{}, 0),
@@ -439,7 +526,5 @@ func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.
 		ServiceMeta:   serviceMeta,
 	}
 
-	go b.dispatcher()
-	go b.batchQueuer()
 	return b
 }

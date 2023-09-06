@@ -1,10 +1,27 @@
 package config
 
 import (
+	"log"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/viant/mly/service/tfmodel/batcher/adjust"
 )
+
+var sysMaxQueuedBatches int
+
+func init() {
+	mqbs := os.Getenv("DISPATCHER_MAX_QUEUED_BATCHES")
+	envMQB, err := strconv.Atoi(mqbs)
+	if err != nil {
+		log.Printf("could not Atoi %s use default 16384", mqbs)
+		envMQB = 16384
+	}
+
+	sysMaxQueuedBatches = envMQB
+
+}
 
 type BatcherConfig struct {
 	// MaxBatchSize is a hard limit to the number of elements in a batch
@@ -19,6 +36,7 @@ type BatcherConfig struct {
 	// BatchWait indicates the maximum amount of time to wait to collect
 	// requests to make a batch.
 	// This is not a rolling window.
+	// Set to <= 0 to effectively turn off batching.
 	// This constraint may sometimes cause a batch to be queued.
 	// If MaxEvaluatorConcurrency is NOT set then the batch will be queued
 	// (and run) as soon MaxBatchSize is hit (if set) or BatchWait elapsed.
@@ -31,7 +49,7 @@ type BatcherConfig struct {
 	// have running.
 	// Set to 0 to have it unbounded.
 	// If set to > 0, but MaxBatchSize is not set, then requests will queue into
-	// a single "mega-batch."
+	// a single "mega-batch," and MaxQueuedBatches is ignored.
 	// If set to > 0, and MaxBatchSize is set, then batches will queue until
 	// MaxQueuedBatches is hit.
 	MaxEvaluatorConcurrency uint32 `json:",omitempty" yaml:",omitempty"`
@@ -56,8 +74,20 @@ type V struct {
 }
 
 func (b *BatcherConfig) Init() {
+	if b.MaxBatchSize < 0 {
+		b.MaxBatchSize = 0
+	}
+
 	if b.BatchWait < 0 {
 		b.BatchWait = 0
+	}
+
+	if b.MaxEvaluatorConcurrency < 0 {
+		b.MaxEvaluatorConcurrency = 0
+	}
+
+	if b.MaxQueuedBatches <= 0 {
+		b.MaxQueuedBatches = sysMaxQueuedBatches
 	}
 
 	if b.TimeoutAdjustments != nil {
