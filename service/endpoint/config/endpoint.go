@@ -4,6 +4,8 @@ import (
 	"time"
 )
 
+const defaultMaxEvaluatorWait = 50
+
 // Endpoint represents an endpoint
 type Endpoint struct {
 	Port           int
@@ -16,7 +18,9 @@ type Endpoint struct {
 	PoolMaxSize int `json:",omitempty" yaml:",omitempty"`
 	BufferSize  int `json:",omitempty" yaml:",omitempty"`
 
-	MaxEvaluatorConcurrency int64 `json:",omitempty" yaml:",omitempty"`
+	MaxEvaluatorWaitMs      int           `json:",omitempty" yaml:",omitempty"`
+	MaxEvaluatorWait        time.Duration `json:",omitempty" yaml:",omitempty"`
+	MaxEvaluatorConcurrency int64         `json:",omitempty" yaml:",omitempty"`
 }
 
 //Init init applied default settings
@@ -43,6 +47,14 @@ func (e *Endpoint) Init() {
 	}
 	if e.BufferSize == 0 {
 		e.BufferSize = 128 * 1024
+	}
+
+	if e.MaxEvaluatorWaitMs != 0 {
+		e.MaxEvaluatorWait = time.Millisecond * time.Duration(e.MaxEvaluatorWaitMs)
+	}
+
+	if e.MaxEvaluatorWait == 0 {
+		e.MaxEvaluatorWait = time.Millisecond * time.Duration(defaultMaxEvaluatorWait)
 	}
 
 	if e.MaxEvaluatorConcurrency <= 0 {

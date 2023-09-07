@@ -66,7 +66,13 @@ func (s *Service) Evaluate(ctx context.Context, params []interface{}) ([]interfa
 	s.wg.Add(1)
 	defer s.wg.Done()
 
+	var cancel func()
+	if s.maxEvaluatorWait > 0 {
+		ctx, cancel = context.WithTimeout(ctx, s.maxEvaluatorWait)
+	}
+
 	release, err := s.acquire(ctx)
+	cancel()
 	if err != nil {
 		return nil, err
 	}

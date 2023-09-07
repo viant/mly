@@ -19,6 +19,7 @@ import (
 func createEvalMeta() evaluator.EvaluatorMeta {
 	s := gmetric.New()
 	return evaluator.MakeEvaluatorMeta(semaphore.NewWeighted(100),
+		time.Duration(1*time.Second),
 		s.MultiOperationCounter("test", "test sema", "", time.Microsecond, time.Minute, 2, srvstat.NewEval()),
 		s.MultiOperationCounter("test", "test eval", "", time.Microsecond, time.Minute, 2, srvstat.NewEval()))
 

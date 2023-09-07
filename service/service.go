@@ -37,7 +37,9 @@ type Service struct {
 	config *config.Model
 	closed int32
 
-	// TODO document how does this interacts with Service.inputs
+	maxEvaluatorWait time.Duration
+
+	// TODO how does this interact with Service.inputs
 	inputProvider *gtly.Provider
 
 	// reload TODO finish refactor
@@ -119,6 +121,7 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 	}
 
 	tensorValues, err := s.evaluate(ctx, request)
+
 	if err != nil {
 		isOverloaded := errors.Is(err, serrs.OverloadedError)
 		if isOverloaded {
@@ -130,6 +133,9 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 		if !isOverloaded && ctx.Err() == nil {
 			log.Printf("[%v do] eval error:(%+v) request:(%+v)", s.config.ID, err, request)
 		}
+
+		// we waited or there was an issue with evaluation; in either case
+		// the prediction never finished so there is nothing left to clean up
 
 		return err
 	}

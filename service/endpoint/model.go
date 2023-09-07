@@ -51,7 +51,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 
 			log.Printf("[%s] model loading", model.ID)
 			e := func() error {
-				tfService := tfmodel.NewService(model, fs, metrics, sema)
+				tfService := tfmodel.NewService(model, fs, metrics, sema, config.Endpoint.MaxEvaluatorWait)
 				modelSrv, err := service.New(context.Background(), model, tfService, fs, metrics, datastores)
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)
