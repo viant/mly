@@ -158,8 +158,10 @@ func (d *dispatcher) clearBlockQ() {
 // TODO maybe consider design where the deadline is passed via channel and
 // then it enters a "with deadline" loop otherwise just be synchronous
 func (d *dispatcher) dispatch() bool {
-	dlod := d.dispatcherLoop.Begin(time.Now())
-	defer func() { dlod(time.Now()) }()
+	if d.Verbose != nil {
+		dlod := d.dispatcherLoop.Begin(time.Now())
+		defer func() { dlod(time.Now()) }()
+	}
 
 	d.runN++
 	hasDeadline := d.timer != nil
@@ -167,8 +169,10 @@ func (d *dispatcher) dispatch() bool {
 	if !hasDeadline {
 		select {
 		case batch := <-d.inputQ:
-			onDone := d.inputQDelay.Begin(batch.created)
-			onDone(time.Now())
+			if d.Verbose != nil {
+				onDone := d.inputQDelay.Begin(batch.created)
+				onDone(time.Now())
+			}
 
 			defer d.clearBlockQ()
 			if batch.closed() {
@@ -193,8 +197,10 @@ func (d *dispatcher) dispatch() bool {
 		// they come in often enough.
 		select {
 		case batch := <-d.inputQ:
-			onDone := d.inputQDelay.Begin(batch.created)
-			onDone(time.Now())
+			if d.Verbose != nil {
+				onDone := d.inputQDelay.Begin(batch.created)
+				onDone(time.Now())
+			}
 
 			defer d.clearBlockQ()
 

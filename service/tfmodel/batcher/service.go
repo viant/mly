@@ -293,11 +293,18 @@ func (s *Service) queue(ctx context.Context, inputs []interface{}) (*subBatch, e
 
 	select {
 	case bqd := <-s.blockInQ:
-		s.blockQDelay.Begin(bqd.start)(time.Now())
+		if s.Verbose != nil {
+			s.blockQDelay.Begin(bqd.start)(time.Now())
+		}
 	case <-ctx.Done():
 		go func() {
+			// in case there was a context error, the dispatcher will
+			// be waiting for us to complete, so we take from the channel
+			// to unblock the dispatcher.
 			bqd := <-s.blockInQ
-			s.blockQDelay.Begin(bqd.start)(time.Now())
+			if s.Verbose != nil {
+				s.blockQDelay.Begin(bqd.start)(time.Now())
+			}
 		}()
 
 		return nil, ctx.Err()
