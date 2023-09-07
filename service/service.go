@@ -42,6 +42,8 @@ type Service struct {
 	config *config.Model
 	closed int32
 
+	maxEvaluatorWait time.Duration
+
 	// TODO how does this interact with Service.inputs
 	inputProvider *gtly.Provider
 
@@ -133,8 +135,18 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 		return err
 	}
 
+	cancel := func() {}
+	if s.maxEvaluatorWait > 0 {
+		// this is here due to how the semaphore operates
+		ctx, cancel = context.WithTimeout(ctx, s.maxEvaluatorWait)
+	}
+
 	tensorValues, err := s.evaluate(ctx, request)
+	cancel()
+
 	if err != nil {
+		// we waited or there was an issue with evaluation; in either case
+		// the prediction never finished so there is nothing left to clean up
 		stats.AppendError(err)
 		log.Printf("[%v do] eval error:(%+v) request:(%+v)", s.config.ID, err, request)
 		return err
@@ -274,7 +286,6 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	result, err := evaluator.Evaluate(request.Feeds)
 	if err != nil {
 		// this branch is logged by the caller
-		// these stats don't support context errors...
 		stats.Append(err)
 		return nil, err
 	}

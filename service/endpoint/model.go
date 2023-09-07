@@ -30,6 +30,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 	handlerTimeout := config.Endpoint.WriteTimeout - time.Millisecond
 
 	sema := semaphore.NewWeighted(config.Endpoint.MaxEvaluatorConcurrency)
+	mewOpt := service.WithMaxEvaluatorWait(config.Endpoint.MaxEvaluatorWait)
 
 	waitGroup := sync.WaitGroup{}
 	numModels := len(config.ModelList.Models)
@@ -48,7 +49,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 
 			log.Printf("[%s] model loading", model.ID)
 			e := func() error {
-				modelSrv, err := service.New(context.Background(), fs, model, metrics, sema, datastores)
+				modelSrv, err := service.New(context.Background(), fs, model, metrics, sema, datastores, mewOpt)
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)
 				}
