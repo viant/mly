@@ -29,7 +29,7 @@ type Service struct {
 
 	// batcher (dispatcher) reads from here and pushes to batchQ
 	inputQ   chan inputBatch
-	blockInQ chan struct{}
+	blockInQ chan blockQDebug
 
 	// indicates the dispatcher is waiting for the batch queue to be available
 	bqWaiting chan struct{}
@@ -62,23 +62,27 @@ type Service struct {
 
 // ServiceMeta contains things that should live longer than the life of a Service.
 type ServiceMeta struct {
-	// Measures how long it takes for a request to get queued
-	// primarily an issue is the channel is full.
 	queueMetric *gmetric.Operation
 
 	// Measures how long each batch lasts before being
 	// sent to the evaluator service.
 	dispatcherMetric *gmetric.Operation
+
+	dispatcherLoop *gmetric.Operation
+
+	blockQDelay *gmetric.Operation
+	inputQDelay *gmetric.Operation
 }
 
-func NewServiceMeta(q, d *gmetric.Operation) ServiceMeta {
-	return ServiceMeta{q, d}
+func NewServiceMeta(q, d, dl, bqd, iqd *gmetric.Operation) ServiceMeta {
+	return ServiceMeta{q, d, dl, bqd, iqd}
 }
 
 // inputBatch represents upstream data.
 type inputBatch struct {
 	inputData []interface{}
 	subBatch
+	created time.Time
 }
 
 func (ib inputBatch) closed() bool {
@@ -121,7 +125,7 @@ func (b *Service) Close() error {
 	b.closed = true
 
 	// make Dispatcher stop
-	b.inputQ <- inputBatch{nil, subBatch{-1, nil, nil}}
+	b.inputQ <- inputBatch{nil, subBatch{-1, nil, nil}, time.Now()}
 
 	b.batchQ <- predictionBatch{nil, nil, -1}
 
@@ -148,10 +152,24 @@ func (b *Service) Close() error {
 // evaluator.Evaluator.Evaluate() when appropriate and return the response
 // via a dedicated channel for the goroutine that called Service.Evaluate.
 func (s *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interface{}, error) {
+	if s.Verbose != nil {
+		log.Printf("[%s Evaluate] start", s.Verbose.ID)
+	}
+
 	sb, err := s.queue(ctx, inputs)
 	if err != nil {
 		return nil, err
 	}
+
+	if s.Verbose != nil {
+		log.Printf("[%s Evaluate] queued", s.Verbose.ID)
+	}
+
+	defer func() {
+		if s.Verbose != nil {
+			log.Printf("[%s Evaluate] done", s.Verbose.ID)
+		}
+	}()
 
 	select {
 	case <-ctx.Done():
@@ -226,9 +244,6 @@ func determineBatchSize(inputs []interface{}) (int, error) {
 
 // queue for requests i.e. input batch
 func (s *Service) queue(ctx context.Context, inputs []interface{}) (*subBatch, error) {
-	onDone := s.queueMetric.Begin(time.Now())
-	defer func() { onDone(time.Now()) }()
-
 	if s.closed {
 		return nil, fmt.Errorf("closed")
 	}
@@ -248,8 +263,8 @@ func (s *Service) queue(ctx context.Context, inputs []interface{}) (*subBatch, e
 		return nil, err
 	}
 
-	ch := make(chan []interface{})
-	ec := make(chan error)
+	ch := make(chan []interface{}, 1)
+	ec := make(chan error, 1)
 
 	sb := &subBatch{
 		batchSize: batchSize,
@@ -258,15 +273,24 @@ func (s *Service) queue(ctx context.Context, inputs []interface{}) (*subBatch, e
 	}
 
 	// See dispatcher.dispatch() for the consumer side.
-	s.inputQ <- inputBatch{inputs, *sb}
+	s.inputQ <- inputBatch{inputs, *sb, time.Now()}
 	// The reason this synchronization mechanism exists is because the
 	// dispatcher may sometimes have to contend with a deadline (for
 	// batching timeout).
 	// If that wasn't the case, we could inline and effectively have
 	// synchronous batch dispatching.
+	onDone := s.queueMetric.Begin(time.Now())
+	defer func() { onDone(time.Now()) }()
+
 	select {
-	case <-s.blockInQ:
+	case bqd := <-s.blockInQ:
+		s.blockQDelay.Begin(bqd.start)(time.Now())
 	case <-ctx.Done():
+		go func() {
+			bqd := <-s.blockInQ
+			s.blockQDelay.Begin(bqd.start)(time.Now())
+		}()
+
 		return nil, ctx.Err()
 	}
 
@@ -370,7 +394,6 @@ func (s *Service) run(batch predictionBatch) {
 	s.activeLock.Unlock()
 	if debugging {
 		log.Printf("[%s run] unlocked", s.Verbose.ID)
-
 		if s.Verbose.Output {
 			log.Printf("[%s run] results:%v", s.Verbose.ID, results)
 		}
@@ -437,6 +460,7 @@ func (s *Service) run(batch predictionBatch) {
 		inputBatchMeta.channel <- batchResult
 		o += inputBatchMeta.batchSize
 	}
+
 }
 
 // startDispatcher runs and gathers model prediction requests and batches them up.
@@ -536,7 +560,7 @@ func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.
 		sheddingLock: new(sync.RWMutex),
 
 		inputQ:   make(chan inputBatch, inputQSize),
-		blockInQ: make(chan struct{}, 0),
+		blockInQ: make(chan blockQDebug, 0),
 
 		bqWaiting: make(chan struct{}, 1),
 		bqFree:    make(chan struct{}, 0),

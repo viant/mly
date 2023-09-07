@@ -76,7 +76,9 @@ func (s *queueService) dispatch() bool {
 		s.debug("go run")
 		go func(pb predictionBatch, i uint64) {
 			s.debugf(func() string { return fmt.Sprintf("run %d...", i) })
+
 			s.run(pb)
+
 			s.debugf(func() string { return fmt.Sprintf("run %d ok", i) })
 		}(pb, s.runN)
 

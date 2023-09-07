@@ -14,11 +14,11 @@ import (
 // dispatcher represents a state after an iteration of pulling from
 // the dispatcher queue.
 type dispatcher struct {
-	deadline *time.Timer
+	timer *time.Timer
 
 	wg     *sync.WaitGroup
 	inputQ chan inputBatch
-	blockQ chan struct{}
+	blockQ chan blockQDebug
 	batchQ chan predictionBatch
 
 	// shared with Service
@@ -88,8 +88,8 @@ func (d *dispatcher) zeroDeadline() bool {
 	return *d.timeout <= 1
 }
 
-func (d *dispatcher) newDeadline() {
-	d.deadline = time.NewTimer(*d.timeout)
+func (d *dispatcher) newTimer() {
+	d.timer = time.NewTimer(*d.timeout)
 }
 
 func (d *dispatcher) appendBatch(batch inputBatch) error {
@@ -143,13 +143,12 @@ func (d *dispatcher) submit(statKey string) {
 	d.resetSlices()
 }
 
+type blockQDebug struct {
+	start time.Time
+}
+
 func (d *dispatcher) clearBlockQ() {
-	select {
-	case d.blockQ <- struct{}{}:
-	default:
-		// could happen if context terminates the waiting goroutine
-		d.debug("no blockQ!")
-	}
+	d.blockQ <- blockQDebug{time.Now()}
 }
 
 // dispatch runs a single input queue read or single batch submission.
@@ -159,14 +158,18 @@ func (d *dispatcher) clearBlockQ() {
 // TODO maybe consider design where the deadline is passed via channel and
 // then it enters a "with deadline" loop otherwise just be synchronous
 func (d *dispatcher) dispatch() bool {
+	dlod := d.dispatcherLoop.Begin(time.Now())
+	defer func() { dlod(time.Now()) }()
+
 	d.runN++
-
-	hasDeadline := d.deadline != nil
-
+	hasDeadline := d.timer != nil
 	d.debug("hasDeadline:%v", hasDeadline)
 	if !hasDeadline {
 		select {
 		case batch := <-d.inputQ:
+			onDone := d.inputQDelay.Begin(batch.created)
+			onDone(time.Now())
+
 			defer d.clearBlockQ()
 			if batch.closed() {
 				return true
@@ -182,7 +185,7 @@ func (d *dispatcher) dispatch() bool {
 				return false
 			}
 
-			d.newDeadline()
+			d.newTimer()
 
 		}
 	} else {
@@ -190,6 +193,9 @@ func (d *dispatcher) dispatch() bool {
 		// they come in often enough.
 		select {
 		case batch := <-d.inputQ:
+			onDone := d.inputQDelay.Begin(batch.created)
+			onDone(time.Now())
+
 			defer d.clearBlockQ()
 
 			if batch.closed() {
@@ -210,9 +216,9 @@ func (d *dispatcher) dispatch() bool {
 				d.debug("full")
 				d.submit(FullBatch)
 				d.resetStats()
-				d.deadline = nil
+				d.timer = nil
 			}
-		case <-d.deadline.C:
+		case <-d.timer.C:
 			// TODO if batch Q is full but max size is not just don't submit?
 			if d.curBatchCount > 0 {
 				d.debug("timeout")
@@ -220,7 +226,7 @@ func (d *dispatcher) dispatch() bool {
 				d.resetStats()
 			}
 
-			d.deadline = nil
+			d.timer = nil
 		}
 	}
 

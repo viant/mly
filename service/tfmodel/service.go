@@ -430,8 +430,11 @@ func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sem
 
 	batcherLocation := reflect.TypeOf(batcher.ServiceMeta{}).PkgPath()
 	bMeta := batcher.NewServiceMeta(
-		metrics.OperationCounter(batcherLocation, id+"BatcherQueue", id+" Batcher Queue performance", time.Microsecond, time.Minute, 2),
+		metrics.OperationCounter(batcherLocation, id+"BatcherQueue", id+" Batcher queue performance", time.Microsecond, time.Minute, 2),
 		metrics.MultiOperationCounter(batcherLocation, id+"Dispatcher", id+" Dispatcher performance", time.Microsecond, time.Minute, 2, batcher.NewDispatcherP()),
+		metrics.OperationCounter(batcherLocation, id+"DispatcherLoop", id+" Dispatcher loop performance", time.Microsecond, time.Minute, 2),
+		metrics.OperationCounter(batcherLocation, id+"BSBQWait", id+" Batcher service block queue wait", time.Microsecond, time.Minute, 2),
+		metrics.OperationCounter(batcherLocation, id+"BSIQWait", id+" Batcher service input queue wait", time.Microsecond, time.Minute, 2),
 	)
 
 	return &Service{
