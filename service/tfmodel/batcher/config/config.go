@@ -13,7 +13,13 @@ var sysMaxQueuedBatches int
 
 func init() {
 	mqbs := os.Getenv("DISPATCHER_MAX_QUEUED_BATCHES")
-	envMQB, err := strconv.Atoi(mqbs)
+
+	envMQB := 16384
+	var err error
+	if mqbs != "" {
+		envMQB, err = strconv.Atoi(mqbs)
+	}
+
 	if err != nil {
 		log.Printf("could not Atoi %s use default 16384", mqbs)
 		envMQB = 16384

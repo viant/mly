@@ -6,6 +6,8 @@ BW  = BatchWait
 MEC = MaxEvaluatorConcurrency
 MQB = MaxQueuedBatches
 
+N is N as in number N.
+
 MBS BW  MEC MQB - unbounded behavior
 0   0   0   0   = invalid configuration - use defaults (add bound BatchWait)
 N   0   0   0   = infinite running evaluations with batch size MaxBatchSize
