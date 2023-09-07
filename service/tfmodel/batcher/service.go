@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"reflect"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/viant/mly/service/tfmodel/batcher/adjust"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator"
+	"github.com/viant/mly/shared/stat"
 )
 
 // Service sits on top of an Evaluator and collects predictions calls
@@ -74,8 +76,15 @@ type ServiceMeta struct {
 	inputQDelay *gmetric.Operation
 }
 
-func NewServiceMeta(q, d, dl, bqd, iqd *gmetric.Operation) ServiceMeta {
-	return ServiceMeta{q, d, dl, bqd, iqd}
+func NewServiceMeta(m *stat.GMeter, id string) ServiceMeta {
+	batcherLocation := reflect.TypeOf(ServiceMeta{}).PkgPath()
+	return ServiceMeta{
+		queueMetric:      m.Op(batcherLocation, id+"BatcherQueue", id+" Batcher queue performance"),
+		dispatcherMetric: m.MOp(batcherLocation, id+"Dispatcher", id+" Dispatcher performance", NewDispatcherP()),
+		dispatcherLoop:   m.Op(batcherLocation, id+"DispatcherLoop", id+" Dispatcher loop performance"),
+		blockQDelay:      m.Op(batcherLocation, id+"BSBQWait", id+" Batcher service block queue wait"),
+		inputQDelay:      m.Op(batcherLocation, id+"BSIQWait", id+" Batcher service input queue wait"),
+	}
 }
 
 // inputBatch represents upstream data.

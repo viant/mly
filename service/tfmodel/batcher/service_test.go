@@ -36,8 +36,8 @@ func (m mockEvaluator) Close() error {
 func createBSMeta() ServiceMeta {
 	s := gmetric.New()
 	return ServiceMeta{
-		queueMetric:      s.OperationCounter("test", "queue", "", time.Microsecond, time.Minute, 2),
-		dispatcherMetric: s.MultiOperationCounter("test", "dispatcher", "", time.Microsecond, time.Minute, 2, NewDispatcherP()),
+		queueMetric:      s.OperationCounter("test", "queue", "", time.Microsecond, time.Second, 2),
+		dispatcherMetric: s.MultiOperationCounter("test", "dispatcher", "", time.Microsecond, time.Second, 2, NewDispatcherP()),
 	}
 }
 

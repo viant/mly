@@ -26,6 +26,7 @@ import (
 	tfstat "github.com/viant/mly/service/tfmodel/stat"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
+	"github.com/viant/mly/shared/stat"
 	"golang.org/x/sync/semaphore"
 	"gopkg.in/yaml.v2"
 )
@@ -421,21 +422,14 @@ func (s *Service) Close() error {
 // This service isn't ready until RelodIfNeeded() is called.
 func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sema *semaphore.Weighted) *Service {
 	location := reflect.TypeOf(evaluator.Service{}).PkgPath()
-
 	id := cfg.ID
 
-	semaMetric := metrics.MultiOperationCounter(location, id+"Semaphore", id+" Tensorflow semaphore", time.Microsecond, time.Minute, 2, tfstat.NewSema())
-	tfMetric := metrics.MultiOperationCounter(location, id+"Eval", id+" Tensorflow evaluator performance", time.Microsecond, time.Minute, 2, tfstat.NewTfs())
-	meta := evaluator.MakeEvaluatorMeta(sema, semaMetric, tfMetric)
+	gm := stat.DefaultGMeter(metrics)
 
-	batcherLocation := reflect.TypeOf(batcher.ServiceMeta{}).PkgPath()
-	bMeta := batcher.NewServiceMeta(
-		metrics.OperationCounter(batcherLocation, id+"BatcherQueue", id+" Batcher queue performance", time.Microsecond, time.Minute, 2),
-		metrics.MultiOperationCounter(batcherLocation, id+"Dispatcher", id+" Dispatcher performance", time.Microsecond, time.Minute, 2, batcher.NewDispatcherP()),
-		metrics.OperationCounter(batcherLocation, id+"DispatcherLoop", id+" Dispatcher loop performance", time.Microsecond, time.Minute, 2),
-		metrics.OperationCounter(batcherLocation, id+"BSBQWait", id+" Batcher service block queue wait", time.Microsecond, time.Minute, 2),
-		metrics.OperationCounter(batcherLocation, id+"BSIQWait", id+" Batcher service input queue wait", time.Microsecond, time.Minute, 2),
-	)
+	semaMetric := gm.MOp(location, id+"Semaphore", id+" Tensorflow semaphore", tfstat.NewSema())
+	tfMetric := gm.MOp(location, id+"Eval", id+" Tensorflow evaluator performance", tfstat.NewTfs())
+	meta := evaluator.MakeEvaluatorMeta(sema, semaMetric, tfMetric)
+	bMeta := batcher.NewServiceMeta(gm, id)
 
 	return &Service{
 		evaluatorMeta: &meta,
