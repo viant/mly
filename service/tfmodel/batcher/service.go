@@ -44,14 +44,16 @@ type Service struct {
 	// batch queue listens to this to continue queueing
 	free chan struct{}
 
-	// busy memoization of active >= BatcherConfig.MaxEvaluatorConcurrency
-	busy bool
 	// number of running evaluators
 	active     uint32
 	activeLock *sync.RWMutex
 	evaluator  evaluator.Evaluator
 	bsPool     *sync.Pool
 	abPool     *sync.Pool
+
+	// for Stats()
+	queueService *queueService
+	dispatcher   *dispatcher
 
 	Adjust *adjust.Adjust // shared for metrics exposure
 	config.BatcherConfig
@@ -97,6 +99,18 @@ type predictionBatch struct {
 	inputData  []interface{}
 	subBatches []subBatch
 	size       int
+}
+
+func (s *Service) Stats(r map[string]interface{}) {
+	r["activeEvaluators"] = s.active
+	r["batchQueueLen"] = len(s.batchQ)
+
+	d := s.dispatcher
+	if d != nil {
+		r["timeout"] = d.timeout
+	}
+
+	r["shedding"] = s.shedding
 }
 
 // Waits for any queued batches to complete then closes underlying resources.
@@ -296,6 +310,8 @@ func (s *Service) newQueueService() *queueService {
 		BatcherConfig: s.BatcherConfig,
 	}
 
+	s.queueService = qsrv
+
 	return qsrv
 }
 
@@ -310,14 +326,22 @@ func (s *Service) startBatchQueueing() {
 
 func (s *Service) run(batch predictionBatch) {
 	defer s.wg.Done()
-	if s.Verbose != nil && s.Verbose.Input {
+	debugging := s.Verbose != nil
+	if debugging && s.Verbose.Input {
 		log.Printf("[%s run] inputData :%v", s.Verbose.ID, batch.inputData)
 	}
 
 	ctx := context.TODO()
 	results, err := s.evaluator.Evaluate(ctx, batch.inputData)
 
+	if debugging {
+		log.Printf("[%s run] locking...", s.Verbose.ID)
+	}
 	s.activeLock.Lock()
+	if debugging {
+		log.Printf("[%s run] locked", s.Verbose.ID)
+	}
+
 	if s.active > 0 {
 		// Should have been incremented in queueService.dispatch().
 		s.active--
@@ -330,23 +354,26 @@ func (s *Service) run(batch predictionBatch) {
 
 		// See queueService.dispatch() for consumer.
 		// This is going to block until the queueService.dispatch()
-		// runs again.
-		if s.Verbose != nil {
+		// runs again... does that make sense to do?
+		if debugging {
 			log.Printf("[%s run] free <- struct{}{} start", s.Verbose.ID)
 		}
 		s.free <- struct{}{}
-		if s.Verbose != nil {
+		if debugging {
 			log.Printf("[%s run] free <- struct{}{} done", s.Verbose.ID)
 		}
 	default:
-		if s.Verbose != nil {
+		if debugging {
 			log.Printf("[%s run] default", s.Verbose.ID)
 		}
 	}
 	s.activeLock.Unlock()
+	if debugging {
+		log.Printf("[%s run] unlocked", s.Verbose.ID)
 
-	if s.Verbose != nil && s.Verbose.Output {
-		log.Printf("[%s run] results:%v", s.Verbose.ID, results)
+		if s.Verbose.Output {
+			log.Printf("[%s run] results:%v", s.Verbose.ID, results)
+		}
 	}
 
 	defer s.bsPool.Put(batch.subBatches)
@@ -403,7 +430,7 @@ func (s *Service) run(batch predictionBatch) {
 			}
 		}
 
-		if s.Verbose != nil && s.Verbose.Output {
+		if debugging && s.Verbose.Output {
 			log.Printf("[%s run] o:%d batchResult:%v", s.Verbose.ID, o, batchResult)
 		}
 
@@ -456,6 +483,9 @@ func (s *Service) newDispatcher() *dispatcher {
 	}
 
 	dspr.resetSlices()
+
+	s.dispatcher = dspr
+
 	return dspr
 }
 

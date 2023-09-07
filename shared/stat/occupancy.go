@@ -45,6 +45,10 @@ func (a *Occupancy) Aggregate(value interface{}) {
 	if g {
 		latest = atomic.AddUint64(&a.current, 1)
 	} else {
+		if a.current == 0 {
+			return
+		}
+
 		latest = atomic.AddUint64(&a.current, minusOne)
 		return
 	}

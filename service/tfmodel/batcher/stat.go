@@ -61,6 +61,8 @@ func (d dispatcherStats) Map(value interface{}) int {
 		case Closing:
 			return 1
 		case FullBatch:
+			return 2
+		case InstantQ:
 			return 3
 		}
 	case *batchStat:
@@ -70,6 +72,8 @@ func (d dispatcherStats) Map(value interface{}) int {
 		case Closing:
 			return 1
 		case FullBatch:
+			return 2
+		case InstantQ:
 			return 3
 		}
 	}

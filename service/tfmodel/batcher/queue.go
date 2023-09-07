@@ -1,6 +1,7 @@
 package batcher
 
 import (
+	"fmt"
 	"log"
 	"sync"
 
@@ -22,21 +23,33 @@ type queueService struct {
 	free chan struct{}
 
 	config.BatcherConfig
+
+	runN uint64 // tracker for debugging purposes
 }
 
 func (s *queueService) debug(m string) {
 	if s.BatcherConfig.Verbose != nil {
-		log.Printf("[%s queue] %s", s.BatcherConfig.Verbose.ID, m)
+		log.Printf("[%s queue %d] %s active:%d", s.BatcherConfig.Verbose.ID, s.runN, m, *s.active)
+	}
+}
+
+func (s *queueService) debugf(f func() string) {
+	if s.BatcherConfig.Verbose != nil {
+		log.Printf("[%s queue %d] %s active:%d", s.BatcherConfig.Verbose.ID, s.runN, f(), *s.active)
 	}
 }
 
 // See Service.queueBatch() and dispatcher.dispatch() for producer.
 func (s *queueService) dispatch() bool {
+	s.runN++
+
 	if s.busy {
-		s.debug("wait for free evaluator")
+		s.debug("<-free evaluator wait")
 		// See Service.run() for producer.
 		<-s.free
-		s.debug("done waiting for free evaluator")
+		s.debug("<-free evaluator wait done")
+
+		s.busy = false
 	}
 
 	select {
@@ -45,12 +58,14 @@ func (s *queueService) dispatch() bool {
 			return false
 		}
 
+		s.debug("locking...")
 		s.activeLock.Lock()
+		s.debug("locked")
 		s.setNotShedding()
 
 		// Gets decremented in Service.run().
-		*s.active++
-		if *s.active >= s.BatcherConfig.MaxEvaluatorConcurrency {
+		*s.active = *s.active + 1
+		if s.BatcherConfig.MaxEvaluatorConcurrency > 0 && *s.active >= s.BatcherConfig.MaxEvaluatorConcurrency {
 			s.busy = true
 			// Indicate that queueService.dispatch() may block
 			// on queueService.free.
@@ -58,13 +73,15 @@ func (s *queueService) dispatch() bool {
 			s.waiting <- struct{}{}
 		}
 
-		go func(pb predictionBatch) {
-			s.debug("run...")
+		s.debug("go run")
+		go func(pb predictionBatch, i uint64) {
+			s.debugf(func() string { return fmt.Sprintf("run %d...", i) })
 			s.run(pb)
-			s.debug("run ok")
-		}(pb)
+			s.debugf(func() string { return fmt.Sprintf("run %d ok", i) })
+		}(pb, s.runN)
 
 		s.activeLock.Unlock()
+		s.debug("unlocked")
 	}
 
 	return true

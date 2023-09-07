@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,7 @@ import (
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/buffer"
 	"github.com/viant/mly/service/clienterr"
+	serrs "github.com/viant/mly/service/errors"
 	"github.com/viant/mly/service/request"
 	sstat "github.com/viant/mly/service/stat"
 	"github.com/viant/mly/shared/common"
@@ -27,15 +29,19 @@ type Handler struct {
 	service     *Service
 	pool        *buffer.Pool
 
-	overheadMetrics *gmetric.Operation
+	overheadMetrics    *gmetric.Operation
+	httpContextMetrics *gmetric.Operation
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Request) {
 	// use Background() since there are things to be done regardless of if the request is cancceled from the client side.
 	ctx := context.Background()
-	// TODO: Handle httpRequest.Context() - there are issues since this can be canceled but there should be housekeeping completed.
 	ctx, cancel := context.WithTimeout(ctx, h.maxDuration)
 	defer cancel()
+
+	handlerOnDone := h.httpContextMetrics.Begin(time.Now())
+	hStats := stat.NewValues()
+	defer func() { handlerOnDone(time.Now(), hStats.Values()...) }()
 
 	isDebug := h.service.config.Debug
 
@@ -95,6 +101,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	}
 
 	if request == nil {
+		http.Error(writer, "no request", http.StatusBadRequest)
 		return
 	}
 
@@ -109,10 +116,17 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		}
 	}
 
+	reqCtx := httpRequest.Context()
+	if reqCtx != nil && reqCtx.Err() != nil {
+		hStats.AppendError(reqCtx.Err())
+	}
+
 	if err != nil {
 		var status int
 		if _, ok := err.(*clienterr.ClientError); ok {
 			status = http.StatusBadRequest
+		} else if errors.Is(err, serrs.OverloadedError) {
+			status = http.StatusTooManyRequests
 		} else {
 			status = http.StatusInternalServerError
 		}
@@ -123,6 +137,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 		http.Error(writer, err.Error(), status)
 	}
+
 }
 
 func (h *Handler) buildRequestFromQuery(httpRequest *http.Request, request *request.Request) error {
@@ -165,10 +180,12 @@ func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
 // NewHandler creates a new HTTP service Handler
 func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration, m *gmetric.Service) *Handler {
 	location := reflect.TypeOf(Handler{}).PkgPath()
+	modelID := service.config.ID
 	return &Handler{
-		service:         service,
-		pool:            pool,
-		maxDuration:     maxDuration,
-		overheadMetrics: m.MultiOperationCounter(location, service.config.ID+"SrvHTTP", service.config.ID+" server HTTP startup overhead", time.Microsecond, time.Minute, 2, sstat.NewHttp()),
+		service:            service,
+		pool:               pool,
+		maxDuration:        maxDuration,
+		overheadMetrics:    m.MultiOperationCounter(location, modelID+"HTTPOverhead", modelID+" server HTTP startup overhead", time.Microsecond, time.Minute, 2, sstat.NewHttp()),
+		httpContextMetrics: m.MultiOperationCounter(location, modelID+"HTTPHandler", modelID+" server HTTP handler", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly()),
 	}
 }

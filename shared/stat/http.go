@@ -2,6 +2,7 @@ package stat
 
 import "github.com/viant/gmetric/counter"
 
+// TODO move to shared/client
 type http struct{}
 
 const Pending = "pending"

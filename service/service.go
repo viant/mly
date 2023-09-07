@@ -120,12 +120,17 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 
 	tensorValues, err := s.evaluate(ctx, request)
 	if err != nil {
-		if errors.Is(err, serrs.OverloadedError) {
+		isOverloaded := errors.Is(err, serrs.OverloadedError)
+		if isOverloaded {
 			stats.Append(stat.Overloaded)
 		} else {
 			stats.AppendError(err)
+		}
+
+		if !isOverloaded && ctx.Err() == nil {
 			log.Printf("[%v do] eval error:(%+v) request:(%+v)", s.config.ID, err, request)
 		}
+
 		return err
 	}
 

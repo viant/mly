@@ -25,9 +25,8 @@ type dispatcher struct {
 	bsPool *sync.Pool
 	abPool *sync.Pool
 
-	active     []interface{}
-	subBatches []subBatch
-
+	active        []interface{}
+	subBatches    []subBatch
 	curBatchCount int
 	curBatchRows  int
 
@@ -40,6 +39,8 @@ type dispatcher struct {
 
 	config.BatcherConfig
 	ServiceMeta
+
+	runN uint64
 }
 
 type batchFull uint32
@@ -118,8 +119,8 @@ func (d *dispatcher) debug(desc string, pfvargs ...interface{}) {
 			desc = fmt.Sprintf(desc, pfvargs...)
 		}
 
-		log.Printf("[%s dispatcher] %s timeout:%v size:%d, count:%d",
-			d.Verbose.ID, desc, d.timeout, d.curBatchRows, d.curBatchCount)
+		log.Printf("[%s dispatcher %d] %s timeout:%v size:%d, count:%d",
+			d.Verbose.ID, d.runN, desc, d.timeout, d.curBatchRows, d.curBatchCount)
 	}
 }
 
@@ -158,6 +159,8 @@ func (d *dispatcher) clearBlockQ() {
 // TODO maybe consider design where the deadline is passed via channel and
 // then it enters a "with deadline" loop otherwise just be synchronous
 func (d *dispatcher) dispatch() bool {
+	d.runN++
+
 	hasDeadline := d.deadline != nil
 
 	d.debug("hasDeadline:%v", hasDeadline)
