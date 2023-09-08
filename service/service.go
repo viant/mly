@@ -290,7 +290,7 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	debug.SetPanicOnFault(true)
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[%s eval] recover()=%v - %+V- PANIC", s.config.ID, r, request)
+			log.Printf("[%s eval] recover()=%v - %+v- PANIC", s.config.ID, r, request)
 			panic(r)
 		}
 	}()
