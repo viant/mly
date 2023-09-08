@@ -13,6 +13,7 @@ import (
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator/test"
+	"github.com/viant/mly/shared/stat"
 	"github.com/viant/toolbox"
 )
 
@@ -35,9 +36,19 @@ func (m mockEvaluator) Close() error {
 
 func createBSMeta() ServiceMeta {
 	s := gmetric.New()
+	m := &stat.GMeter{
+		Service:        s,
+		Unit:           time.Microsecond,
+		RecentDuration: 15 * time.Second,
+		NumRecent:      4,
+	}
+
 	return ServiceMeta{
-		queueMetric:      s.OperationCounter("test", "queue", "", time.Microsecond, time.Second, 2),
-		dispatcherMetric: s.MultiOperationCounter("test", "dispatcher", "", time.Microsecond, time.Second, 2, NewDispatcherP()),
+		queueMetric:      m.Op("test", "queue", ""),
+		dispatcherMetric: m.MOp("test", "dispatcher", "", NewDispatcherP()),
+		dispatcherLoop:   m.Op("test", "dispatcherLoop", ""),
+		blockQDelay:      m.Op("test", "blockQ", ""),
+		inputQDelay:      m.Op("test", "inputQ", ""),
 	}
 }
 
@@ -221,6 +232,11 @@ func TestServiceBatchMax(t *testing.T) {
 	toolbox.Dump(met)
 
 	batchSrv.Close()
+}
+
+func TestClose(t *testing.T) {
+	// TODO add test to make sure there are no leaks or early closes if there is
+	// any queues not empty but Close() is called.
 }
 
 func BenchmarkServiceParallel(b *testing.B) {

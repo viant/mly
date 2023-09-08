@@ -10,9 +10,9 @@ import (
 
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/errors"
+	"github.com/viant/mly/service/evaluator"
 	"github.com/viant/mly/service/tfmodel/batcher/adjust"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
-	"github.com/viant/mly/service/tfmodel/evaluator"
 	"github.com/viant/mly/shared/stat"
 )
 

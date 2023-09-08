@@ -173,10 +173,11 @@ func (d *dispatcher) dispatch() bool {
 				onDone(time.Now())
 			}
 
-			defer d.clearBlockQ()
 			if batch.closed() {
 				return true
 			}
+
+			defer d.clearBlockQ()
 
 			d.startStats()
 			d.appendBatch(batch)
@@ -201,8 +202,6 @@ func (d *dispatcher) dispatch() bool {
 				onDone(time.Now())
 			}
 
-			defer d.clearBlockQ()
-
 			if batch.closed() {
 				if d.curBatchCount > 0 {
 					d.debug("closed")
@@ -212,6 +211,8 @@ func (d *dispatcher) dispatch() bool {
 				// terminate
 				return true
 			}
+
+			defer d.clearBlockQ()
 
 			if err := d.appendBatch(batch); err != nil {
 				return false
