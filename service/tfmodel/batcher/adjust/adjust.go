@@ -1,36 +1,33 @@
 package adjust
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
-// TODO
 type Adjust struct {
-	config *AdjustConfig
-
+	config         *AdjustConfig
 	CurrentTimeout time.Duration
+
+	l *sync.Mutex
 }
 
 func (a *Adjust) Stats(r map[string]interface{}) {
 }
 
-func (a *Adjust) Adjust() {
-}
+func (a *Adjust) Active(active uint32) {
+	a.l.Lock()
+	defer a.l.Unlock()
 
-func (a *Adjust) IncTimeout() {
-}
-
-func (a *Adjust) IncOverloaded() {
-}
-
-func (a *Adjust) Count() {
-}
-
-func (a *Adjust) recalculate() {
-}
-
-func (a *Adjust) Close() {
+	if active <= a.config.Max {
+		a.CurrentTimeout = a.config.Increment * time.Duration(active)
+	}
 }
 
 // NewAdjust creates a new Adjust with constraints.
 func NewAdjust(ac *AdjustConfig) *Adjust {
-	return nil
+	return &Adjust{
+		config: ac,
+		l:      new(sync.Mutex),
+	}
 }

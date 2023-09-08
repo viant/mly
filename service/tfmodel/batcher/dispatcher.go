@@ -134,7 +134,6 @@ func (d *dispatcher) submit(statKey string) {
 	d.wg.Add(1)
 
 	d.queueBatch(predictionBatch{d.active, d.subBatches, d.curBatchCount})
-
 	d.endStats()
 
 	d.curBatchCount = 0

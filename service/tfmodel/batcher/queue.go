@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 
+	"github.com/viant/mly/service/tfmodel/batcher/adjust"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 )
 
@@ -23,6 +24,7 @@ type queueService struct {
 	free chan struct{}
 
 	config.BatcherConfig
+	*adjust.Adjust
 
 	runN uint64 // tracker for debugging purposes
 }
@@ -65,6 +67,10 @@ func (s *queueService) dispatch() bool {
 
 		// Gets decremented in Service.run().
 		*s.active = *s.active + 1
+		if s.Adjust != nil {
+			s.Adjust.Active(*s.active)
+		}
+
 		if s.BatcherConfig.MaxEvaluatorConcurrency > 0 && *s.active >= s.BatcherConfig.MaxEvaluatorConcurrency {
 			s.busy = true
 			// Indicate that queueService.dispatch() may block

@@ -57,7 +57,7 @@ type Service struct {
 	queueService *queueService
 	dispatcher   *dispatcher
 
-	Adjust *adjust.Adjust // shared for metrics exposure
+	*adjust.Adjust
 	config.BatcherConfig
 	ServiceMeta
 }
@@ -347,6 +347,7 @@ func (s *Service) newQueueService() *queueService {
 		waiting: s.waiting,
 		free:    s.free,
 
+		Adjust:        s.Adjust,
 		BatcherConfig: s.BatcherConfig,
 	}
 
@@ -385,6 +386,10 @@ func (s *Service) run(batch predictionBatch) {
 	if s.active > 0 {
 		// Should have been incremented in queueService.dispatch().
 		s.active--
+	}
+
+	if s.Adjust != nil {
+		s.Adjust.Active(s.active)
 	}
 
 	select {
@@ -536,7 +541,6 @@ func (s *Service) Start() {
 
 func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.BatcherConfig, serviceMeta ServiceMeta) *Service {
 	var adj *adjust.Adjust
-
 	ta := batchConfig.TimeoutAdjustments
 	if ta != nil {
 		if batchConfig.Verbose != nil {
@@ -570,7 +574,7 @@ func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.
 		bqSize = bqSize - 1
 	}
 
-	b := &Service{
+	s := &Service{
 		wg: new(sync.WaitGroup),
 
 		sheddingLock: new(sync.RWMutex),
@@ -596,5 +600,5 @@ func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.
 		ServiceMeta:   serviceMeta,
 	}
 
-	return b
+	return s
 }
