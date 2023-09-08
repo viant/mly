@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -283,7 +284,15 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	s.mux.RUnlock()
 	rleDone()
 
+	debug.SetPanicOnFault(true)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[%s eval] recover()=%v - %+V- PANIC", s.config.ID, r, request)
+			panic(r)
+		}
+	}()
 	result, err := evaluator.Evaluate(request.Feeds)
+	debug.SetPanicOnFault(false)
 	if err != nil {
 		// this branch is logged by the caller
 		stats.Append(err)
