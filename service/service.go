@@ -9,6 +9,7 @@ import (
 	"log"
 	"reflect"
 	"runtime/debug"
+	"runtime/trace"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -262,7 +263,9 @@ func incrementThenDecrement(metric *gmetric.Operation, start time.Time, statName
 }
 
 func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]interface{}, error) {
+	trr := trace.StartRegion(ctx, "Semaphore.Acquire")
 	err := s.sema.Acquire(ctx, 1)
+	trr.End()
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +294,9 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 			panic(r)
 		}
 	}()
+
 	result, err := evaluator.Evaluate(request.Feeds)
+
 	debug.SetPanicOnFault(false)
 	if err != nil {
 		// this branch is logged by the caller
@@ -304,7 +309,9 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	}
 
 	if s.stream != nil {
-		s.stream.Log(request.Body, result, time.Now().Sub(startTime))
+		trace.WithRegion(ctx, "Stream.Log", func() {
+			s.stream.Log(request.Body, result, time.Now().Sub(startTime))
+		})
 	}
 
 	return result, nil

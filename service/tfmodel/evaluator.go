@@ -1,7 +1,9 @@
 package tfmodel
 
 import (
+	"context"
 	"fmt"
+	"runtime/trace"
 
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/clienterr"
@@ -30,12 +32,18 @@ func (e *Evaluator) feeds(feeds []interface{}) (map[tf.Output]*tf.Tensor, error)
 
 //Evaluate evaluates model
 func (e *Evaluator) Evaluate(params []interface{}) ([]interface{}, error) {
+	ctx := context.Background()
+	trr := trace.StartRegion(ctx, "Evaluator.feeds")
 	feeds, err := e.feeds(params)
+	trr.End()
 	if err != nil {
 		return nil, clienterr.Wrap(err)
 	}
 
+	trr = trace.StartRegion(ctx, "Evaluator.Session")
 	output, err := e.session.Run(feeds, e.fetches, e.targets)
+	trr.End()
+
 	if err != nil {
 		return nil, err
 	}
