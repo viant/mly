@@ -12,9 +12,6 @@ type Adjust struct {
 	l *sync.Mutex
 }
 
-func (a *Adjust) Stats(r map[string]interface{}) {
-}
-
 func (a *Adjust) Active(active uint32) {
 	a.l.Lock()
 	defer a.l.Unlock()

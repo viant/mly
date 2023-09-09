@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/viant/gmetric/counter"
+	"github.com/viant/mly/service/tfmodel/batcher/adjust"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/shared/stat"
 )
@@ -37,6 +38,7 @@ type dispatcher struct {
 
 	queueBatch func(predictionBatch) bool
 
+	*adjust.Adjust
 	config.BatcherConfig
 	ServiceMeta
 
@@ -84,7 +86,7 @@ func (d *dispatcher) endStats() {
 	d.onDone(time.Now(), d.stats.Values()...)
 }
 
-func (d *dispatcher) zeroDeadline() bool {
+func (d *dispatcher) noTimeout() bool {
 	return *d.timeout <= 1
 }
 
@@ -182,7 +184,15 @@ func (d *dispatcher) dispatch() bool {
 			d.startStats()
 			d.appendBatch(batch)
 
-			if f := d.full(); f != BatchNotFull || d.zeroDeadline() {
+			nt := d.noTimeout()
+			if f := d.full(); f != BatchNotFull || nt {
+				if nt && d.Adjust != nil {
+					// averts any queue processing delay
+					// from forcing too many instant
+					// queues.
+					d.Adjust.Active(1)
+				}
+
 				d.debug("instantQ")
 				d.submit(InstantQ)
 				d.resetStats()

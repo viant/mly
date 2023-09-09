@@ -516,6 +516,7 @@ func (s *Service) newDispatcher() *dispatcher {
 		wg:     s.wg,
 		inputQ: s.inputQ,
 		blockQ: s.blockInQ,
+
 		batchQ: s.batchQ,
 
 		abPool: s.abPool,
@@ -523,6 +524,7 @@ func (s *Service) newDispatcher() *dispatcher {
 
 		queueBatch: s.queueBatch,
 
+		Adjust:        s.Adjust,
 		BatcherConfig: s.BatcherConfig,
 		ServiceMeta:   s.ServiceMeta,
 	}
