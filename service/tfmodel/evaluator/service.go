@@ -3,6 +3,8 @@ package evaluator
 import (
 	"context"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -92,7 +94,17 @@ func (s *Service) Evaluate(ctx context.Context, params []interface{}) ([]interfa
 	onExit := metric.EnterThenExit(s.tfMetric, time.Now(), stat.Enter, stat.Exit)
 	defer onExit()
 
+	debug.SetPanicOnFault(true)
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[%s Evaluate] recover()=%v - %+v - PANIC", s.id, r, params)
+			panic(r)
+		}
+	}()
+
 	output, err := s.session.Run(feeds, s.fetches, s.targets)
+	debug.SetPanicOnFault(false)
 
 	if err != nil {
 		stats.Append(err)

@@ -8,6 +8,8 @@ import (
 )
 
 type EvaluatorMeta struct {
+	id string // model ID
+
 	// prevents potentially explosive thread generation due to concurrent requests
 	// this should be shared across all Evaluators.
 	semaphore *semaphore.Weighted
@@ -19,10 +21,11 @@ type EvaluatorMeta struct {
 	tfMetric *gmetric.Operation
 }
 
-func MakeEvaluatorMeta(semaphore *semaphore.Weighted, maxEvaluatorWait time.Duration,
+func MakeEvaluatorMeta(id string, semaphore *semaphore.Weighted, maxEvaluatorWait time.Duration,
 	semaMetric, tfMetric *gmetric.Operation) EvaluatorMeta {
 
 	return EvaluatorMeta{
+		id:               id,
 		semaphore:        semaphore,
 		maxEvaluatorWait: maxEvaluatorWait,
 		semaMetric:       semaMetric,

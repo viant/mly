@@ -429,7 +429,7 @@ func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sem
 
 	semaMetric := gm.MOp(location, id+"Semaphore", id+" Tensorflow semaphore", tfstat.NewSema())
 	tfMetric := gm.MOp(location, id+"Eval", id+" Tensorflow evaluator performance", tfstat.NewTfs())
-	meta := evaluator.MakeEvaluatorMeta(sema, maxEvaluatorWait, semaMetric, tfMetric)
+	meta := evaluator.MakeEvaluatorMeta(id, sema, maxEvaluatorWait, semaMetric, tfMetric)
 	bMeta := batcher.NewServiceMeta(gm, id)
 
 	return &Service{
