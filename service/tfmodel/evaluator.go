@@ -3,6 +3,9 @@ package tfmodel
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"runtime/debug"
 	"runtime/trace"
 
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
@@ -12,6 +15,8 @@ import (
 
 //Evaluator represents evaluator
 type Evaluator struct {
+	id string
+
 	session *tf.Session
 	fetches []tf.Output
 	targets []*tf.Operation
@@ -33,25 +38,66 @@ func (e *Evaluator) feeds(feeds []interface{}) (map[tf.Output]*tf.Tensor, error)
 //Evaluate evaluates model
 func (e *Evaluator) Evaluate(params []interface{}) ([]interface{}, error) {
 	ctx := context.Background()
-	trr := trace.StartRegion(ctx, "Evaluator.feeds")
-	feeds, err := e.feeds(params)
-	trr.End()
-	if err != nil {
-		return nil, clienterr.Wrap(err)
+
+	if TFSessionPanicDuration > 0 {
+		var cancel func()
+		ctx, cancel = context.WithTimeout(ctx, TFSessionPanicDuration)
+		defer cancel()
 	}
 
-	trr = trace.StartRegion(ctx, "Evaluator.Session")
-	output, err := e.session.Run(feeds, e.fetches, e.targets)
-	trr.End()
+	errc := make(chan error)
+	done := make(chan struct{})
 
-	if err != nil {
+	var tensorValues []interface{}
+	go func() {
+		debug.SetPanicOnFault(true)
+		defer debug.SetPanicOnFault(false)
+
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[%s Evaluator.Evaluate] recover()=%v - %+v - TERMINATING PROCESS", e.id, r, params)
+				// we are potentially recovering from a segment fault
+				// we will exit like we would if there was a segment fault
+				os.Exit(139)
+			}
+		}()
+
+		trr := trace.StartRegion(ctx, "Evaluator.feeds")
+		feeds, err := e.feeds(params)
+		trr.End()
+		if err != nil {
+			errc <- clienterr.Wrap(err)
+		}
+
+		trr = trace.StartRegion(ctx, "Evaluator.Session")
+
+		output, err := e.session.Run(feeds, e.fetches, e.targets)
+		trr.End()
+
+		if err != nil {
+			errc <- err
+		}
+
+		tensorValues = make([]interface{}, len(output))
+		for i := range tensorValues {
+			tensorValues[i] = output[i].Value()
+		}
+
+		done <- struct{}{}
+	}()
+
+	select {
+	case err := <-errc:
 		return nil, err
+	case <-done:
+		return tensorValues, nil
+	case <-ctx.Done():
+		log.Printf("Forced panic invocation, Tensorflow Session took longer than %s", TFSessionPanicDuration)
+		debug.PrintStack()
+		os.Exit(5)
+		return nil, nil
 	}
-	var tensorValues = make([]interface{}, len(output))
-	for i := range tensorValues {
-		tensorValues[i] = output[i].Value()
-	}
-	return tensorValues, nil
+
 }
 
 //Close closes evaluator
@@ -60,13 +106,15 @@ func (e *Evaluator) Close() error {
 }
 
 //NewEvaluator creates new evaluator
-func NewEvaluator(signature *domain.Signature, session *tf.Session) *Evaluator {
+func NewEvaluator(id string, signature *domain.Signature, session *tf.Session) *Evaluator {
 	fetches := []tf.Output{}
 	for _, output := range signature.Outputs {
 		fetches = append(fetches, output.Output(output.Index))
 	}
 
 	return &Evaluator{
+		id: id,
+
 		Signature: *signature,
 		session:   session,
 		fetches:   fetches,

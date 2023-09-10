@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"reflect"
-	"runtime/debug"
 	"runtime/trace"
 	"strings"
 	"sync"
@@ -287,17 +286,8 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	s.mux.RUnlock()
 	rleDone()
 
-	debug.SetPanicOnFault(true)
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("[%s eval] recover()=%v - %+v- PANIC", s.config.ID, r, request)
-			panic(r)
-		}
-	}()
-
 	result, err := evaluator.Evaluate(request.Feeds)
 
-	debug.SetPanicOnFault(false)
 	if err != nil {
 		// this branch is logged by the caller
 		stats.Append(err)
@@ -384,7 +374,7 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 		inputs[iName] = fInput
 	}
 
-	evaluator := tfmodel.NewEvaluator(signature, model.Session)
+	evaluator := tfmodel.NewEvaluator(s.config.ID, signature, model.Session)
 	if s.config.OutputType != "" {
 		signature.Output.DataType = s.config.OutputType
 	}
