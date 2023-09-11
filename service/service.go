@@ -571,7 +571,7 @@ func New(ctx context.Context, fs afs.Service, cfg *config.Model, metrics *gmetri
 				return srv.dictionary
 			}, func() []domain.Output {
 				return srv.signature.Outputs
-			})
+			}, metrics)
 		}
 
 		if err != nil {
