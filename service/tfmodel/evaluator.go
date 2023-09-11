@@ -70,7 +70,6 @@ func (e *Evaluator) Evaluate(params []interface{}) ([]interface{}, error) {
 		}
 
 		trr = trace.StartRegion(ctx, "Evaluator.Session")
-
 		output, err := e.session.Run(feeds, e.fetches, e.targets)
 		trr.End()
 
@@ -92,10 +91,11 @@ func (e *Evaluator) Evaluate(params []interface{}) ([]interface{}, error) {
 	case <-done:
 		return tensorValues, nil
 	case <-ctx.Done():
-		log.Printf("Forced panic invocation, Tensorflow Session took longer than %s", TFSessionPanicDuration)
+		debugStr := fmt.Sprintf("Forced panic invocation, Tensorflow Session took longer than %s", TFSessionPanicDuration)
+		log.Printf(debugStr)
 		debug.PrintStack()
 		os.Exit(5)
-		return nil, nil
+		panic(debugStr)
 	}
 
 }
