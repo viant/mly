@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"log"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/viant/afs"
+	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/common"
+	"github.com/viant/mly/shared/stat"
 	"github.com/viant/tapper/config"
 	tlog "github.com/viant/tapper/log"
 	"github.com/viant/tapper/msg"
@@ -28,14 +31,22 @@ type Service struct {
 
 	dictProvider    dictProvider
 	outputsProvider outputsProvider
+
+	logMetric          *gmetric.Operation
+	logCounterNoData   *gmetric.Counter
+	logCounterNoSample *gmetric.Counter
+	logCounterNoEnd    *gmetric.Counter
+	logCounterComplete *gmetric.Counter
 }
 
-func NewService(modelID string, streamCfg *config.Stream, afsv afs.Service, dp dictProvider, op outputsProvider) (*Service, error) {
+func NewService(modelID string, streamCfg *config.Stream, afsv afs.Service, dp dictProvider, op outputsProvider, m *gmetric.Service) (*Service, error) {
 	uuid := getStreamID()
 	logger, err := tlog.New(streamCfg, uuid, afs.New())
 	if err != nil {
 		return nil, err
 	}
+
+	location := reflect.TypeOf(Service{}).PkgPath()
 
 	s := &Service{
 		modelID:         modelID,
@@ -44,6 +55,12 @@ func NewService(modelID string, streamCfg *config.Stream, afsv afs.Service, dp d
 		msgProvider:     msg.NewProvider(2048, 32, json.New),
 		dictProvider:    dp,
 		outputsProvider: op,
+
+		logMetric:          m.MultiOperationCounter(location, modelID+"LogPerf", modelID+" tlog", time.Microsecond, time.Minute, 2, stat.ErrorOnly()),
+		logCounterNoData:   m.Counter(location, modelID+"LogPerf_NoData", modelID+" tlog no data"),
+		logCounterNoSample: m.Counter(location, modelID+"LogPerf_NoSample", modelID+" tlog skipped logging"),
+		logCounterNoEnd:    m.Counter(location, modelID+"LogPerf_NoEnd", modelID+" tlog missing closing bracket"),
+		logCounterComplete: m.Counter(location, modelID+"LogPerf_Done", modelID+" tlog completed"),
 	}
 
 	return s, nil
@@ -51,10 +68,12 @@ func NewService(modelID string, streamCfg *config.Stream, afsv afs.Service, dp d
 
 func (s *Service) Log(data []byte, output interface{}, timeTaken time.Duration) {
 	if len(data) == 0 {
+		s.logCounterNoData.Increment()
 		return
 	}
 
 	if !s.config.CanSample() {
+		s.logCounterNoSample.Increment()
 		return
 	}
 
@@ -62,8 +81,13 @@ func (s *Service) Log(data []byte, output interface{}, timeTaken time.Duration) 
 	begin := bytes.IndexByte(data, '{')
 	end := bytes.LastIndexByte(data, '}')
 	if end == -1 {
+		s.logCounterNoEnd.Increment()
 		return
 	}
+
+	onDone := s.logMetric.Begin(time.Now())
+	stats := stat.NewValues()
+	defer func() { onDone(time.Now(), stats.Values()...) }()
 
 	// procedurally build the JSON string
 	tmsg := s.msgProvider.NewMessage()
@@ -154,8 +178,11 @@ func (s *Service) Log(data []byte, output interface{}, timeTaken time.Duration) 
 	}
 
 	if err := s.logger.Log(tmsg); err != nil {
+		stats.Append(err)
 		log.Printf("[%s log] failed to log: %v\n", s.modelID, err)
 	}
+
+	s.logCounterComplete.Increment()
 }
 
 func getStreamID() string {

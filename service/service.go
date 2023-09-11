@@ -286,7 +286,7 @@ func New(ctx context.Context, cfg *config.Model, tfsrv *tfmodel.Service, fs afs.
 		if cfg.Stream != nil {
 			srv.stream, err = stream.NewService(cfg.ID, cfg.Stream, fs, srv.Dictionary, func() []domain.Output {
 				return srv.Signature().Outputs
-			})
+			}, metrics)
 		}
 
 		if err != nil {
