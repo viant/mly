@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -95,14 +96,14 @@ func (s *Service) Evaluate(ctx context.Context, params []interface{}) ([]interfa
 	defer onExit()
 
 	debug.SetPanicOnFault(true)
-
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[%s Evaluate] recover()=%v - %+v - PANIC", s.id, r, params)
-			panic(r)
+			log.Printf("[%s Evaluate] recover()=%v - %+v - EXIT with code 139", s.id, r, params)
+			// we are potentially recovering from a segment fault
+			// so we will exit like there was a seg fault.
+			os.Exit(139)
 		}
 	}()
-
 	output, err := s.session.Run(feeds, s.fetches, s.targets)
 	debug.SetPanicOnFault(false)
 
