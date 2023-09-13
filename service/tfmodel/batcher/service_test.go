@@ -2,7 +2,9 @@ package batcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,8 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/viant/gmetric"
+	serrs "github.com/viant/mly/service/errors"
+	"github.com/viant/mly/service/tfmodel/batcher/adjust"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/service/tfmodel/evaluator/test"
+	"github.com/viant/mly/shared/common/permute"
 	"github.com/viant/mly/shared/stat"
 	"github.com/viant/toolbox"
 )
@@ -39,8 +44,8 @@ func createBSMeta() ServiceMeta {
 	m := &stat.GMeter{
 		Service:        s,
 		Unit:           time.Microsecond,
-		RecentDuration: 15 * time.Second,
-		NumRecent:      4,
+		RecentDuration: 5 * time.Second,
+		NumRecent:      12,
 	}
 
 	return ServiceMeta{
@@ -296,4 +301,158 @@ func BenchmarkServiceParallel(b *testing.B) {
 	}
 
 	batcher.Close()
+}
+
+func BenchmarkServiceVariantParallel(ob *testing.B) {
+	mbsVariants := []int{0, 100}
+	bwVariants := []time.Duration{time.Microsecond * 500, time.Microsecond * 1000}
+	mecVariants := []int{0}
+	mqbVariants := []int{0}
+
+	adjIVars := []time.Duration{time.Microsecond * 10}
+	adjMaxVars := []uint32{0, 100, 1000}
+
+	iter := permute.NewPermuter(
+		[][]int{mbsVariants, mqbVariants, mecVariants},
+		[][]time.Duration{bwVariants, adjIVars},
+		[][]uint32{adjMaxVars},
+	)
+
+	c, variant := iter.Next()
+	for c {
+		mbs := variant.Ints[0]
+		mqb := variant.Ints[1]
+		mec := variant.Ints[2]
+
+		bw := variant.Durs[0]
+		adjI := variant.Durs[1]
+
+		adjMax := variant.Uint32s[0]
+
+		runID := fmt.Sprintf("MBS-%d-MQB-%d-BW-%s-MEC-%d-AdjI-%s-AdjMax-%d", mbs, mqb, bw, mec, adjI, adjMax)
+
+		ob.Run(runID, func(b *testing.B) {
+			var adj *adjust.AdjustConfig
+			if adjMax > 0 {
+				adj = &adjust.AdjustConfig{
+					Increment: adjI,
+					Max:       adjMax,
+				}
+			}
+
+			bcfg := config.BatcherConfig{
+				MaxBatchSize:            mbs,
+				BatchWait:               bw,
+				MaxQueuedBatches:        mqb,
+				MaxEvaluatorConcurrency: mec,
+				TimeoutAdjustments:      adj,
+				//Verbose:                 &config.V{ID: runID},
+			}
+
+			bcfg.Init()
+
+			bnil := func(err error) {
+				if err != nil {
+					b.Error(err)
+				}
+			}
+
+			signature, evaluator, _ := test.LoadEvaluator("example/model/string_lookups_int_model", bnil, bnil)
+			batcher := NewBatcher(evaluator, len(signature.Inputs), bcfg, createBSMeta())
+			batcher.Start()
+
+			feeds2 := make([]interface{}, 0)
+			feeds2 = append(feeds2, [][]string{{"a"}, {"b"}})
+			feeds2 = append(feeds2, [][]string{{"c"}, {"d"}})
+
+			evaluator.Evaluate(context.Background(), feeds2)
+			ctx := context.Background()
+
+			agg := make(chan []time.Duration, 100)
+			aggDone := make(chan struct{}, 0)
+
+			adi := 0
+			allDurs := make([]time.Duration, b.N)
+
+			go func() {
+				c := true
+				for c {
+					select {
+					case ds := <-agg:
+						for _, d := range ds {
+							allDurs[adi] = d
+							adi++
+						}
+					case <-aggDone:
+						c = false
+					}
+				}
+
+				c = true
+				for c {
+					select {
+					case ds := <-agg:
+						for _, d := range ds {
+							allDurs[adi] = d
+							adi++
+						}
+					default:
+						c = false
+					}
+				}
+
+				aggDone <- struct{}{}
+			}()
+
+			var numErrs, overloads uint64
+			b.RunParallel(func(pb *testing.PB) {
+				times := make([]time.Duration, 0)
+
+				for pb.Next() {
+					start := time.Now()
+					sb, err := batcher.queue(ctx, feeds2)
+					if err != nil {
+						if errors.Is(err, serrs.OverloadedError) {
+							atomic.AddUint64(&overloads, 1)
+						} else {
+							atomic.AddUint64(&numErrs, 1)
+						}
+						return
+					}
+
+					select {
+					case <-sb.channel:
+					case err = <-sb.ec:
+						atomic.AddUint64(&numErrs, 1)
+					}
+
+					times = append(times, time.Now().Sub(start))
+				}
+
+				agg <- times
+			})
+
+			aggDone <- struct{}{}
+			<-aggDone
+
+			sort.Slice(allDurs, func(i, j int) bool { return allDurs[i] < allDurs[j] })
+
+			b.ReportMetric(float64(allDurs[0]), "dur_min")
+
+			ldurs := len(allDurs)
+
+			b.ReportMetric(float64(allDurs[ldurs-1]), "dur_max")
+			b.ReportMetric(float64(allDurs[ldurs/2]), "dur_median")
+
+			b.ReportMetric(float64(allDurs[int(float64(ldurs)*0.05)]), "dur_p05")
+			b.ReportMetric(float64(allDurs[int(float64(ldurs)*0.95)]), "dur_p95")
+
+			b.ReportMetric(float64(numErrs), "errors")
+			b.ReportMetric(float64(overloads), "overloads")
+
+			batcher.Close()
+		})
+
+		c, variant = iter.Next()
+	}
 }

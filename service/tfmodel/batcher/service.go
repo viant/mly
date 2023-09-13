@@ -127,24 +127,28 @@ func (s *Service) Stats(r map[string]interface{}) {
 }
 
 // Waits for any queued batches to complete then closes underlying resources.
-func (b *Service) Close() error {
+func (s *Service) Close() error {
 	// anything that passes this due to sync issues can just continue
 	// generally, we rely on upstream to stop sending traffic before
 	// calling Close()
-	b.closed = true
+	s.closed = true
 
-	// make Dispatcher stop
-	b.inputQ <- inputBatch{nil, subBatch{-1, nil, nil}, time.Now()}
+	s.Verbose.Debug("Close", "queue close inputQ")
+	s.inputQ <- inputBatch{nil, subBatch{-1, nil, nil}, time.Now()}
 
-	b.batchQ <- predictionBatch{nil, nil, -1}
+	s.Verbose.Debug("Close", "done close inputQ, wait WaitGroup")
 
 	// let Dispatch goroutine finish clearing queue
-	b.wg.Wait()
+	s.wg.Wait()
+	s.Verbose.Debug("Close", "done WaitGroup, close batchQ")
+
+	s.batchQ <- predictionBatch{nil, nil, -1}
+	s.Verbose.Debug("Close", "done close batchQ")
 
 	var err error
-	if b.evaluator != nil {
+	if s.evaluator != nil {
 		// the evaluator service will handle itself clearing
-		err = b.evaluator.Close()
+		err = s.evaluator.Close()
 	}
 
 	return err
@@ -161,23 +165,17 @@ func (b *Service) Close() error {
 // evaluator.Evaluator.Evaluate() when appropriate and return the response
 // via a dedicated channel for the goroutine that called Service.Evaluate.
 func (s *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interface{}, error) {
-	if s.Verbose != nil {
-		log.Printf("[%s Evaluate] start", s.Verbose.ID)
-	}
+	s.Verbose.Debug("Evaluate", "start")
 
 	sb, err := s.queue(ctx, inputs)
 	if err != nil {
 		return nil, err
 	}
 
-	if s.Verbose != nil {
-		log.Printf("[%s Evaluate] queued", s.Verbose.ID)
-	}
+	s.Verbose.Debug("Evaluate", "queued")
 
 	defer func() {
-		if s.Verbose != nil {
-			log.Printf("[%s Evaluate] done", s.Verbose.ID)
-		}
+		s.Verbose.Debug("Evaluate", "done")
 	}()
 
 	select {
@@ -201,9 +199,7 @@ func (s *Service) setShedding(shedding bool) {
 func (s *Service) setNotShedding() {
 	s.sheddingLock.RLock()
 	if s.shedding {
-		if s.Verbose != nil {
-			log.Printf("[%s setNotShedding]", s.Verbose.ID)
-		}
+		s.Verbose.Debug("setNotShedding", "no longer shedding")
 		s.sheddingLock.RUnlock()
 		s.setShedding(false)
 	} else {
@@ -263,9 +259,7 @@ func (s *Service) queue(ctx context.Context, inputs []interface{}) (*subBatch, e
 		return nil, err
 	}
 
-	if s.Verbose != nil && s.Verbose.Input {
-		log.Printf("[%s Queue] inputs:%v", s.Verbose.ID, inputs)
-	}
+	s.Verbose.DebugFn("Queue", func() string { return fmt.Sprintf("inputs:%v", inputs) }, s.Verbose.InputEnabled())
 
 	batchSize, err := determineBatchSize(inputs)
 	if err != nil {
@@ -316,17 +310,15 @@ func (s *Service) queue(ctx context.Context, inputs []interface{}) (*subBatch, e
 func (s *Service) queueBatch(batch predictionBatch) (shedding bool) {
 	select {
 	case s.batchQ <- batch:
+		s.Verbose.Debug("queueBatch", "queued batch")
 	default:
 		s.setShedding(true)
-		if s.Verbose != nil {
-			log.Printf("[%s queueBatch] full batchQ len:%d (+1)", s.Verbose.ID, len(s.batchQ))
-		}
+		s.Verbose.DebugFn("queueBatch", func() string { return fmt.Sprintf("full batchQ len:%d (+1)", len(s.batchQ)) }, nil)
 
 		go func() {
+			// I suspect this is not completing due
 			s.batchQ <- batch
-			if s.Verbose != nil {
-				log.Printf("[%s queueBatch] +1 done", s.Verbose.ID)
-			}
+			s.Verbose.Debug("queueBatch", "+1 done")
 		}()
 
 		return true
@@ -363,10 +355,14 @@ func (s *Service) startBatchQueueing() {
 	for run {
 		run = qsrv.dispatch()
 	}
+
+	s.Verbose.Debug("startBatchQueueing", "terminating")
 }
 
 func (s *Service) run(batch predictionBatch) {
+	// this should have been incremented by dispatcher.submit()
 	defer s.wg.Done()
+
 	debugging := s.Verbose != nil
 	if debugging && s.Verbose.Input {
 		log.Printf("[%s run] inputData :%v", s.Verbose.ID, batch.inputData)
@@ -497,9 +493,7 @@ func (s *Service) startDispatcher() {
 		terminate = dspr.dispatch()
 	}
 
-	if s.Verbose != nil {
-		log.Printf("[%s dispatcher] terminated", s.Verbose.ID)
-	}
+	s.Verbose.Debug("dispatcher", "terminated")
 }
 
 func (s *Service) newDispatcher() *dispatcher {
@@ -545,9 +539,7 @@ func NewBatcher(evaluator evaluator.Evaluator, inputLen int, batchConfig config.
 	var adj *adjust.Adjust
 	ta := batchConfig.TimeoutAdjustments
 	if ta != nil {
-		if batchConfig.Verbose != nil {
-			log.Printf("[%s NewBatcher] auto-adjust enabled %+v", batchConfig.Verbose.ID, ta)
-		}
+		batchConfig.Verbose.DebugFn("NewBatcher", func() string { return fmt.Sprintf("auto-adjust enabled %+v", ta) }, nil)
 		adj = adjust.NewAdjust(ta)
 	}
 

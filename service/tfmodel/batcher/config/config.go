@@ -44,6 +44,8 @@ type BatcherConfig struct {
 	// This is not a rolling window.
 	// Set to <= 0 to effectively turn off batching.
 	// This constraint may sometimes cause a batch to be queued.
+	// If there TimeoutAdjustments are provided, then this value
+	// will be ignored.
 	// If MaxEvaluatorConcurrency is NOT set then the batch will be queued
 	// (and run) as soon MaxBatchSize is hit (if set) or BatchWait elapsed.
 	// If MaxEvaluatorConcurrency is set and the system is busy, then
@@ -58,7 +60,7 @@ type BatcherConfig struct {
 	// a single "mega-batch," and MaxQueuedBatches is ignored.
 	// If set to > 0, and MaxBatchSize is set, then batches will queue until
 	// MaxQueuedBatches is hit.
-	MaxEvaluatorConcurrency uint32 `json:",omitempty" yaml:",omitempty"`
+	MaxEvaluatorConcurrency int `json:",omitempty" yaml:",omitempty"`
 
 	// MaxQueuedBatches works IFF both MaxEvaluatorConcurrency and
 	// MaxBatchSize are set.
@@ -79,6 +81,32 @@ type V struct {
 	Input  bool
 }
 
+func (v *V) Debug(tag string, msg string) {
+	if v == nil {
+		return
+	}
+
+	log.Printf("[%s %s] %s", v.ID, tag, msg)
+}
+
+func (v *V) DebugFn(tag string, mfn func() string, second func() bool) {
+	if v == nil {
+		return
+	}
+
+	if second == nil || second() {
+		log.Printf("[%s %s] %s", v.ID, tag, mfn())
+	}
+}
+
+func (v *V) InputEnabled() func() bool {
+	if v == nil {
+		return nil
+	}
+
+	return func() bool { return v.Input }
+}
+
 func (b *BatcherConfig) Init() {
 	if b.MaxBatchSize < 0 {
 		b.MaxBatchSize = 0
@@ -96,7 +124,12 @@ func (b *BatcherConfig) Init() {
 		b.MaxQueuedBatches = sysMaxQueuedBatches
 	}
 
-	if b.TimeoutAdjustments != nil {
-		b.TimeoutAdjustments.Init()
+	ta := b.TimeoutAdjustments
+	if ta != nil {
+		ta.Init()
+
+		if b.MaxEvaluatorConcurrency > 0 && ta.Max < uint32(b.MaxEvaluatorConcurrency) {
+			ta.Max = uint32(b.MaxEvaluatorConcurrency)
+		}
 	}
 }

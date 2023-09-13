@@ -57,6 +57,7 @@ func (s *queueService) dispatch() bool {
 	select {
 	case pb := <-s.batchQ:
 		if pb.size < 0 {
+			s.debugf(func() string { return fmt.Sprintf("terminating batchQ len:%d", len(s.batchQ)) })
 			return false
 		}
 
@@ -71,7 +72,7 @@ func (s *queueService) dispatch() bool {
 			s.Adjust.Active(*s.active)
 		}
 
-		if s.BatcherConfig.MaxEvaluatorConcurrency > 0 && *s.active >= s.BatcherConfig.MaxEvaluatorConcurrency {
+		if s.BatcherConfig.MaxEvaluatorConcurrency > 0 && *s.active >= uint32(s.BatcherConfig.MaxEvaluatorConcurrency) {
 			s.busy = true
 			// Indicate that queueService.dispatch() may block
 			// on queueService.free.
@@ -82,9 +83,7 @@ func (s *queueService) dispatch() bool {
 		s.debug("go run")
 		go func(pb predictionBatch, i uint64) {
 			s.debugf(func() string { return fmt.Sprintf("run %d...", i) })
-
 			s.run(pb)
-
 			s.debugf(func() string { return fmt.Sprintf("run %d ok", i) })
 		}(pb, s.runN)
 

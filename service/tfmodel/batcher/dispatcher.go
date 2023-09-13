@@ -179,6 +179,7 @@ func (d *dispatcher) dispatch() bool {
 				return true
 			}
 
+			// the queue is waiting for this to finish
 			defer d.clearBlockQ()
 
 			d.startStats()
@@ -222,6 +223,7 @@ func (d *dispatcher) dispatch() bool {
 				return true
 			}
 
+			// the queue is waiting for this to finish
 			defer d.clearBlockQ()
 
 			if err := d.appendBatch(batch); err != nil {
