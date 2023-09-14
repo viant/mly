@@ -66,7 +66,9 @@ func (s *Service) NewMessage() *Message {
 	return message
 }
 
-// Run run model prediction
+// Run will fetch the model prediction and populate response.Data with the result.
+// input can vary in types, but if it is an instance of Cachable, then the configured
+// caching system will be used.
 func (s *Service) Run(ctx context.Context, input interface{}, response *Response) error {
 	onDone := s.counter.Begin(time.Now())
 	stats := stat.NewValues()
