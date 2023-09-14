@@ -318,6 +318,8 @@ The `/v1/api/health` endpoint will provide a response like:
 
 ## `/v1/api/metric/operations` 
 
+TODO - Add more metrics added from server-side batching.
+
 All metrics registered in the web service.
 These are provided via [`gmetric`](https://github.com/viant/gmetric).
 
