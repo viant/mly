@@ -156,8 +156,6 @@ func (d *dispatcher) clearBlockQ() {
 // The return value represents if we should terminate the loop.
 // See Service.queue() for the producer side.
 // See Service.queueBatch() and queueService.dispatch() for consumer side.
-// TODO maybe consider design where the deadline is passed via channel and
-// then it enters a "with deadline" loop otherwise just be synchronous
 func (d *dispatcher) dispatch() bool {
 	if d.Verbose != nil {
 		dlod := d.dispatcherLoop.Begin(time.Now())
@@ -237,7 +235,6 @@ func (d *dispatcher) dispatch() bool {
 				d.timer = nil
 			}
 		case <-d.timer.C:
-			// TODO if batch Q is full but max size is not just don't submit?
 			if d.curBatchCount > 0 {
 				d.debug("timeout")
 				d.submit(stat.Timeout)

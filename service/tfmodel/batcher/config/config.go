@@ -58,9 +58,6 @@ type BatcherConfig struct {
 	//
 	// If MaxEvaluatorConcurrency is NOT set then the batch will be queued
 	// (and run) as soon MaxBatchSize is hit (if set) or BatchWait elapsed.
-	// If MaxEvaluatorConcurrency is set and the system is busy, then
-	// BatchWait will be ignored until either MaxBatchSize is hit, or an
-	// Evaluator is free while the batch continues to grow in size.
 	BatchWait time.Duration `json:",omitempty" yaml:",omitempty"`
 
 	// MaxEvaluatorConcurrency determines the maximum number of evaluators to

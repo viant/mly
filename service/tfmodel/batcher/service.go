@@ -102,7 +102,6 @@ func (ib inputBatch) closed() bool {
 type subBatch struct {
 	batchSize int // memoization - this should be calculated from InputBatch.inputData
 
-	// TODO check for leaks - these should be straight forward for GC
 	channel chan []interface{} // channel for actual model output
 	ec      chan error
 }
@@ -255,7 +254,6 @@ func (s *Service) queue(ctx context.Context, inputs []interface{}) (*subBatch, e
 
 	err := s.checkShedding()
 	if err != nil {
-		// TODO metric
 		return nil, err
 	}
 
