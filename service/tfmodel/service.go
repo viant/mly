@@ -19,6 +19,7 @@ import (
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
+	srveval "github.com/viant/mly/service/evaluator"
 	"github.com/viant/mly/service/files"
 	"github.com/viant/mly/service/tfmodel/batcher"
 	"github.com/viant/mly/service/tfmodel/evaluator"
@@ -62,25 +63,18 @@ type Service struct {
 func (s *Service) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
 	s.mux.RLock()
 	// Maybe use interface?
-	var batcher *batcher.Service
-	var evaluator *evaluator.Service
+	var evalr srveval.Evaluator
 	if s.batcher != nil {
-		batcher = s.batcher
+		evalr = s.batcher
 	} else {
-		evaluator = s.evaluator
+		evalr = s.evaluator
 	}
 	wg := s.wg
 
 	wg.Add(1)
 	s.mux.RUnlock()
 
-	var tv []interface{}
-	var err error
-	if batcher != nil {
-		tv, err = batcher.Evaluate(ctx, params)
-	} else {
-		tv, err = evaluator.Evaluate(ctx, params)
-	}
+	tv, err := evalr.Evaluate(ctx, params)
 
 	wg.Done()
 
@@ -192,7 +186,7 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	newEvaluator := evaluator.NewEvaluator(signature, model.Session, *s.evaluatorMeta)
 
 	var newBatchSrv *batcher.Service
-	if config.Batch != nil {
+	if config.Batch != nil && config.Batch.BatcherConfig.BatchWait >= 0 {
 		bc := (*config.Batch).BatcherConfig
 		newBatchSrv = batcher.NewBatcher(newEvaluator, len(signature.Inputs), bc, *s.batcherMeta)
 		newBatchSrv.Start()

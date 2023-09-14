@@ -73,8 +73,12 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 					log.Printf("[%v http] read error: %v\n", h.service.config.ID, err)
 				}
 
-				// TODO if buffer is too small, it should be a 413
-				http.Error(writer, err.Error(), http.StatusInternalServerError)
+				code := http.StatusInternalServerError
+				if errors.Is(err, buffer.ErrBufferTooSmall) {
+					code = http.StatusRequestEntityTooLarge
+				}
+
+				http.Error(writer, err.Error(), code)
 				return
 			}
 

@@ -50,7 +50,7 @@ type BatcherConfig struct {
 	// requests to make a batch.
 	// This is not a rolling window.
 	//
-	// Set to < 0 to effectively turn off batching.
+	// Set to < 0 to turn off batching.
 	// If this is 0, then a default of 500 * time.Microsecond will be used.
 	// This constraint may sometimes cause a batch to be queued.
 	// If there TimeoutAdjustments are provided, then this value

@@ -30,10 +30,12 @@ func ErrorWrap(err error) errorWrap {
 	return errorWrap{e: err}
 }
 
+// implements fmt.Stringer
 func (e errorWrap) String() string {
 	return e.e.Error()
 }
 
+// implements github.com/viant/gmetric/counter.CustomCounter
 func (k *TopK) Aggregate(value interface{}) {
 	b, ok := value.(fmt.Stringer)
 	if !ok {

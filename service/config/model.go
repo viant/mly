@@ -87,17 +87,17 @@ func (m *Model) Init(globalBatchConfig *batchconfig.BatcherConfig) {
 
 	if m.Batch != nil {
 		m.Batch.Init()
-		if m.Debug {
-			if m.Batch.BatcherConfig.Verbose == nil {
-				m.Batch.BatcherConfig.Verbose = &batchconfig.V{
-					Output: true,
-				}
+		v := m.Batch.BatcherConfig.Verbose
+		if m.Debug && v == nil {
+			v = &batchconfig.V{
+				Output: true,
 			}
 
+			m.Batch.BatcherConfig.Verbose = v
 		}
 
-		if m.Batch.BatcherConfig.Verbose.ID == "" {
-			m.Batch.BatcherConfig.Verbose.ID = m.ID
+		if v != nil && v.ID == "" {
+			v.ID = m.ID
 		}
 	} else if globalBatchConfig != nil {
 		m.Batch = &BatcherConfigFile{

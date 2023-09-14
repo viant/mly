@@ -2,12 +2,15 @@ package buffer
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http/httputil"
 )
 
-//Read reads data with buffer Pool
+var ErrBufferTooSmall error = errors.New("entity too large - buffer too small")
+
+// Read reads data with buffer Pool
 func Read(pool httputil.BufferPool, reader io.Reader) ([]byte, int, error) {
 	data := pool.Get()
 	readTotal := 0
@@ -15,7 +18,7 @@ func Read(pool httputil.BufferPool, reader io.Reader) ([]byte, int, error) {
 	for i := 0; i < len(data); i++ {
 		if offset >= len(data) {
 			pool.Put(data)
-			return nil, 0, fmt.Errorf("buffer too small: %v", len(data))
+			return nil, 0, fmt.Errorf("%w - buffer size:%d, tried to read:%d", ErrBufferTooSmall, len(data), offset)
 		}
 		read, err := reader.Read(data[offset:])
 		offset += read

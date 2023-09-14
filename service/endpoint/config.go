@@ -28,7 +28,7 @@ type Config struct {
 	// GlobalBatching provides a default batching configuration if
 	// models do not provide their own.
 	// If GlobalBatching is provided but a model should not be batching,
-	// set the TODO to 0.
+	// set BatchWait to < 0.
 	GlobalBatching *batchconfig.BatcherConfig `json:",omitempty" yaml:",omitempty"`
 
 	Endpoint econfig.Endpoint
