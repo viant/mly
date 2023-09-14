@@ -116,18 +116,18 @@ Once a client detects a change in dictionary hash code, it automatically initiat
 
 ## Server
 
-See [service/endpoint/config.go]().
+See [`service/endpoint/config.go`](service/endpoint/config.go).
 The server accepts configuration with the following options:
 
-* `Models` : list of models - see [service/config/model.go]() for all options.
+* `Models` : list of models - see [`service/config/model.go`](service/config/model.go) for all options.
   - `ID`: `string` - required - model ID, used to generate the URLs.
   - `Debug`: `bool` - optional - enables further output and debugging.
   - `URL`: `string` - required - model location source.
     * to use S3, set environment variable `AWS_SDK_LOAD_CONFIG=true`
     * to use GCS, set environment variable `GOOGLE_APPLICATION_CREDENTIALS=true`
   - `DataStore`: `string` - optional - name of Datastore to cache, should match `Datastores[].ID`.
-  - `Transformer`: `string` - optional - name of model output transformer. See [#Transformer]().
-  - `Batch`: optional - enables or overrides server-side batching configuration. See [service/tfmodel/batcher/config/config.go]().
+  - `Transformer`: `string` - optional - name of model output transformer. See [#Transformer](#Transformer).
+  - `Batch`: optional - enables or overrides server-side batching configuration. See [`service/tfmodel/batcher/config/config.go`](service/tfmodel/batcher/config/config.go).
   - `Test`: optional - enables a client request to send to self on start up.
     * `Test`: `bool` - if `true`, a client will generate a non-batch request with random values based on the model input signature.
     * `Single`: `map[string]interface{}` - if present, will use the provided values for certain input keys, otherwise randomly generated based on model input signature.
@@ -184,7 +184,7 @@ Where optional `options` can be of, but not limited to, the following:
   * `NewCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)`
   * `NewGmetric()` - custom instance of `gmetric` service
 
-See [shared/client/option.go]() for more options. 
+See [`shared/client/option.go`](shared/client/option.go) for more options. 
 
 # Usage
 
