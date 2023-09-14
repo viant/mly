@@ -1,6 +1,10 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/viant/mly/service/tfmodel/batcher/config"
+)
 
 //ModelList represents model
 type ModelList struct {
@@ -8,12 +12,13 @@ type ModelList struct {
 }
 
 //Init initialises model list
-func (l *ModelList) Init() {
+func (l *ModelList) Init(bc *config.BatcherConfig) {
 	if len(l.Models) == 0 {
 		return
 	}
+
 	for i := range l.Models {
-		l.Models[i].Init()
+		l.Models[i].Init(bc)
 	}
 }
 

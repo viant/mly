@@ -305,12 +305,12 @@ func BenchmarkServiceParallel(b *testing.B) {
 
 func BenchmarkServiceVariantParallel(ob *testing.B) {
 	mbsVariants := []int{0, 100}
-	bwVariants := []time.Duration{time.Microsecond * 500, time.Microsecond * 1000}
+	bwVariants := []time.Duration{time.Microsecond * 500}
 	mecVariants := []int{0}
 	mqbVariants := []int{0}
 
-	adjIVars := []time.Duration{time.Microsecond * 10}
-	adjMaxVars := []uint32{0, 100, 1000}
+	adjIVars := []time.Duration{time.Microsecond * 500}
+	adjMaxVars := []uint32{0, 1000}
 
 	iter := permute.NewPermuter(
 		[][]int{mbsVariants, mqbVariants, mecVariants},

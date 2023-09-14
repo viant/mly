@@ -18,6 +18,6 @@ type AdjustConfig struct {
 // Init sets defaults.
 func (a *AdjustConfig) Init() {
 	if a.Increment == 0 {
-		a.Increment = 100
+		a.Increment = 100 * time.Microsecond
 	}
 }

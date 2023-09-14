@@ -45,6 +45,9 @@ func Test(t *testing.T) {
 	require.Equal(t, []uint32{6}, k.Uint32s)
 
 	c, k = p.Next()
-	require.False(t, c, k)
+	require.True(t, c, k)
 	require.Equal(t, []int{2, 4}, k.Ints)
+
+	c, k = p.Next()
+	require.False(t, c, k)
 }

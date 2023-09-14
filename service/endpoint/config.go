@@ -10,6 +10,7 @@ import (
 	"github.com/viant/afs"
 	"github.com/viant/mly/service/config"
 	econfig "github.com/viant/mly/service/endpoint/config"
+	batchconfig "github.com/viant/mly/service/tfmodel/batcher/config"
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/toolbox"
 	"gopkg.in/yaml.v2"
@@ -24,15 +25,27 @@ type Config struct {
 	config.ModelList      `json:",omitempty" yaml:",inline"`
 	sconfig.DatastoreList `json:",omitempty" yaml:",inline"`
 
-	Endpoint      econfig.Endpoint
+	// GlobalBatching provides a default batching configuration if
+	// models do not provide their own.
+	// If GlobalBatching is provided but a model should not be batching,
+	// set the TODO to 0.
+	GlobalBatching *batchconfig.BatcherConfig `json:",omitempty" yaml:",omitempty"`
+
+	Endpoint econfig.Endpoint
+
 	EnableMemProf bool
 	EnableCPUProf bool
+
 	AllowedSubnet []string `json:",omitempty" yaml:",omitempty"`
 }
 
 // Init initialise config
 func (c *Config) Init() {
-	c.ModelList.Init()
+	if c.GlobalBatching != nil {
+		c.GlobalBatching.Init()
+	}
+
+	c.ModelList.Init(c.GlobalBatching)
 	c.DatastoreList.Init()
 	c.Endpoint.Init()
 }

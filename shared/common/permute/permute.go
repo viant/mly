@@ -77,5 +77,5 @@ func (p *Permuter) Next() (bool, Permutation) {
 	}
 
 	p.lastInc++
-	return p.lastInc < p.maxInc, it
+	return p.lastInc <= p.maxInc, it
 }

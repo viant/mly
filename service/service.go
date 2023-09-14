@@ -252,7 +252,7 @@ func New(ctx context.Context, cfg *config.Model, tfsrv *tfmodel.Service, fs afs.
 
 	location := reflect.TypeOf(Service{}).PkgPath()
 
-	cfg.Init()
+	cfg.Init(nil)
 
 	srv := &Service{
 		config:        cfg,

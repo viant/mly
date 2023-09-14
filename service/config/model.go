@@ -70,7 +70,7 @@ func (m Model) UseDictionary() bool {
 }
 
 // Init initialises model config
-func (m *Model) Init() {
+func (m *Model) Init(globalBatchConfig *batchconfig.BatcherConfig) {
 	if len(m.Tags) == 0 {
 		m.Tags = []string{"serve"}
 	}
@@ -94,12 +94,16 @@ func (m *Model) Init() {
 				}
 			}
 
-			if m.Batch.BatcherConfig.Verbose.ID == "" {
-				m.Batch.BatcherConfig.Verbose.ID = m.ID
-			}
+		}
+
+		if m.Batch.BatcherConfig.Verbose.ID == "" {
+			m.Batch.BatcherConfig.Verbose.ID = m.ID
+		}
+	} else if globalBatchConfig != nil {
+		m.Batch = &BatcherConfigFile{
+			BatcherConfig: *globalBatchConfig,
 		}
 	}
-
 }
 
 // Validate validates model config

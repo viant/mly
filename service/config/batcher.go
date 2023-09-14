@@ -6,8 +6,10 @@ import (
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 )
 
+// BatcherConfigFile provides a Microsecond level override for BatchWait.
 type BatcherConfigFile struct {
 	config.BatcherConfig
+
 	BatchWaitMicros int
 }
 
