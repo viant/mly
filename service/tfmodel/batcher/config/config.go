@@ -83,6 +83,7 @@ type BatcherConfig struct {
 
 	TimeoutAdjustments *adjust.AdjustConfig `json:",omitempty" yaml:",omitempty"`
 
+	// Verbose enables a lot of debugging messages.
 	Verbose *V `json:",omitempty" yaml:",omitempty"`
 }
 

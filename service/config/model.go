@@ -17,17 +17,25 @@ type Model struct {
 	ID    string
 	Debug bool
 
+	// Location is the path the model will be copied to.
 	Location string `json:",omitempty" yaml:",omitempty"`
-	Dir      string
-	URL      string
+
+	// Dir is used to build a Location if Location is not provided.
+	// The build Location will use Dir directory after os.TempDir() and ID.
+	Dir string
+
+	URL string
 
 	Batch *BatcherConfigFile `json:",omitempty" yaml:",omitempty"`
 
-	// for TF SavedModel
+	// Tags is used when loading the Savedmodel.
+	// Defaults to []string{"serve"}.
 	Tags []string
 
-	// IO and caching
-	UseDict *bool  `json:",omitempty" yaml:",omitempty"`
+	// UseDict enables caching and replacing OOV values as "[UNK]" in cache key.
+	// If UseDict is nil, defaults to true.
+	UseDict *bool `json:",omitempty" yaml:",omitempty"`
+
 	DictURL string // Deprecated: we usually extract the dictionary/vocabulary from TF graph
 
 	shared.MetaInput `json:",omitempty" yaml:",inline"`
@@ -40,11 +48,13 @@ type Model struct {
 	// caching
 	DataStore string `json:",omitempty" yaml:",omitempty"`
 
-	// logging
+	// Stream is a github.com/viant/tapper configuration.
+	// All requests are eligible to be logged.
 	Stream *config.Stream `json:",omitempty" yaml:",omitempty"`
 
-	// for health and monitoring
+	// Modified shows the state of the model files.
 	Modified *Modified `json:",omitempty" yaml:",omitempty"`
+
 	DictMeta DictionaryMeta
 
 	Test TestPayload `json:",omitempty" yaml:",omitempty"`

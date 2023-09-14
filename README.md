@@ -12,24 +12,23 @@ This library is compatible with Go 1.17+
 - [Contribution](#contributing-to-mly)
 - [License](#license)
 
-# Motivation
+# Introduction
 
 The goal of this library to provide a deep-learning model prediction HTTP service which can speed up end to end execution by leveraging a caching system. 
 Currently the only deep-learning library supported is TensorFlow.
-Caching has to be seamless, meaning the client, behind the scenes, should take care of any dictionary-based key generation and model changes automatically. 
+
+The client cares of any dictionary-based key generation and model changes automatically. 
 
 In practice this library can provide substantial (100x) E2E execution improvement from the client side perspective, with the input space of billions of distinct keys. 
 
 Each model provides both TensorFlow and cache-level performance metrics via HTTP REST API.
-
-# Introduction
 
 This project provides libraries for both the client and the web service.
 
 The web service supports multiple TensorFlow model integrations on the URI level, with `GET`, `POST`  method support with HTTP 2.0 in full duplex mode as provided by Golang libraries.
 
 The service automatically detects and reloads any model changes; it will poll the source files for modifications once a minute.
-Technically, any HTTP client can work with the service, but to get the seamless caching benefit, it's recommended to use provided client.
+Technically, any HTTP client can work with the service, but the provided client provides extra caching support.
 
 # Quickstart
 
@@ -42,7 +41,7 @@ Endpoint:
   Port: 8086
 Models:
   - ID: ml0
-    URL: gs://modelBucket/Ml0ModelFolder
+    URL: /path/to/model/ml0
 ```
 
 The `URL` is loaded using [afs](https://github.com/viant/afs).
@@ -93,7 +92,7 @@ Endpoint:
 
 Models:
   - ID: mlx
-    URL: s3://myBucket/myModelX
+    URL: /path/to/myModelX
     Datastore: mlxCache
 
 Datastores:
@@ -117,37 +116,32 @@ Once a client detects a change in dictionary hash code, it automatically initiat
 
 ## Server
 
+See [service/endpoint/config.go]().
 The server accepts configuration with the following options:
-See `service/config/model.go`.
 
-* `Models` : list of models
-  - `ID`: `string` - required - model ID.
+* `Models` : list of models - see [service/config/model.go]() for all options.
+  - `ID`: `string` - required - model ID, used to generate the URLs.
   - `Debug`: `bool` - optional - enables further output and debugging.
-  - `Location`: `string` - optional - path the model will be copied to.
-  - `Dir`: `string` - optional - if `Location` is not provided, will use this directory after `os.TempDir()` and `ID` as `Location`, ignored if `Location` is provided.
   - `URL`: `string` - required - model location source.
     * to use S3, set environment variable `AWS_SDK_LOAD_CONFIG=true`
     * to use GCS, set environment variable `GOOGLE_APPLICATION_CREDENTIALS=true`
-  - `Tags`: `[]string` - optional - model tags, default "serve".
-  - `UseDict`: `bool` - optional - enables cache key space reduction, default `true`.
-  - `DictURL`: `string` - deprecated, optional - URL that has dictionary; this is no longer supported and will be removed.
+  - `DataStore`: `string` - optional - name of Datastore to cache, should match `Datastores[].ID`.
+  - `Transformer`: `string` - optional - name of model output transformer. See [#Transformer]().
+  - `Batch`: optional - enables or overrides server-side batching configuration. See [service/tfmodel/batcher/config/config.go]().
+  - `Test`: optional - enables a client request to send to self on start up.
+    * `Test`: `bool` - if `true`, a client will generate a non-batch request with random values based on the model input signature.
+    * `Single`: `map[string]interface{}` - if present, will use the provided values for certain input keys, otherwise randomly generated based on model input signature.
+    * `SingleBatch`: `bool` - if `true`, a client will generate a batch request with random values based on the model input signature; if `Single` is set, values will be used for provided keys.
+    * `Batch`: `map[string][]interface{}` - if present, will be used to generate a batch of requests for the self-test.
   - `Inputs`: optional - used to further provide or define inputs, a list of `shared.Field`.
     * `Name`: `string` - required - input name, only required if an entry is provided.
     * `Index`: `int` - optional - used to maintain cache key ordering.
-    * `DataType`: `string` - optional - will be extracted from the model.
     * `Auxiliary`: `bool` - optional - the input is permitted to be provided in an evaluation request.
     * `Wildcard`: `bool` - conditionally required - if enabled this input will not have a vocabulary for lookup; if `UseDict` is true, the service will refuse to start if it cannot guess the vocabulary extraction Operation. 
     * `Precision`: `int` - conditionally required - if the input is a float type and dictionary is enabled, this can be used to round the value to a lower precision which can improve cache hit rates; if `UseDict` is true, the service will refuse to start if it encounters a float input without a `Precision`.
   - `KeyFields`: `[]string` - optional - list of fields used to generate caching key (by default, all model inputs, sorted alphabetically). Can be used to order and add valid inputs that can be used as a cache key but not used as prediction input.
   - `Auxiliary`: `[]string` - deprecated, optional - list of additional fields that are acceptable for eval server call. Deprecated, use `Field.Auxiliary`.
   - `Outputs`: `[]shared.Field` - deprecated, optional - model outputs are automatically pulled from the model.
-  - `DataStore`: `string` - optional - name of Datastore to cache, should match `Datastores[].ID`.
-  - `Transformer`: `string` - optional - name of model output transformer.
-  - `Test`: optional - enables a client request to send to self on start up.
-    * `Test`: `bool` - if `true`, a client will generate a non-batch request with random values based on the model input signature
-    * `Single`: `map[string]interface{}` - if present, will use the provided values for certain input keys, otherwise randomly generated based on model input signature
-    * `SingleBatch`: `bool` - if `true`, a client will generate a batch request with random values based on the model input signature; if `Single` is set, values will be used for provided keys
-    * `Batch`: `map[string][]interface{}` - if present, will be used to generate a batch of requests
     
 * `Connection`: optional - list of external Aerospike connections.
   - `ID`: `string` - required - connection ID
@@ -177,7 +171,7 @@ See `service/config/model.go`.
 
 ## Client
  
-`mly` client does not come with external config file.
+`mly` client does not come with an external config file.
 
 To create a client, use the following snippet:
 
@@ -190,7 +184,7 @@ Where optional `options` can be of, but not limited to, the following:
   * `NewCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)`
   * `NewGmetric()` - custom instance of `gmetric` service
 
-See `shared/client/option.go` for more options. 
+See [shared/client/option.go]() for more options. 
 
 # Usage
 
@@ -250,7 +244,7 @@ func main() {
 }
 ```
 
-# Output post-processing
+# Transformer 
 
 By default, the model signature output name alongside the model prediction gets used to produce cachable output.
 This process can be customized for specific needs.
