@@ -14,6 +14,7 @@ import (
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/stat"
 	"github.com/viant/tapper/config"
+	"github.com/viant/tapper/io"
 	tlog "github.com/viant/tapper/log"
 	"github.com/viant/tapper/msg"
 	"github.com/viant/tapper/msg/json"
@@ -22,6 +23,25 @@ import (
 type dictProvider func() *common.Dictionary
 type outputsProvider func() []domain.Output
 
+// Service is used to log request inputs to model outputs without an output
+// transformer, in JSON format.
+//
+// The input values will be directly inlined into the resulting JSON.
+// The outputs will be provided as properties in the resulting JSON, with
+// the keys as the output Tensor names.
+//
+// If the dimensions of the output from the model are [1, numOutputs, 1] (single
+// request), the value in the JSON object will be a scalar.
+// If the dimensions of the output from the model are [batchSize, numOutputs, 1],
+// (batch request), the value in the JSON object will be a list of scalars of
+// length batchSize.
+// If the dimensions of the output from the model are [1, numOutputs, outDims],
+// (single request), the value of the JSON object will be a list of scalars of
+// length outDims.
+// If the dimensions of the output from the model are [batchSize, numOutputs, outDims],
+// (batch request), the value of the JSON object will be a list of objects of length
+// batchSize, where each object has a property with key "output" and value a
+// list of scalars of length outDims.
 type Service struct {
 	modelID string
 
@@ -114,40 +134,85 @@ func (s *Service) Log(data []byte, output interface{}, timeTaken time.Duration) 
 	}
 
 	outputs := s.outputsProvider()
+	writeObject(tmsg, hasBatchSize, output, outputs)
+
+	if err := s.logger.Log(tmsg); err != nil {
+		stats.Append(err)
+		log.Printf("[%s log] failed to log: %v\n", s.modelID, err)
+	}
+
+	s.logCounterComplete.Increment()
+}
+
+func writeObject(tmsg msg.Message, hasBatchSize bool, output interface{}, outputs []domain.Output) {
 	if value, ok := output.([]interface{}); ok {
 		for outputIdx, v := range value {
 			outputName := outputs[outputIdx].Name
 
 			switch actual := v.(type) {
 			case [][]string:
-				if len(actual) > 0 {
-					switch len(actual) {
-					case 0:
-					case 1:
-						if hasBatchSize {
-							tmsg.PutStrings(outputName, []string{actual[0][0]})
-						} else {
-							tmsg.PutString(outputName, actual[0][0])
+				switch len(actual) {
+				case 0:
+				case 1:
+					outVec := actual[0]
+					if hasBatchSize || len(outVec) > 1 {
+						tmsg.PutStrings(outputName, outVec)
+					} else {
+						tmsg.PutString(outputName, outVec[0])
+					}
+				default:
+					lAct := len(actual[0])
+					multiOutDims := lAct > 1
+					if multiOutDims {
+						c := make([]io.Encoder, lAct)
+						for i, v := range actual {
+							c[i] = KVStrings(v)
 						}
-					default:
+						tmsg.PutObjects(outputName, c)
+					} else {
 						var stringSlice = make([]string, len(actual))
 						for i, vec := range actual {
 							stringSlice[i] = vec[0]
 						}
+
 						tmsg.PutStrings(outputName, stringSlice)
 					}
 				}
 			case [][]int64:
-				if len(actual) > 0 {
-					switch len(actual) {
-					case 0:
-					case 1:
-						if hasBatchSize {
-							tmsg.PutInts(outputName, []int{int(actual[0][0])})
+				switch len(actual) {
+				case 0:
+				case 1:
+					outVec := actual[0]
+					lenOutVec := len(outVec)
+					if hasBatchSize || lenOutVec > 1 {
+						var c []int
+						if lenOutVec > 1 {
+							c = make([]int, lenOutVec)
+							for i, v := range outVec {
+								c[i] = int(v)
+							}
 						} else {
-							tmsg.PutInt(outputName, int(actual[0][0]))
+							c = []int{int(outVec[0])}
 						}
-					default:
+
+						tmsg.PutInts(outputName, c)
+					} else {
+						tmsg.PutInt(outputName, int(actual[0][0]))
+					}
+				default:
+					lAct := len(actual[0])
+					multiOutDims := lAct > 1
+					if multiOutDims {
+						c := make([]io.Encoder, lAct)
+						for i, v := range actual {
+							t := make([]int, lAct)
+							for ii, vv := range v {
+								t[ii] = int(vv)
+							}
+							c[i] = KVInts(t)
+						}
+						tmsg.PutObjects(outputName, c)
+					} else {
 						var ints = make([]int, len(actual))
 						for i, vec := range actual {
 							ints[i] = int(vec[0])
@@ -156,33 +221,50 @@ func (s *Service) Log(data []byte, output interface{}, timeTaken time.Duration) 
 					}
 				}
 			case [][]float32:
-				if len(actual) > 0 {
-					switch len(actual) {
-					case 0:
-					case 1:
-						if hasBatchSize {
-							tmsg.PutFloats(outputName, []float64{float64(actual[0][0])})
+				switch len(actual) {
+				case 0:
+				case 1:
+					outVec := actual[0]
+					lenOutVec := len(outVec)
+					if hasBatchSize || lenOutVec > 1 {
+						var c []float64
+						if lenOutVec > 1 {
+							c = make([]float64, lenOutVec)
+							for i, v := range outVec {
+								c[i] = float64(v)
+							}
 						} else {
-							tmsg.PutFloat(outputName, float64(actual[0][0]))
+							c = []float64{float64(outVec[0])}
 						}
-					default:
-						var floats = make([]float64, len(actual))
+
+						tmsg.PutFloats(outputName, c)
+					} else {
+						tmsg.PutFloat(outputName, float64(actual[0][0]))
+					}
+				default:
+					lAct := len(actual[0])
+					multiOutDims := lAct > 1
+					if multiOutDims {
+						c := make([]io.Encoder, lAct)
+						for i, v := range actual {
+							t := make([]float64, lAct)
+							for ii, vv := range v {
+								t[ii] = float64(vv)
+							}
+							c[i] = KVFloat64s(t)
+						}
+						tmsg.PutObjects(outputName, c)
+					} else {
+						var ints = make([]float64, len(actual))
 						for i, vec := range actual {
-							floats[i] = float64(vec[0])
+							ints[i] = float64(vec[0])
 						}
-						tmsg.PutFloats(outputName, floats)
+						tmsg.PutFloats(outputName, ints)
 					}
 				}
 			}
 		}
 	}
-
-	if err := s.logger.Log(tmsg); err != nil {
-		stats.Append(err)
-		log.Printf("[%s log] failed to log: %v\n", s.modelID, err)
-	}
-
-	s.logCounterComplete.Increment()
 }
 
 func getStreamID() string {
