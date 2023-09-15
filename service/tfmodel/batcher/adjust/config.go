@@ -5,6 +5,7 @@ import "time"
 type AdjustConfig struct {
 	// Increment is multiplied by the number of active evalutors to determine
 	// the active timeout.
+	// Defaults to 100 Microseconds.
 	Increment time.Duration
 
 	// Max is the maximum Increment multiplier that can be applied as the
