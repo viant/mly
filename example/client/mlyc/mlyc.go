@@ -25,5 +25,11 @@ func main() {
 		return &segmenteds
 	})
 
+	// this is an example usage of a non-Storable type being bound to Response.Data
+	client.CustomMakerRegistry.Register("custom", func() interface{} {
+		// TODO provide actual example
+		return struct{}{}
+	})
+
 	client.Run(os.Args[1:])
 }

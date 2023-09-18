@@ -13,6 +13,9 @@ import (
 	"github.com/viant/toolbox"
 )
 
+// Use CustomMakerRegistry with --maker to use a specific entity for Response.Data.
+var CustomMakerRegistry *customMakerRegistry = new(customMakerRegistry)
+
 func RunWithOptions(options *Options) error {
 	options.Init()
 	if err := options.Validate(); err != nil {
@@ -74,6 +77,8 @@ func RunWithOptions(options *Options) error {
 
 			response := &client.Response{}
 
+			var dataSetter func() interface{}
+
 			storableSrv := storable.Singleton()
 			maker, err := storableSrv.Lookup(options.Storable)
 			if err != nil {
@@ -84,7 +89,22 @@ func RunWithOptions(options *Options) error {
 				maker = checker.Generated(cli.Config.Datastore.MetaInput.Outputs, pl.Batch, false)
 			}
 
-			response.Data = maker()
+			dataSetter = func() interface{} {
+				return maker()
+			}
+
+			if options.CustomMaker != "" {
+				custom, ok := CustomMakerRegistry.registry[options.CustomMaker]
+				if !ok {
+					if options.Debug {
+						fmt.Printf("no such custom maker:\"%s\"\n", options.CustomMaker)
+					}
+				} else {
+					dataSetter = custom
+				}
+			}
+
+			response.Data = dataSetter()
 
 			ctx := context.Background()
 			cancel := func() {}
