@@ -16,8 +16,9 @@ type Options struct {
 	Debug     bool `long:"debug"`
 	TimeoutUs int  `short:"t" long:"timeout"`
 
-	Model    string `short:"m" long:"model" description:"model"`
-	Storable string `short:"s" long:"storable"`
+	Model       string `short:"m" long:"model" description:"model"`
+	Storable    string `short:"s" long:"storable"`
+	CustomMaker string `long:"maker" description:"non-storable Response.Data, requires binding with CustomMaker"`
 
 	CacheMB     int  `long:"cache"`
 	NoHashCheck bool `long:"nohash"`

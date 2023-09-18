@@ -15,6 +15,9 @@ import (
 	"github.com/viant/toolbox"
 )
 
+// Use CustomMakerRegistry with --maker to use a specific entity for Response.Data.
+var CustomMakerRegistry *customMakerRegistry = new(customMakerRegistry)
+
 func RunWithOptions(runOpts *Options) error {
 	runOpts.Init()
 	if err := runOpts.Validate(); err != nil {
@@ -78,6 +81,19 @@ func RunWithOptions(runOpts *Options) error {
 		}
 	}
 
+	dataSetter := func(i int) func() interface{} { return func() interface{} { return maker(i) } }
+
+	if runOpts.CustomMaker != "" {
+		custom, ok := CustomMakerRegistry.registry[runOpts.CustomMaker]
+		if !ok {
+			if runOpts.Debug {
+				fmt.Printf("no such custom maker:\"%s\"\n", runOpts.CustomMaker)
+			}
+		} else {
+			dataSetter = func(int) func() interface{} { return custom }
+		}
+	}
+
 	lenPayloads := len(payloads)
 
 	fullyCompleted := new(sync.WaitGroup)
@@ -111,7 +127,7 @@ func RunWithOptions(runOpts *Options) error {
 		for i, pload := range payloads {
 			rs.WPayloads[i] = WorkerPayload{Payload: pload}
 			rd := &rs.WPayloads[i]
-			payloadedRunner := makePayloadRunner(cli, pload, runOpts, maker)
+			payloadedRunner := makePayloadRunner(cli, pload, runOpts, dataSetter)
 
 			fchan <- runContext{
 				WP: rd,
@@ -216,7 +232,7 @@ func worker(worker int, echan chan error, fchan chan runContext, closed chan str
 }
 
 func makePayloadRunner(cli *client.Service, pl *CliPayload, runOpts *Options,
-	builder func(int) func() common.Storable) func() (*client.Response, error) {
+	builder func(int) func() interface{}) func() (*client.Response, error) {
 
 	maker := builder(pl.Batch)
 
