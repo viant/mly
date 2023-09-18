@@ -2,6 +2,7 @@ package stream
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"os"
 	"reflect"
@@ -52,11 +53,12 @@ type Service struct {
 	dictProvider    dictProvider
 	outputsProvider outputsProvider
 
-	logMetric          *gmetric.Operation
-	logCounterNoData   *gmetric.Counter
-	logCounterNoSample *gmetric.Counter
-	logCounterNoEnd    *gmetric.Counter
-	logCounterComplete *gmetric.Counter
+	logMetric           *gmetric.Operation
+	logCounterNoData    *gmetric.Counter
+	logCounterNoSample  *gmetric.Counter
+	logCounterNoEnd     *gmetric.Counter
+	logCounterComplete  *gmetric.Counter
+	logCounterNoHandler *gmetric.Counter
 }
 
 func NewService(modelID string, streamCfg *config.Stream, afsv afs.Service, dp dictProvider, op outputsProvider, m *gmetric.Service) (*Service, error) {
@@ -134,9 +136,13 @@ func (s *Service) Log(data []byte, output interface{}, timeTaken time.Duration) 
 	}
 
 	outputs := s.outputsProvider()
-	writeObject(tmsg, hasBatchSize, output, outputs)
+	err := writeObject(tmsg, hasBatchSize, output, outputs)
+	if err != nil {
+		s.logCounterNoHandler.Increment()
+		return
+	}
 
-	if err := s.logger.Log(tmsg); err != nil {
+	if err = s.logger.Log(tmsg); err != nil {
 		stats.Append(err)
 		log.Printf("[%s log] failed to log: %v\n", s.modelID, err)
 	}
@@ -144,7 +150,7 @@ func (s *Service) Log(data []byte, output interface{}, timeTaken time.Duration) 
 	s.logCounterComplete.Increment()
 }
 
-func writeObject(tmsg msg.Message, hasBatchSize bool, output interface{}, outputs []domain.Output) {
+func writeObject(tmsg msg.Message, hasBatchSize bool, output interface{}, outputs []domain.Output) error {
 	if value, ok := output.([]interface{}); ok {
 		for outputIdx, v := range value {
 			outputName := outputs[outputIdx].Name
@@ -156,20 +162,25 @@ func writeObject(tmsg msg.Message, hasBatchSize bool, output interface{}, output
 				case 1:
 					outVec := actual[0]
 					if hasBatchSize || len(outVec) > 1 {
+						// single request, multi output
+						// batched request of batch 1, single output
 						tmsg.PutStrings(outputName, outVec)
 					} else {
+						// single request, single output
 						tmsg.PutString(outputName, outVec[0])
 					}
 				default:
 					lAct := len(actual[0])
 					multiOutDims := lAct > 1
 					if multiOutDims {
+						// batch request, multi output
 						c := make([]io.Encoder, lAct)
 						for i, v := range actual {
 							c[i] = KVStrings(v)
 						}
 						tmsg.PutObjects(outputName, c)
 					} else {
+						// batch request, single output
 						var stringSlice = make([]string, len(actual))
 						for i, vec := range actual {
 							stringSlice[i] = vec[0]
@@ -200,12 +211,12 @@ func writeObject(tmsg msg.Message, hasBatchSize bool, output interface{}, output
 						tmsg.PutInt(outputName, int(actual[0][0]))
 					}
 				default:
-					lAct := len(actual[0])
-					multiOutDims := lAct > 1
+					lOutput := len(actual[0])
+					multiOutDims := lOutput > 1
 					if multiOutDims {
-						c := make([]io.Encoder, lAct)
+						c := make([]io.Encoder, len(actual))
 						for i, v := range actual {
-							t := make([]int, lAct)
+							t := make([]int, lOutput)
 							for ii, vv := range v {
 								t[ii] = int(vv)
 							}
@@ -242,12 +253,12 @@ func writeObject(tmsg msg.Message, hasBatchSize bool, output interface{}, output
 						tmsg.PutFloat(outputName, float64(actual[0][0]))
 					}
 				default:
-					lAct := len(actual[0])
-					multiOutDims := lAct > 1
+					lOutput := len(actual[0])
+					multiOutDims := lOutput > 1
 					if multiOutDims {
-						c := make([]io.Encoder, lAct)
+						c := make([]io.Encoder, len(actual))
 						for i, v := range actual {
-							t := make([]float64, lAct)
+							t := make([]float64, lOutput)
 							for ii, vv := range v {
 								t[ii] = float64(vv)
 							}
@@ -262,9 +273,13 @@ func writeObject(tmsg msg.Message, hasBatchSize bool, output interface{}, output
 						tmsg.PutFloats(outputName, ints)
 					}
 				}
+			default:
+				return fmt.Errorf("no handler for %T", actual)
 			}
 		}
 	}
+
+	return nil
 }
 
 func getStreamID() string {
