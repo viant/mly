@@ -2,7 +2,7 @@ set -x -e
 
 SUPPORT=cpu
 VERSION=${VERSION:-2.4.2}
-DESTINATION=/usr/local
+DESTINATION=${DESTINATION:-/usr/local}
 
 mkdir -p $DESTINATION
 

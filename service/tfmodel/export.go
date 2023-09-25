@@ -21,9 +21,13 @@ func Export(session *tf.Session, graph *tf.Graph, name string) (interface{}, err
 		}
 	}
 
+	return GetAndRunExport(session, graph, operationName)
+}
+
+func GetAndRunExport(session *tf.Session, graph *tf.Graph, operationName string) (interface{}, error) {
 	expOperation := graph.Operation(operationName)
 	if expOperation == nil {
-		return nil, fmt.Errorf("failed to lookup RunExport operation: %v", operationName)
+		return nil, fmt.Errorf("RunExport: failed to find operation:%v", operationName)
 	}
 
 	return RunExport(session, expOperation)
@@ -47,7 +51,9 @@ func MatchOperation(graph *tf.Graph, name string) string {
 
 //RunExport runs export
 func RunExport(session *tf.Session, exportOp *tf.Operation) (interface{}, error) {
+	// for LookupTableExportV2, output offset 1 is the encoded value
 	ipOutput := exportOp.Output(0)
+
 	feeds := map[tf.Output]*tf.Tensor{}
 	fetches := []tf.Output{ipOutput}
 	targets := []*tf.Operation{exportOp}
@@ -56,5 +62,6 @@ func RunExport(session *tf.Session, exportOp *tf.Operation) (interface{}, error)
 		return nil, err
 	}
 	value := output[0].Value()
+	fmt.Printf("%v %s\n", output[0].Shape(), output[0].DataType())
 	return value, nil
 }

@@ -110,7 +110,7 @@ func Operate(options *FlagSpec) error {
 			case "signature":
 				return tools.DiscoverSignature(writer, signature)
 			case "layers":
-				fmt.Println(model, writer)
+				return DiscoverLayers(model, writer)
 			default:
 				fmt.Printf("unknown action %s\n", discover.Desc.Action)
 			}
