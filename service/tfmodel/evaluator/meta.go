@@ -21,6 +21,10 @@ type EvaluatorMeta struct {
 	tfMetric *gmetric.Operation
 }
 
+func (e EvaluatorMeta) TFMetric() *gmetric.Operation {
+	return e.tfMetric
+}
+
 func MakeEvaluatorMeta(id string, semaphore *semaphore.Weighted, maxEvaluatorWait time.Duration,
 	semaMetric, tfMetric *gmetric.Operation) EvaluatorMeta {
 

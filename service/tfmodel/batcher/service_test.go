@@ -304,13 +304,13 @@ func BenchmarkServiceParallel(b *testing.B) {
 }
 
 func BenchmarkServiceVariantParallel(ob *testing.B) {
-	mbsVariants := []int{0, 100}
-	bwVariants := []time.Duration{time.Microsecond * 500}
-	mecVariants := []int{0}
+	mbsVariants := []int{5, 10, 20}
+	bwVariants := []time.Duration{0, time.Microsecond * 1000}
+	mecVariants := []int{0, 5}
 	mqbVariants := []int{0}
 
-	adjIVars := []time.Duration{time.Microsecond * 500}
-	adjMaxVars := []uint32{0, 1000}
+	adjIVars := []time.Duration{time.Microsecond * 200}
+	adjMaxVars := []uint32{0, 10}
 
 	iter := permute.NewPermuter(
 		[][]int{mbsVariants, mqbVariants, mecVariants},
@@ -357,8 +357,20 @@ func BenchmarkServiceVariantParallel(ob *testing.B) {
 				}
 			}
 
-			signature, evaluator, _ := test.LoadEvaluator("example/model/string_lookups_int_model", bnil, bnil)
-			batcher := NewBatcher(evaluator, len(signature.Inputs), bcfg, createBSMeta())
+			signature, evaluator, evMeta := test.LoadEvaluator("example/model/string_lookups_int_model", bnil, bnil)
+
+			var negOneUI64 uint64 = 0
+			maxEval := &negOneUI64
+
+			cntr := evMeta.TFMetric().Counters[1].Counter.Custom
+			switch actual := cntr.(type) {
+			case *stat.Occupancy:
+				maxEval = &(*stat.Occupancy)(actual).Max
+			default:
+			}
+
+			bsMeta := createBSMeta()
+			batcher := NewBatcher(evaluator, len(signature.Inputs), bcfg, bsMeta)
 			batcher.Start()
 
 			feeds2 := make([]interface{}, 0)
@@ -436,6 +448,8 @@ func BenchmarkServiceVariantParallel(ob *testing.B) {
 			<-aggDone
 
 			sort.Slice(allDurs, func(i, j int) bool { return allDurs[i] < allDurs[j] })
+
+			b.ReportMetric(float64(*maxEval), "max_eval")
 
 			b.ReportMetric(float64(allDurs[0]), "dur_min")
 

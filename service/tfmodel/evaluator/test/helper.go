@@ -10,9 +10,9 @@ import (
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/domain"
-	srvstat "github.com/viant/mly/service/stat"
 	"github.com/viant/mly/service/tfmodel/evaluator"
 	"github.com/viant/mly/service/tfmodel/signature"
+	tfstat "github.com/viant/mly/service/tfmodel/stat"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -22,10 +22,9 @@ func createEvalMeta() evaluator.EvaluatorMeta {
 		"test",
 		semaphore.NewWeighted(100),
 		time.Duration(1*time.Second),
-		s.MultiOperationCounter("test", "test sema", "", time.Microsecond, time.Minute, 2, srvstat.NewEval()),
-		s.MultiOperationCounter("test", "test eval", "", time.Microsecond, time.Minute, 2, srvstat.NewEval()),
+		s.MultiOperationCounter("test", "test sema", "", time.Microsecond, time.Minute, 2, tfstat.NewSema()),
+		s.MultiOperationCounter("test", "test eval", "", time.Microsecond, time.Minute, 2, tfstat.NewTfs()),
 	)
-
 }
 
 func LoadEvaluator(path string, withLoadModel, withSignature func(error)) (*domain.Signature, *evaluator.Service, evaluator.EvaluatorMeta) {
