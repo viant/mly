@@ -53,15 +53,17 @@ func MatchOperation(graph *tf.Graph, name string) string {
 func RunExport(session *tf.Session, exportOp *tf.Operation) (interface{}, error) {
 	// for LookupTableExportV2, output offset 1 is the encoded value
 	ipOutput := exportOp.Output(0)
+	fetches := []tf.Output{ipOutput}
+
+	targets := []*tf.Operation{exportOp}
 
 	feeds := map[tf.Output]*tf.Tensor{}
-	fetches := []tf.Output{ipOutput}
-	targets := []*tf.Operation{exportOp}
 	output, err := session.Run(feeds, fetches, targets)
 	if err != nil {
 		return nil, err
 	}
+
 	value := output[0].Value()
-	fmt.Printf("%v %s\n", output[0].Shape(), output[0].DataType())
+
 	return value, nil
 }
