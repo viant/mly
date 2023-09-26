@@ -745,6 +745,8 @@ github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o
 github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07/go.mod h1:kDXzergiv9cbyO7IOYJZWg1U88JhDg3PB6klq9Hg2pA=
 github.com/tensorflow/tensorflow v2.4.2+incompatible h1:v6E2LxMHubd9rljvm0sU6v3yRMO5an00VMoRjlzqSKA=
 github.com/tensorflow/tensorflow v2.4.2+incompatible/go.mod h1:itOSERT4trABok4UOoG+X4BoKds9F3rIsySdn+Lvu90=
+github.com/tensorflow/tensorflow v2.7.4+incompatible h1:jxDMcOXPTv9K4JMPsm/1oGDvPx1ScAIdgCR0lDwg7Xw=
+github.com/tensorflow/tensorflow v2.7.4+incompatible/go.mod h1:itOSERT4trABok4UOoG+X4BoKds9F3rIsySdn+Lvu90=
 github.com/viant/afs v1.0.0/go.mod h1:wdiEDffZKJwj1ZSFasy7hHoxLQdSpFZkd3XOWNt1aN0=
 github.com/viant/afs v1.16.1-0.20221201181023-455837320ec5 h1:roScADfArV4sxN0CB14BQbMlPRf4PpVeX3dx9lMQFC4=
 github.com/viant/afs v1.16.1-0.20221201181023-455837320ec5/go.mod h1:bo/jkTH8sBUhG0PQcPsuskvjb/5uEzgiwygGwtaDw8Q=

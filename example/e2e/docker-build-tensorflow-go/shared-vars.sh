@@ -1,0 +1,3 @@
+VERSION=${VERSION:-2.4.2}
+RESOLVED_GOPATH=$(go env GOPATH)
+TENSORFLOW_GIT_REPO=$RESOLVED_GOPATH/src/github.com/tensorflow/tensorflow
