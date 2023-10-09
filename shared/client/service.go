@@ -189,7 +189,11 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 func (s *Service) loadFromCache(ctx context.Context, cached *[]interface{}, batchSize int, response *Response, cachable Cachable) (int, error) {
 	*cached = make([]interface{}, batchSize)
-	dataType := response.DataItemType()
+	dataType, err := response.DataItemType()
+	if err != nil {
+		return 0, err
+	}
+
 	if batchSize > 0 {
 		cachedCount, err := s.readFromCacheInBatch(ctx, batchSize, dataType, cachable, response, *cached)
 		if err != nil && !common.IsTransientError(err) {

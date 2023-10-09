@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"time"
 
@@ -77,15 +78,23 @@ func (r *Response) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 	return nil
 }
 
-func (r *Response) DataItemType() reflect.Type {
+func (r *Response) DataItemType() (reflect.Type, error) {
 	if r.Data == nil {
-		return reflect.TypeOf(&struct{}{})
+		return reflect.TypeOf(&struct{}{}), nil
 	}
-	dataType := reflect.TypeOf(r.Data).Elem()
-	if dataType.Kind() == reflect.Slice {
-		return dataType.Elem()
+
+	dataType := reflect.TypeOf(r.Data)
+	// in go1.18 this was renamed to Pointer
+	if dataType.Kind() != reflect.Ptr && dataType.Kind() != reflect.Interface {
+		return nil, fmt.Errorf("expected Ptr or Interface, got %v", dataType)
 	}
-	return dataType
+
+	elemType := dataType.Elem()
+	if elemType.Kind() == reflect.Slice {
+		return elemType.Elem(), nil
+	}
+
+	return elemType, nil
 }
 
 //NKeys returns object keys JSON (gojay API)
