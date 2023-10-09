@@ -81,7 +81,12 @@ func RunWithOptions(runOpts *Options) error {
 		}
 	}
 
-	dataSetter := func(i int) func() interface{} { return func() interface{} { return maker(i) } }
+	// wrap return value to interface{}
+	dataSetter := func(i int) func() interface{} {
+		return func() interface{} {
+			return maker(i)()
+		}
+	}
 
 	if runOpts.CustomMaker != "" {
 		custom, ok := CustomMakerRegistry.registry[runOpts.CustomMaker]
