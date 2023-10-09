@@ -636,21 +636,17 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 			}
 
 			var data []byte
+			if response.Body != nil {
+				data, err = io.ReadAll(response.Body)
+				_ = response.Body.Close()
+			}
+
 			if response.StatusCode != http.StatusOK {
 				// as long as this func is run synchronously,
 				// this is safe
 				terminate = true
-
-				return nil, fmt.Errorf("invalid response: %v, %s", response.StatusCode, data)
-			}
-
-			if response.Body != nil {
-				data, err = io.ReadAll(response.Body)
-				_ = response.Body.Close()
-
-				if err != nil {
-					return nil, err
-				}
+				return nil, fmt.Errorf("HTTP Code:%d, Body:\"%s\" (read nil:%v error:%v)",
+					response.StatusCode, string(data), response.Body == nil, err)
 			}
 
 			return data, nil

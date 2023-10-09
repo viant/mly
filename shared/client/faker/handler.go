@@ -39,6 +39,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if h.next != nil {
+		h.next(data, w)
+		return
+	}
+
 	testDataURL := h.fetchTestdata(URI)
 	output, err := h.fs.DownloadWithURL(context.TODO(), testDataURL)
 
