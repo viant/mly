@@ -7,11 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/viant/gmetric"
 	srvConfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/endpoint/checker"
 	"github.com/viant/mly/service/endpoint/health"
-	"github.com/viant/mly/service/endpoint/prometheus"
+	promh "github.com/viant/mly/service/endpoint/prometheus"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/mly/shared/common"
@@ -183,7 +184,8 @@ func New(cfg *Config) (*Service, error) {
 	metricHandler := gmetric.NewHandler(common.MetricURI, metrics)
 	mux.Handle(common.MetricURI, metricHandler)
 
-	mux.Handle("/v1/prometheus", prometheus.Handler())
+	promReg := prometheus.NewRegistry()
+	mux.Handle("/v1/prometheus", promh.Handler(promReg))
 
 	datastores, err := datastore.NewStoresV2(&cfg.DatastoreList, metrics, true)
 	if err != nil {
@@ -194,7 +196,7 @@ func New(cfg *Config) (*Service, error) {
 		healthHandler,
 	}
 
-	err = Build(mux, cfg, datastores, hooks, metrics)
+	err = Build(mux, cfg, datastores, hooks, metrics, promReg)
 	if err != nil {
 		return nil, err
 	}

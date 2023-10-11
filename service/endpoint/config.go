@@ -31,6 +31,8 @@ type Config struct {
 	// set BatchWait to < 0.
 	GlobalBatching *batchconfig.BatcherConfig `json:",omitempty" yaml:",omitempty"`
 
+	Metrics *econfig.MetricsConfig `json:",omitempty" yaml:",omitempty"`
+
 	Endpoint econfig.Endpoint
 
 	EnableMemProf bool

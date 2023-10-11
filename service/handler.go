@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/francoispqt/gojay"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/buffer"
 	"github.com/viant/mly/service/clienterr"
@@ -31,6 +33,11 @@ type Handler struct {
 
 	overheadMetrics    *gmetric.Operation
 	httpContextMetrics *gmetric.Operation
+
+	// indicates the last time a request came in
+	lastRequest time.Time
+	lrLock      *sync.Mutex
+	lrObserver  prometheus.Observer
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Request) {
@@ -38,6 +45,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, h.maxDuration)
 	defer cancel()
+
+	h.trackIdle()
 
 	handlerOnDone := h.httpContextMetrics.Begin(time.Now())
 	hStats := stat.NewValues()
@@ -181,14 +190,31 @@ func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
 	return err
 }
 
+func (h *Handler) trackIdle() {
+	now := time.Now()
+	h.lrLock.Lock()
+	lr := h.lastRequest
+	h.lastRequest = now
+	h.lrLock.Unlock()
+	elapsed := now.Sub(lr)
+	h.lrObserver.Observe(float64(elapsed))
+}
+
 // NewHandler creates a new HTTP service Handler
-func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration, m *gmetric.Service) *Handler {
+func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration,
+	m *gmetric.Service, lrOV prometheus.ObserverVec) *Handler {
+
 	location := reflect.TypeOf(Handler{}).PkgPath()
 	modelID := service.config.ID
 	return &Handler{
-		service:            service,
-		pool:               pool,
-		maxDuration:        maxDuration,
+		service:     service,
+		pool:        pool,
+		maxDuration: maxDuration,
+
+		lastRequest: time.Now(),
+		lrLock:      new(sync.Mutex),
+		lrObserver:  lrOV.With(prometheus.Labels{"model": modelID}),
+
 		overheadMetrics:    m.MultiOperationCounter(location, modelID+"HTTPOverhead", modelID+" server HTTP startup overhead", time.Microsecond, time.Minute, 2, sstat.NewHttp()),
 		httpContextMetrics: m.MultiOperationCounter(location, modelID+"HTTPHandler", modelID+" server HTTP handler", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly()),
 	}

@@ -18,6 +18,7 @@ type Endpoint struct {
 	PoolMaxSize int `json:",omitempty" yaml:",omitempty"`
 	BufferSize  int `json:",omitempty" yaml:",omitempty"`
 
+	// Deprecated: to be moved to separate object in service/endpoint/config.Config
 	MaxEvaluatorWaitMs      int           `json:",omitempty" yaml:",omitempty"`
 	MaxEvaluatorWait        time.Duration `json:",omitempty" yaml:",omitempty"`
 	MaxEvaluatorConcurrency int64         `json:",omitempty" yaml:",omitempty"`
