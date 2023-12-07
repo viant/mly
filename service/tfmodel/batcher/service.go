@@ -79,11 +79,11 @@ type ServiceMeta struct {
 func NewServiceMeta(m *stat.GMeter, id string) ServiceMeta {
 	batcherLocation := reflect.TypeOf(ServiceMeta{}).PkgPath()
 	return ServiceMeta{
-		queueMetric:      m.Op(batcherLocation, id+"BatcherQueue", id+" Batcher queue performance"),
-		dispatcherMetric: m.MOp(batcherLocation, id+"Dispatcher", id+" Dispatcher performance", NewDispatcherP()),
-		dispatcherLoop:   m.Op(batcherLocation, id+"DispatcherLoop", id+" Dispatcher loop performance"),
-		blockQDelay:      m.Op(batcherLocation, id+"BSBQWait", id+" Batcher service block queue wait"),
-		inputQDelay:      m.Op(batcherLocation, id+"BSIQWait", id+" Batcher service input queue wait"),
+		queueMetric:      m.Op(batcherLocation, id+"BatcherQueue", "batch enters dispatcher queue"),
+		dispatcherMetric: m.MOp(batcherLocation, id+"Dispatcher", "batch exists in dispatcher", NewDispatcherP()),
+		dispatcherLoop:   m.Op(batcherLocation, id+"DispatcherLoop", "dispatch loop"),
+		blockQDelay:      m.Op(batcherLocation, id+"BSBQWait", "wait until dispatcher accepts input (verbose)"),
+		inputQDelay:      m.Op(batcherLocation, id+"BSIQWait", "wait until dispatcher receives input (verbose)"),
 	}
 }
 
