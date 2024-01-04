@@ -131,7 +131,7 @@ func (s *Service) do(ctx context.Context, request *request.Request, response *Re
 		}
 
 		if !isOverloaded && ctx.Err() == nil {
-			log.Printf("[%v do] eval error:(%+v) request:(%+v)", s.config.ID, err, request)
+			log.Printf("[%v do] eval error:(%+v) request.Feeds:(%+v)", s.config.ID, err, request.Feeds)
 		}
 
 		// we waited or there was an issue with evaluation; in either case
