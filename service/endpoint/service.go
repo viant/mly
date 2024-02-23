@@ -54,6 +54,18 @@ func (s *Service) Listen() (net.Listener, error) {
 
 func (s *Service) Serve(l net.Listener) error {
 	log.Printf("starting mly service endpoint: %v\n", s.server.Addr)
+	tls := s.config.TLS
+
+	var err error
+	if tls == nil {
+		err = tls.Valid()
+		if err != nil {
+			return err
+		}
+
+		return s.server.ServeTLS(l, tls.CertFile, tls.KeyFile)
+	}
+
 	return s.server.Serve(l)
 }
 

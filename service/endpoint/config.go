@@ -38,6 +38,8 @@ type Config struct {
 	EnableMemProf bool
 	EnableCPUProf bool
 
+	TLS *TLSConfig
+
 	AllowedSubnet []string `json:",omitempty" yaml:",omitempty"`
 }
 
