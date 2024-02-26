@@ -10,10 +10,14 @@ import (
 )
 
 // ModifiedSnapshot checks and updates modified times based on the object in URL
-func ModifiedSnapshot(ctx context.Context, fs afs.Service, URL string, resource *config.Modified) (*config.Modified, error) {
+func ModifiedSnapshot(ctx context.Context, fs afs.Service, URL string, metadata *config.Modified) (*config.Modified, error) {
 	objects, err := fs.List(ctx, URL)
 	if err != nil {
-		return resource, fmt.Errorf("failed to list URL:%s; error:%w", URL, err)
+		return metadata, fmt.Errorf("failed to list URL:%s; error:%w", URL, err)
+	}
+
+	if metadata == nil {
+		metadata = new(config.Modified)
 	}
 
 	if extURL := url.SchemeExtensionURL(URL); extURL != "" {
@@ -22,9 +26,9 @@ func ModifiedSnapshot(ctx context.Context, fs afs.Service, URL string, resource 
 			return nil, err
 		}
 
-		resource.Max = object.ModTime()
-		resource.Min = object.ModTime()
-		return resource, nil
+		metadata.Max = object.ModTime()
+		metadata.Min = object.ModTime()
+		return metadata, nil
 	}
 
 	for i, item := range objects {
@@ -32,25 +36,25 @@ func ModifiedSnapshot(ctx context.Context, fs afs.Service, URL string, resource 
 			continue
 		}
 		if item.IsDir() {
-			resource, err = ModifiedSnapshot(ctx, fs, item.URL(), resource)
+			metadata, err = ModifiedSnapshot(ctx, fs, item.URL(), metadata)
 			if err != nil {
-				return resource, err
+				return metadata, err
 			}
 			continue
 		}
-		if resource.Max.IsZero() {
-			resource.Max = item.ModTime()
+		if metadata.Max.IsZero() {
+			metadata.Max = item.ModTime()
 		}
-		if resource.Min.IsZero() {
-			resource.Min = item.ModTime()
+		if metadata.Min.IsZero() {
+			metadata.Min = item.ModTime()
 		}
 
-		if item.ModTime().After(resource.Max) {
-			resource.Max = item.ModTime()
+		if item.ModTime().After(metadata.Max) {
+			metadata.Max = item.ModTime()
 		}
-		if item.ModTime().Before(resource.Min) {
-			resource.Min = item.ModTime()
+		if item.ModTime().Before(metadata.Min) {
+			metadata.Min = item.ModTime()
 		}
 	}
-	return resource, nil
+	return metadata, nil
 }

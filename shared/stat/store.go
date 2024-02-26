@@ -2,9 +2,13 @@ package stat
 
 import "github.com/viant/gmetric/counter"
 
-type store struct{}
+type client struct{}
 
-func (p store) Keys() []string {
+const (
+	EarlyCtxError = "ctx"
+)
+
+func (p client) Keys() []string {
 	return []string{
 		ErrorKey,
 		NoSuchKey,
@@ -12,10 +16,11 @@ func (p store) Keys() []string {
 		Down,
 		Canceled,
 		DeadlineExceeded,
+		EarlyCtxError,
 	}
 }
 
-func (p store) Map(value interface{}) int {
+func (p client) Map(value interface{}) int {
 	if value == nil {
 		return -1
 	}
@@ -34,11 +39,13 @@ func (p store) Map(value interface{}) int {
 			return 4
 		case DeadlineExceeded:
 			return 5
+		case EarlyCtxError:
+			return 6
 		}
 	}
 	return -1
 }
 
-func NewStore() counter.Provider {
-	return &store{}
+func NewClient() counter.Provider {
+	return &client{}
 }

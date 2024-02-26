@@ -7,11 +7,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/viant/gmetric"
 	srvConfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/endpoint/checker"
 	"github.com/viant/mly/service/endpoint/health"
-	"github.com/viant/mly/service/endpoint/prometheus"
+	promh "github.com/viant/mly/service/endpoint/prometheus"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/mly/shared/common"
@@ -53,6 +54,18 @@ func (s *Service) Listen() (net.Listener, error) {
 
 func (s *Service) Serve(l net.Listener) error {
 	log.Printf("starting mly service endpoint: %v\n", s.server.Addr)
+	tls := s.config.TLS
+
+	var err error
+	if tls == nil {
+		err = tls.Valid()
+		if err != nil {
+			return err
+		}
+
+		return s.server.ServeTLS(l, tls.CertFile, tls.KeyFile)
+	}
+
 	return s.server.Serve(l)
 }
 
@@ -74,10 +87,7 @@ func (s *Service) SelfTest() error {
 	numModels := len(s.config.ModelList.Models)
 	waitGroup.Add(numModels)
 
-	hosts := []*client.Host{{
-		Name: "localhost",
-		Port: s.config.Endpoint.Port,
-	}}
+	hosts := client.NewHosts(s.config.Endpoint.Port, []string{"localhost"})
 
 	timeout := time.Duration(s.config.Endpoint.ReadTimeoutMs) * time.Millisecond
 
@@ -142,16 +152,16 @@ func (s *Service) SelfTest() error {
 
 // Registers Shutdown() on interrupt.
 func (s *Service) shutdownOnInterrupt() {
-	closed := make(chan struct{})
 	go func() {
 		sigint := make(chan os.Signal, 1)
 		signal.Notify(sigint, os.Interrupt)
+
 		<-sigint
+
 		// We received an interrupt signal, shut down.
 		if err := s.Shutdown(context.Background()); err != nil {
 			log.Printf("HTTP Service Shutdown: %v", err)
 		}
-		close(closed)
 	}()
 }
 
@@ -186,7 +196,8 @@ func New(cfg *Config) (*Service, error) {
 	metricHandler := gmetric.NewHandler(common.MetricURI, metrics)
 	mux.Handle(common.MetricURI, metricHandler)
 
-	mux.Handle("/v1/prometheus", prometheus.Handler())
+	promReg := prometheus.NewRegistry()
+	mux.Handle("/v1/prometheus", promh.Handler(promReg))
 
 	datastores, err := datastore.NewStoresV2(&cfg.DatastoreList, metrics, true)
 	if err != nil {
@@ -197,7 +208,7 @@ func New(cfg *Config) (*Service, error) {
 		healthHandler,
 	}
 
-	err = Build(mux, cfg, datastores, hooks, metrics)
+	err = Build(mux, cfg, datastores, hooks, metrics, promReg)
 	if err != nil {
 		return nil, err
 	}

@@ -5,7 +5,7 @@ import random
 import tensorflow as tf
 import time
 from tensorflow.keras import Input, Model
-from tensorflow.keras.layers import Concatenate, Lambda, Layer
+from tensorflow.keras.layers import Concatenate, Dense, Lambda, Layer
 from tensorflow.keras.layers.experimental.preprocessing import StringLookup, TextVectorization
 
 class LookupLayer(Layer):
@@ -29,6 +29,12 @@ class LookupLayer(Layer):
     def call(self, inputs):
         return self.table.lookup(inputs)
 
+def scale_geometric(start, end):
+    cur = start
+    while cur <= end:
+        yield cur
+        cur *= 2
+
 if __name__ == '__main__':
     ap = ArgumentParser(description='Generate TensorFlow 2.4.x models.')
 
@@ -49,10 +55,15 @@ if __name__ == '__main__':
     ap.add_argument('--no-lookup-layer', action='store_true', help='for broken_case_v0_5_0 model')
     ap.add_argument('--no-keyed-out', action='store_true', help='for testing v0.5.0')
 
-    ap.add_argument('--no-slow', action='store_true', help='for testing thread limit')
-    ap.add_argument('--slow-repeat', type=int, default=10, help='looping math operations for slow model')
-    ap.add_argument('--slow-depth', type=int, default=4096)
-    ap.add_argument('--slow-depth-exp', type=int, default=2)
+    ap.add_argument('--no-slow', action='store_true', help='for load testing, builds a set of models')
+
+    ap.add_argument('--slow-num-inputs', type=int, default=2)
+
+    ap.add_argument('--slow-min-depth', type=int, default=2)
+    ap.add_argument('--slow-max-depth', type=int, default=2)
+
+    ap.add_argument('--slow-min-width', type=int, default=512, help='scaled geometrically by 2 from min to max')
+    ap.add_argument('--slow-max-width', type=int, default=512)
 
     pa, _ = ap.parse_known_args()
 
@@ -233,42 +244,22 @@ if __name__ == '__main__':
         model_test_save(test_tf_tensor, ko_model)
 
     if not pa.no_slow:
-        repeat_depth = pa.slow_depth ** pa.slow_depth_exp
+        for num_dense, dense_dims in itertools.product(
+                range(pa.slow_min_depth, pa.slow_max_depth + 1),
+                scale_geometric(pa.slow_min_width, pa.slow_max_width)
+            ):
 
-        r = lambda i: Lambda(lambda t: tf.repeat(t, repeat_depth, axis=-1), name=f'repeater_{i}')
-        d = lambda i: Lambda(lambda d: tf.divide(d['x'], d['y']), name=f'divider_{i}')
-        m = lambda i: Lambda(lambda m: tf.multiply(m['x'], m['y']), name=f'multiplier_{i}')
-        s = lambda i: Lambda(lambda t: tf.expand_dims(tf.math.reduce_sum(t, axis=-1), axis=-1), name=f'summer_{i}')
+            inputs = [tf.keras.layers.Input(name=f'x_{i}', shape=(1,)) for i in range(pa.slow_num_inputs)]
+            g = Concatenate()(inputs)
+            for dense_i in range(num_dense - 1):
+                g = Dense(dense_dims, activation='relu', name=f'dense_{dense_i}')(g)
+            o = Dense(1, name='output')(g)
+            slow_model = Model(inputs=inputs, outputs=[o], name=f'slow_{pa.slow_num_inputs}x{num_dense}x{dense_dims}')
 
-        i_x = tf.keras.layers.Input(name='x', shape=(1,), dtype=tf.float32)
-        i_y = tf.keras.layers.Input(name='y', shape=(1,), dtype=tf.float32)
-
-        rx = r('x')(i_x)
-        ry = r('y')(i_y)
-        # rx / ry
-        o = d('d0')(dict(x=rx, y=ry))
-
-        for i in range(pa.slow_repeat):
-            # rx^2 / ry
-            o = m(f'm0_{i}')(dict(x=o, y=rx))
-            # sum(rx^2/ry)
-            so = s(f's0_{i}')(o)
-            # rx^2 * sum(rx^2/ry) / ry
-            o = m(f'm1_{i}')(dict(x=o, y=so))
-            # rx^2 * sum(rx^2/ry) / ry^2
-            o = d(f'd1_{i}')(dict(x=o, y=ry))
-            # sum(rx^2 * sum(rx^2/ry) / ry^2)
-            so = s(f's1_{i}')(o)
-            # [rx^2 * sum(rx^2/ry)] / [ry^2 * sum(rx^2 * sum(rx^2/ry) / ry^2)]
-            o = d(f'd2_{i}')(dict(x=o, y=so))
-
-        o = s(f's2')(o)
-        o = Lambda(lambda t: t, name='output')(o)
-
-        slow_model = Model(inputs=[i_x, i_y], outputs=[o], name='slow')
-
-        test_tf_tensor = dict(x=tf.constant([[4], [8]]), y=tf.constant([[5], [9]]))
-        model_test_save(test_tf_tensor, slow_model)
+            test_tf_tensor = {f'x_{i}': tf.constant([[4], [8]]) for i in range(pa.slow_num_inputs)}
+            model_test_save(test_tf_tensor, slow_model)
+        # end for
+    # end if
 
     print('Done.')
 

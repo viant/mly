@@ -11,6 +11,7 @@ func getStorable(cfg *config.Datastore) func() common.Storable {
 	if err == nil && result != nil {
 		return result
 	} //otherwise return default storable
+
 	return func() common.Storable {
 		return storable.New(cfg.Fields)
 	}

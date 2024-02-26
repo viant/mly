@@ -3,17 +3,26 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/francoispqt/gojay"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/buffer"
 	"github.com/viant/mly/service/clienterr"
+	serrs "github.com/viant/mly/service/errors"
 	"github.com/viant/mly/service/request"
+	sstat "github.com/viant/mly/service/stat"
+	"github.com/viant/mly/shared/common"
+	"github.com/viant/mly/shared/stat"
 )
 
 // Handler converts a model prediction HTTP request to its internal calls.
@@ -21,49 +30,92 @@ type Handler struct {
 	maxDuration time.Duration
 	service     *Service
 	pool        *buffer.Pool
+
+	overheadMetrics    *gmetric.Operation
+	httpContextMetrics *gmetric.Operation
+
+	// indicates the last time a request came in
+	lastRequest time.Time
+	lrLock      *sync.Mutex
+	lrObserver  prometheus.Observer
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Request) {
 	// use Background() since there are things to be done regardless of if the request is cancceled from the client side.
 	ctx := context.Background()
-	// TODO: Handle httpRequest.Context() - there are issues since this can be canceled but there should be housekeeping completed.
 	ctx, cancel := context.WithTimeout(ctx, h.maxDuration)
 	defer cancel()
 
+	h.trackIdle()
+
+	handlerOnDone := h.httpContextMetrics.Begin(time.Now())
+	hStats := stat.NewValues()
+	defer func() { handlerOnDone(time.Now(), hStats.Values()...) }()
+
 	isDebug := h.service.config.Debug
 
-	request := h.service.NewRequest()
-	response := &Response{Status: "ok", started: time.Now()}
+	// TODO this context isn't guaranteed to leak - the model can change in the
+	// middle of a request
+	var request *request.Request
+
+	response := &Response{Status: common.StatusOK, started: time.Now()}
 	if httpRequest.Method == http.MethodGet {
+
+		request = h.service.NewRequest()
 		if err := h.buildRequestFromQuery(httpRequest, request); err != nil {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
 		}
 	} else {
 		defer httpRequest.Body.Close()
+
+		onDone := h.overheadMetrics.Begin(time.Now())
+		stats := stat.NewValues()
 		data, size, err := buffer.Read(h.pool, httpRequest.Body)
 		defer h.pool.Put(data)
-		if err != nil {
-			http.Error(writer, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		func() {
+			defer func() { onDone(time.Now(), stats.Values()...) }()
 
-		request.Body = data[:size]
-		if isDebug {
-			trimmed := strings.Trim(string(request.Body), " \n\r")
-			log.Printf("[%v http] input: %s\n", h.service.config.ID, trimmed)
-		}
+			if err != nil {
+				stats.Append(sstat.ReadError{err})
+				if isDebug {
+					log.Printf("[%v http] read error: %v\n", h.service.config.ID, err)
+				}
 
-		err = gojay.Unmarshal(data[:size], request)
-		if err != nil {
-			if isDebug {
-				log.Printf("[%v http] unmarshal error: %v\n", h.service.config.ID, err)
+				code := http.StatusInternalServerError
+				if errors.Is(err, buffer.ErrBufferTooSmall) {
+					code = http.StatusRequestEntityTooLarge
+				}
+
+				http.Error(writer, err.Error(), code)
+				return
 			}
 
-			rmsg := fmt.Sprintf("%s (are your input types correct?)", err.Error())
-			http.Error(writer, rmsg, http.StatusBadRequest)
-			return
-		}
+			request = h.service.NewRequest()
+			request.Body = data[:size]
+			if isDebug {
+				trimmed := strings.Trim(string(request.Body), " \n\r")
+				log.Printf("[%v http] input: %s\n", h.service.config.ID, trimmed)
+			}
+
+			err = gojay.Unmarshal(data[:size], request)
+			if err != nil {
+				stats.Append(sstat.UnmarshalError{err})
+
+				if isDebug {
+					log.Printf("[%v http] unmarshal error: %v\n", h.service.config.ID, err)
+				}
+
+				rmsg := fmt.Sprintf("%s (are your input types correct?)", err.Error())
+				http.Error(writer, rmsg, http.StatusBadRequest)
+				return
+			}
+		}()
+	}
+
+	if request == nil {
+		http.Error(writer, "no request", http.StatusBadRequest)
+		return
 	}
 
 	err := h.handleAppRequest(ctx, writer, request, response)
@@ -77,10 +129,17 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		}
 	}
 
+	reqCtx := httpRequest.Context()
+	if reqCtx != nil && reqCtx.Err() != nil {
+		hStats.AppendError(reqCtx.Err())
+	}
+
 	if err != nil {
 		var status int
 		if _, ok := err.(*clienterr.ClientError); ok {
 			status = http.StatusBadRequest
+		} else if errors.Is(err, serrs.OverloadedError) {
+			status = http.StatusTooManyRequests
 		} else {
 			status = http.StatusInternalServerError
 		}
@@ -91,6 +150,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 		http.Error(writer, err.Error(), status)
 	}
+
 }
 
 func (h *Handler) buildRequestFromQuery(httpRequest *http.Request, request *request.Request) error {
@@ -130,11 +190,32 @@ func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
 	return err
 }
 
-//NewHandler creates a new HTTP service Handler
-func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration) *Handler {
+func (h *Handler) trackIdle() {
+	now := time.Now()
+	h.lrLock.Lock()
+	lr := h.lastRequest
+	h.lastRequest = now
+	h.lrLock.Unlock()
+	elapsed := now.Sub(lr)
+	h.lrObserver.Observe(float64(elapsed))
+}
+
+// NewHandler creates a new HTTP service Handler
+func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration,
+	m *gmetric.Service, lrOV prometheus.ObserverVec) *Handler {
+
+	location := reflect.TypeOf(Handler{}).PkgPath()
+	modelID := service.config.ID
 	return &Handler{
 		service:     service,
 		pool:        pool,
 		maxDuration: maxDuration,
+
+		lastRequest: time.Now(),
+		lrLock:      new(sync.Mutex),
+		lrObserver:  lrOV.With(prometheus.Labels{"model": modelID}),
+
+		overheadMetrics:    m.MultiOperationCounter(location, modelID+"HTTPOverhead", modelID+" server HTTP startup overhead", time.Microsecond, time.Minute, 2, sstat.NewHttp()),
+		httpContextMetrics: m.MultiOperationCounter(location, modelID+"HTTPHandler", modelID+" server HTTP handler", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly()),
 	}
 }

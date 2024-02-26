@@ -19,8 +19,8 @@ import (
 	sconfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/endpoint"
-	"github.com/viant/mly/service/layers"
 	"github.com/viant/mly/service/tfmodel"
+	"github.com/viant/mly/service/tfmodel/signature"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 	dconfig "github.com/viant/mly/shared/config"
@@ -74,12 +74,12 @@ func LoadModel(ctx context.Context, URL string) (*tf.SavedModel, error) {
 }
 
 func DiscoverDictHash(model *tf.SavedModel, writer io.Writer) error {
-	signature, err := tfmodel.Signature(model)
+	signature, err := signature.Signature(model)
 	if err != nil {
 		return err
 	}
 
-	dict, err := layers.Dictionary(model.Session, model.Graph, signature)
+	dict, err := tfmodel.Dictionary(model.Session, model.Graph, signature)
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ func DiscoverSignature(writer io.Writer, signature *domain.Signature) error {
 }
 
 func DiscoverConfig(sourceURL string, model *tf.SavedModel, writer io.Writer) error {
-	signature, err := tfmodel.Signature(model)
+	signature, err := signature.Signature(model)
 	if err != nil {
 		return err
 	}

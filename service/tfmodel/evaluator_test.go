@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/tfmodel"
+	"github.com/viant/mly/service/tfmodel/signature"
 )
 
 func TestBasic(t *testing.T) {
@@ -19,7 +20,7 @@ func TestBasic(t *testing.T) {
 	model, err := tf.LoadSavedModel(modelDest, []string{"serve"}, nil)
 	assert.Nil(t, err)
 
-	signature, err := tfmodel.Signature(model)
+	signature, err := signature.Signature(model)
 	assert.Nil(t, err)
 	evaluator := tfmodel.NewEvaluator("test", signature, model.Session)
 
@@ -40,7 +41,7 @@ func TestBasicV2(t *testing.T) {
 	model, err := tf.LoadSavedModel(modelDest, []string{"serve"}, nil)
 	assert.Nil(t, err)
 
-	signature, err := tfmodel.Signature(model)
+	signature, err := signature.Signature(model)
 	assert.Nil(t, err)
 	evaluator := tfmodel.NewEvaluator("test", signature, model.Session)
 	feeds := make([]interface{}, 0)

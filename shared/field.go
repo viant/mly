@@ -7,12 +7,21 @@ import (
 type (
 	Field struct {
 		Name     string
-		Index    int
+		Index    int    // Position in cache key.
 		DataType string `json:",omitempty" yaml:",omitempty"`
 
+		// Indicates not an input for the model, but is eligible to
+		// be passed in a payload.
 		Auxiliary bool `json:",omitempty" yaml:",omitempty"`
-		Wildcard  bool `json:",omitempty" yaml:",omitempty"`
-		Precision int  `json:",omitempty" yaml:",omitempty"`
+
+		// Indicates, on its own, that it is an input for the model,
+		// and that it should be directly input as a cache key.
+		// Applies to string inputs.
+		Wildcard bool `json:",omitempty" yaml:",omitempty"`
+
+		// Indicates, on its own, that it is an input for the model,
+		// and that it should be directly input as a cache key.
+		Precision int `json:",omitempty" yaml:",omitempty"`
 
 		rawType reflect.Type
 	}
@@ -20,10 +29,17 @@ type (
 	Fields []*Field
 
 	MetaInput struct {
-		Inputs    []*Field
-		KeyFields []string `json:",omitempty" yaml:",omitempty"` // Deprecated: use Field.Wildcard
-		Auxiliary []string `json:",omitempty" yaml:",omitempty"` // Deprecated: use Field.Auxiliary
-		Outputs   []*Field `json:",omitempty" yaml:",omitempty"`
+		Inputs []*Field
+
+		// This is used to order inputs and provide extra caching information
+		// to the client.
+		// TODO rethink this, use a property on Field instead.
+		KeyFields []string `json:",omitempty" yaml:",omitempty"`
+
+		// Deprecated: use Field.Auxiliary
+		Auxiliary []string `json:",omitempty" yaml:",omitempty"`
+
+		Outputs []*Field `json:",omitempty" yaml:",omitempty"`
 	}
 )
 
@@ -96,13 +112,13 @@ func (m *MetaInput) Init() {
 			}
 		}
 	}
+
 	for i, input := range m.Inputs {
-		if input.Auxiliary { //this is an input for post model prediction transformer
-			m.Inputs[i].Index = -1 //unknown fields
-		}
 		if input.rawType == nil {
+			// default input type is string
 			input.rawType = reflect.TypeOf("")
 		}
+
 		m.Inputs[i].Index = i
 	}
 }
