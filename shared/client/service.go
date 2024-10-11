@@ -32,7 +32,7 @@ import (
 	"golang.org/x/net/http2"
 )
 
-//Service represent mly client
+// Service represent mly client
 type Service struct {
 	Config
 	hostIndex   int64
@@ -577,25 +577,20 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 			postErr = err
 			continue
 		}
-
 		var data []byte
-		if response.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("invalid response: %v, %s", response.StatusCode, data)
-		}
-
 		if response.Body != nil {
 			data, err = io.ReadAll(response.Body)
 			_ = response.Body.Close()
-
 			if err != nil {
 				postErr = err
 				continue
 			}
-
-			return data, nil
 		}
+		if response.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("invalid response: %v, %s", response.StatusCode, data)
+		}
+		return data, nil
 	}
-
 	return nil, postErr
 }
 
