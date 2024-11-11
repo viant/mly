@@ -40,7 +40,7 @@ func RunAppWithConfigError(version string, args []string, cp configProvider) err
 }
 
 // RunAppWithConfigWaitError is the full options versions.
-/// version is printed if provided in the options.
+// version is printed if provided in the options.
 // TODO auto-determine version.
 // cp is a function that can provide a configuration file.
 // wg.Done() will be called once, when the server is finished booting up.
