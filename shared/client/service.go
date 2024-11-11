@@ -33,7 +33,7 @@ import (
 	"golang.org/x/net/http2"
 )
 
-//Service represent mly client
+// Service represent mly client
 type Service struct {
 	Config
 	hostIndex   int64
