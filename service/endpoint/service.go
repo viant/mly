@@ -57,7 +57,7 @@ func (s *Service) Serve(l net.Listener) error {
 	tls := s.config.TLS
 
 	var err error
-	if tls == nil {
+	if tls != nil {
 		err = tls.Valid()
 		if err != nil {
 			return err
