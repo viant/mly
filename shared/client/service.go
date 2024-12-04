@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -406,7 +405,7 @@ func (s *Service) loadModelDictionary() error {
 		return err
 	}
 
-	data, err := ioutil.ReadAll(response.Body)
+	data, err := io.ReadAll(response.Body)
 	if err != nil {
 		stats.Append(err)
 		return fmt.Errorf("failed to read body: %w", err)
@@ -505,7 +504,7 @@ func (s *Service) discoverConfig(host *Host, URL string) (*config.Remote, error)
 	if err != nil {
 		return nil, err
 	}
-	data, err := ioutil.ReadAll(response.Body)
+	data, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
