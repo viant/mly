@@ -394,16 +394,17 @@ func (s *Service) loadModelDictionary() error {
 	httpClient := s.getHTTPClient(host)
 	response, err := httpClient.Get(URL)
 	if err != nil {
-		// no context errors supported
 		stats.Append(err)
 		return fmt.Errorf("failed to load Dictionary: %w", err)
 	}
 
 	if response.Body == nil {
-		err = fmt.Errorf("unable to load dictioanry body was empty")
+		err = fmt.Errorf("unable to load dictionary body was empty")
 		stats.Append(err)
 		return err
 	}
+
+	defer response.Body.Close()
 
 	data, err := io.ReadAll(response.Body)
 	if err != nil {
@@ -636,8 +637,8 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 
 			var data []byte
 			if response.Body != nil {
+				defer response.Body.Close()
 				data, err = io.ReadAll(response.Body)
-				_ = response.Body.Close()
 			}
 
 			if response.StatusCode != http.StatusOK {
