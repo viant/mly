@@ -101,6 +101,11 @@ func (s *Service) Do(ctx context.Context, request *request.Request, response *Re
 	return nil
 }
 
+// do is the main entrypoint for using the service.
+// First run validation (just checks if all required fields are present).
+// Then run evaluation (which can be immediate or time-batched).
+// Then (in buildResponse) runs the transformer (if any).
+// Then (in buildResponse in transformOutput) stores the result in the datastore if configured.
 func (s *Service) do(ctx context.Context, request *request.Request, response *Response) error {
 	startTime := time.Now()
 	onDone := s.serviceMetric.Operation.Begin(startTime)
@@ -161,6 +166,7 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	return result, nil
 }
 
+// buildResponse handles single and batched requests for calling transformOutput().
 func (s *Service) buildResponse(ctx context.Context, request *request.Request, response *Response, tensorValues []interface{}) error {
 	dictionary := s.Dictionary()
 	if dictionary != nil {
@@ -208,6 +214,7 @@ func (s *Service) buildResponse(ctx context.Context, request *request.Request, r
 	return nil
 }
 
+// transformOutput runs the transformer (if any) and stores the result in the datastore if configured.
 func (s *Service) transformOutput(ctx context.Context, request *request.Request, output interface{}) (common.Storable, error) {
 	inputIndex := 0
 	if out, ok := output.(*shared.Output); ok {
@@ -231,11 +238,11 @@ func (s *Service) transformOutput(ctx context.Context, request *request.Request,
 		go func() {
 			err := s.datastore.Put(ctx, key, transformed, dictHash)
 			if err != nil {
-				log.Printf("[%s trout] put error:%v", s.config.ID, err)
+				log.Printf("[%s trout] put error: \"%s\" %v", s.config.ID, cacheKey, err)
 			}
 
 			if s.config.Debug {
-				log.Printf("[%s trout] put:\"%s\" dictHash:%d ok", s.config.ID, cacheKey, dictHash)
+				log.Printf("[%s trout] put: \"%s\" dictHash: %d ok", s.config.ID, cacheKey, dictHash)
 			}
 		}()
 	}
