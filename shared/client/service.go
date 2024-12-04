@@ -360,16 +360,17 @@ func (s *Service) loadModelDictionary() error {
 	httpClient := s.getHTTPClient(host)
 	response, err := httpClient.Get(URL)
 	if err != nil {
-		// no context errors supported
 		stats.Append(err)
 		return fmt.Errorf("failed to load Dictionary: %w", err)
 	}
 
 	if response.Body == nil {
-		err = fmt.Errorf("unable to load dictioanry body was empty")
+		err = fmt.Errorf("unable to load dictionary body was empty")
 		stats.Append(err)
 		return err
 	}
+
+	defer response.Body.Close()
 
 	data, err := io.ReadAll(response.Body)
 	if err != nil {
@@ -565,11 +566,54 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 	evalUrl := host.evalURL(s.Model)
 	var postErr error
 	for i := 0; i < s.MaxRetry; i++ {
+<<<<<<< HEAD
 		postErr = nil
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, evalUrl, bytes.NewReader(data))
 		if err != nil {
 			return nil, err
 		}
+=======
+		data, err := func() ([]byte, error) {
+			onDone := s.httpCliCounter.Begin(time.Now())
+			stats := stat.NewValues()
+
+			defer func() {
+				onDone(time.Now(), stats.Values()...)
+			}()
+
+			request, err := http.NewRequestWithContext(ctx, http.MethodPost, evalUrl, bytes.NewReader(data))
+			if err != nil {
+				stats.AppendError(err)
+				return nil, err
+			}
+
+			response, err := s.httpClient.Do(request)
+			if s.Config.Debug {
+				log.Printf("http try:%d err:%s", i, err)
+			}
+
+			if err != nil {
+				stats.AppendError(err)
+				return nil, err
+			}
+
+			var data []byte
+			if response.Body != nil {
+				defer response.Body.Close()
+				data, err = io.ReadAll(response.Body)
+			}
+
+			if response.StatusCode != http.StatusOK {
+				// as long as this func is run synchronously,
+				// this is safe
+				terminate = true
+				return nil, fmt.Errorf("HTTP Code:%d, Body:\"%s\" (read nil:%v error:%v)",
+					response.StatusCode, string(data), response.Body == nil, err)
+			}
+
+			return data, nil
+		}()
+>>>>>>> 6226dd6 (Fix missing Close() in shared/client.(*Service).loadModelDictionary(), fix typo, use defer for Close() instead of ignored output call.)
 
 		response, err := s.httpClient.Do(request)
 		if err != nil {
