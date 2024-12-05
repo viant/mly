@@ -3,13 +3,7 @@
 [![GoReportCard](https://goreportcard.com/badge/github.com/viant/mly)](https://goreportcard.com/report/github.com/viant/mly)
 [![GoDoc](https://godoc.org/github.com/viant/mly?status.svg)](https://godoc.org/github.com/viant/mly)
 
-This library is compatible with Go 1.17+
-
-- [Introduction](#introduction)
-- [Configuration](#configuration)  
-- [Usage](#usage)
-- [Contribution](#contributing-to-mly)
-- [License](#license)
+This library is compatible with Go 1.22+
 
 # Introduction
 
@@ -122,16 +116,16 @@ To code a server executable you can use the following code:
 package main
 
 import (
-	"github.com/viant/mly/service/endpoint"
-	"os"
+    "github.com/viant/mly/service/endpoint"
+    "os"
 )
 
 const (
-	Version = "1.0"
+	  Version = "1.0"
 )
 
 func main() {
-	endpoint.RunApp(Version, os.Args)
+	  endpoint.RunApp(Version, os.Args)
 }
 ```
 
@@ -141,32 +135,34 @@ func main() {
 package main
 
 import (
-  "context"
-  "fmt"
-  "github.com/viant/mly/shared/client"
-  "log"
+    "context"
+    "fmt"
+    "github.com/viant/mly/shared/client"
+    "log"
 )
 
 type Prediction struct {
-  Output float32
+    Output float32
 }
 
 func main() {
-  mly, err := client.New("$modelID", []*client.Host{client.NewHost("mlyEndpointHost", 8080)})
-  if err != nil {
-    log.Fatal(err)
-  }
-  response := &client.Response{Data: &Prediction{}}
-  msg := mly.NewMessage()
-  msg.StringKey("input1", "val1")
-  //....
-  msg.IntKey("inputN", 1)
+    mly, err := client.New("$modelID", []*client.Host{client.NewHost("mlyEndpointHost", 8080)})
+    if err != nil {
+        log.Fatal(err)
+    }
 
-  err = mly.Run(context.TODO(), msg, response)
-  if err != nil {
-    log.Fatal(err)
-  }
-  fmt.Printf("response: %+v\n", response)
+    response := &client.Response{Data: &Prediction{}}
+    msg := mly.NewMessage()
+    msg.StringKey("input1", "val1")
+    //....
+    msg.IntKey("inputN", 1)
+
+    err = mly.Run(context.TODO(), msg, response)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Printf("response: %+v\n", response)
 }
 ```
 
