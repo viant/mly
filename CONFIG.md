@@ -54,3 +54,20 @@ The server accepts configuration with the following options:
 * `EnableCPUProf`: `bool` - optional - enables endpoint for cpu profiling.
 * `AllowedSubnet`: `bool` - optional - restricts administrative endpoints to IP string prefixes.
   - Restricts the system configuration, memory profile, CPU profile, and health endpoints.
+
+## Client
+ 
+`mly` client does not come with an external config file.
+
+To create a client, use the following snippet:
+
+```go
+mly := client.New("$modelID", []*client.Host{client.NewHost("mlServiceHost", mlServicePort)}, options ...)
+```
+
+Where optional `options` can be of, but not limited to, the following:
+  * `NewCacheSize(sizeOption)`
+  * `NewCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)`
+  * `NewGmetric()` - custom instance of `gmetric` service
+
+See [`shared/client/option.go`](shared/client/option.go) for more options. 
