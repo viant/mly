@@ -5,7 +5,6 @@
 
 This library is compatible with Go 1.17+
 
-- [Motivation](#motivation)
 - [Introduction](#introduction)
 - [Configuration](#configuration)  
 - [Usage](#usage)
@@ -30,7 +29,7 @@ The web service supports multiple TensorFlow model integrations on the URI level
 The service automatically detects and reloads any model changes; it will poll the source files for modifications once a minute.
 Technically, any HTTP client can work with the service, but the provided client provides extra caching support.
 
-# Quickstart
+# Quick Start
 
 To start a HTTP service with a model, from the repository root:
 
@@ -57,11 +56,8 @@ The main performance benefit comes from trading compute with space.
 
 In order to leverage caching, the model has to use categorical features with a fixed vocabulary, with the input space providing a reasonable cache hit rate.
 
-As of `v0.8.0`, numeric features are supported. 
-The cache space is reduced by limiting decimal precision.
-
-Until `v0.8.0`, only `StringLookup` and `IntegerLookup` layers are supported for caching.
-In terms of practical limits, only models with categorical features can be cached; even numeric values can theoretically be cached, if a given level of input precision loss is acceptable.
+Categorical features can be cached, and out-of-dictionary values will be cached using the `UNK` token.
+Numerical features can be cached limiting decimal precision, otherwise it is not recommended to leverage the cache for models with numerical features.
 
 By default, the client will configure itself using the web service cache settings.  
 This enables the `mly` client to handle key generation without additional configuration or code.
@@ -114,77 +110,7 @@ Once a client detects a change in dictionary hash code, it automatically initiat
 
 # Configuration
 
-## Server
-
-See [`service/endpoint/config.go`](service/endpoint/config.go).
-The server accepts configuration with the following options:
-
-* `Models` : list of models - see [`service/config/model.go`](service/config/model.go) for all options.
-  - `ID`: `string` - required - model ID, used to generate the URLs.
-  - `Debug`: `bool` - optional - enables further output and debugging.
-  - `URL`: `string` - required - model location source.
-    * to use S3, set environment variable `AWS_SDK_LOAD_CONFIG=true`
-    * to use GCS, set environment variable `GOOGLE_APPLICATION_CREDENTIALS=true`
-  - `DataStore`: `string` - optional - name of Datastore to cache, should match `Datastores[].ID`.
-  - `Transformer`: `string` - optional - name of model output transformer. See [#Transformer](#Transformer).
-  - `Batch`: optional - enables or overrides server-side batching configuration. See [`service/tfmodel/batcher/config/config.go`](service/tfmodel/batcher/config/config.go).
-  - `Test`: optional - enables a client request to send to self on start up.
-    * `Test`: `bool` - if `true`, a client will generate a non-batch request with random values based on the model input signature.
-    * `Single`: `map[string]interface{}` - if present, will use the provided values for certain input keys, otherwise randomly generated based on model input signature.
-    * `SingleBatch`: `bool` - if `true`, a client will generate a batch request with random values based on the model input signature; if `Single` is set, values will be used for provided keys.
-    * `Batch`: `map[string][]interface{}` - if present, will be used to generate a batch of requests for the self-test.
-  - `Inputs`: optional - used to further provide or define inputs, a list of `shared.Field`.
-    * `Name`: `string` - required - input name, only required if an entry is provided.
-    * `Index`: `int` - optional - used to maintain cache key ordering.
-    * `Auxiliary`: `bool` - optional - the input is permitted to be provided in an evaluation request.
-    * `Wildcard`: `bool` - conditionally required - if enabled this input will not have a vocabulary for lookup; if `UseDict` is true, the service will refuse to start if it cannot guess the vocabulary extraction Operation. 
-    * `Precision`: `int` - conditionally required - if the input is a float type and dictionary is enabled, this can be used to round the value to a lower precision which can improve cache hit rates; if `UseDict` is true, the service will refuse to start if it encounters a float input without a `Precision`.
-  - `KeyFields`: `[]string` - optional - list of fields used to generate caching key (by default, all model inputs, sorted alphabetically). Can be used to order and add valid inputs that can be used as a cache key but not used as prediction input.
-  - `Auxiliary`: `[]string` - deprecated, optional - list of additional fields that are acceptable for eval server call. Deprecated, use `Field.Auxiliary`.
-  - `Outputs`: `[]shared.Field` - deprecated, optional - model outputs are automatically pulled from the model.
-    
-* `Connection`: optional - list of external Aerospike connections.
-  - `ID`: `string` - required - connection ID
-  - `Hostnames`: `string` - required - Aerospike hostnames
-
-* `Datastores` : list of datastore caches
-  - `ID`: `string` - required - datastore ID (to be matched with `Models[].DataStores[].ID`)
-  - `Connection`: `string` - optional - connection ID
-  - `Namespace`: `string` - optional - Aerospike namespace
-  - `Dataset`: `string` - optional - Aerospike dataset 
-  - `Storable`: `string` - optional - name of registered `storable` provider
-  - `Cache`: optional - in-memory cache setting
-    * `SizeMB`: `int` - optional - cache size in MB
-
-* `Endpoint`: some special administrative options
-  - `Port`: `int` - optional - used in `addr` for `http.Server`, default `8080`.
-  - `ReadTimeoutMs`, `WriteTimeoutMs`: `int` - optional - additional settings for `http.Server`, default `5000` for both.
-  - `MaxHeaderBytes`: `int` - optional - additional settings for `http.Server`, default `8192` (`8 * 1024`).
-  - `WriteTimeout`: `int` - optional - maximum request timeout.
-  - `PoolMaxSize`, `BufferSize`: `int` - optional - controls implementation of `net/http/httputil`, default `512` and `131072` (`128 * 1024`), respectively.
-  - `MaxEvaluatorConcurrency`: `int` - optional - controls semaphore that prevents too many CGo goroutines from spawning, default `5000`.
-
-* `EnableMemProf`: `bool` - optional - enables endpoint for memory profiling.
-* `EnableCPUProf`: `bool` - optional - enables endpoint for cpu profiling.
-* `AllowedSubnet`: `bool` - optional - restricts administrative endpoints to IP string prefixes.
-  - Restricts the system configuration, memory profile, CPU profile, and health endpoints.
-
-## Client
- 
-`mly` client does not come with an external config file.
-
-To create a client, use the following snippet:
-
-```go
-mly := client.New("$modelID", []*client.Host{client.NewHost("mlServiceHost", mlServicePort)}, options ...)
-```
-
-Where optional `options` can be of, but not limited to, the following:
-  * `NewCacheSize(sizeOption)`
-  * `NewCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)`
-  * `NewGmetric()` - custom instance of `gmetric` service
-
-See [`shared/client/option.go`](shared/client/option.go) for more options. 
+[See `CONFIG.md`](CONFIG.md).
 
 # Usage
 
@@ -246,41 +172,9 @@ func main() {
 
 # Transformer 
 
-By default, the model signature output name alongside the model prediction gets used to produce cachable output.
-This process can be customized for specific needs.
+By default, the model signature outputs the layer names alongside the model prediction to produce cachable output.
 
-A custom transformer has to use the following function signature:
-
-```go
-type Transformer func(ctx context.Context, signature *Signature, input *gtly.Object, output interface{}) (common.Storable, error)
-```
-
-Then to register the transformer:
-
-```go
-import "github.com/viant/mly/service/domain/transformer"
-
-func init() {
-  transformer.Register("myTransformer", aTransformer)
-}
-```
-
-Optionally you can implement a `storable` provider.
-
-```go
-import "github.com/viant/mly/service/domain/transformer"
-
-func init() {
-  transformer.Register("myType", func() interface{} {
-      return &MyOutputType{}
-  })
-}
-```
-
-Where `MyOutputType` could implement the following interfaces to avoid reflection:
-- [Storable](shared/common/storable.go) (Aerospike storage)
-- [Bintly](https://github.com/viant/bintly) (in-memory serialization)
-- [Gojay JSON](https://github.com/francoispqt/gojay/) (HTTP response)
+See [`TRANSFORMER.md`](TRANSFORMER.md) for more details.
 
 # Server Endpoints
 
@@ -364,9 +258,12 @@ all compatible with Apache License, Version 2. Please see individual files for d
 
 `mly` is an open source project and contributors are welcome!
 
-# Major Versions
+# Versioning Notes
 
-- v0.14.1 last support for go 1.17
+- `v0.14.1` last support for go 1.17
+- `v0.8.0` - numeric features are supported. 
+
+Until `v0.8.0`, only `StringLookup` and `IntegerLookup` layers are supported for caching.
 
 # Credits and Acknowledgements
 
