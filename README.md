@@ -364,6 +364,10 @@ all compatible with Apache License, Version 2. Please see individual files for d
 
 `mly` is an open source project and contributors are welcome!
 
+# Major Versions
+
+- v0.14.1 last support for go 1.17
+
 # Credits and Acknowledgements
 
 **Initial Author:** Adrian Witas
