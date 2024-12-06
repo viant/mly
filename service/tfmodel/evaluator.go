@@ -8,12 +8,12 @@ import (
 	"runtime/debug"
 	"runtime/trace"
 
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/domain"
+	tf "github.com/wamuir/graft/tensorflow"
 )
 
-//Evaluator represents evaluator
+// Evaluator represents evaluator
 type Evaluator struct {
 	id string
 
@@ -35,7 +35,7 @@ func (e *Evaluator) feeds(feeds []interface{}) (map[tf.Output]*tf.Tensor, error)
 	return result, nil
 }
 
-//Evaluate evaluates model
+// Evaluate evaluates model
 func (e *Evaluator) Evaluate(params []interface{}) ([]interface{}, error) {
 	ctx := context.Background()
 
@@ -100,12 +100,12 @@ func (e *Evaluator) Evaluate(params []interface{}) ([]interface{}, error) {
 
 }
 
-//Close closes evaluator
+// Close closes evaluator
 func (e *Evaluator) Close() error {
 	return e.session.Close()
 }
 
-//NewEvaluator creates new evaluator
+// NewEvaluator creates new evaluator
 func NewEvaluator(id string, signature *domain.Signature, session *tf.Session) *Evaluator {
 	fetches := []tf.Output{}
 	for _, output := range signature.Outputs {

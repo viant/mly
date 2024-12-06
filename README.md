@@ -27,22 +27,61 @@ Technically, any HTTP client can work with the service, but the provided client 
 
 To start a HTTP service with a model, from the repository root:
 
-1. Create a `config.yaml` file:
+### 1 Have a TensorFlow model
+
+If you don't have a TensorFlow model, this is most likely an inappropriate use case for this application.
+Alternatively, you can use the provided example models in `example/model`.
+
+### 2 Install TensorFlow
+
+Install TensorFlow following the [Golang Install Guide](https://github.com/tensorflow/build/tree/master/golang_install_guide).
+Note there are some caveats with `libtensorflow` installations outside `/usr/local/lib`.
+
+### 3 Configuration
+
+Create a `config.yaml` file:
 
 ```yaml
 Endpoint:
   Port: 8086
 Models:
-  - ID: ml0
-    URL: /path/to/model/ml0
+  - ID: sli
+    URL: /path/to/repo/example/model/string_lookups_int_model
 ```
 
-The `URL` is loaded using [afs](https://github.com/viant/afs).
+Note: The `URL` is loaded using [afs](https://github.com/viant/afs).
 
-2. Start the example server in the background with `go run ./example/server -c config.yaml &`.
-3. Then invoke a prediction with `curl 'http://localhost:8086/v1/api/model/ml0/eval?modelInput1=val1&modelInputX=valueX'`.
-4. Bring the server to the foreground by using the command `fg` .
-5. Use Ctrl+C to terminate the server.
+### 4 Run the server
+
+Start the example server in the background with:
+
+```bash
+go run ./example/server/mly -c config.yaml &
+```
+
+If you did not [use the Linker](https://www.tensorflow.org/install/lang_c#linker), you need to specify the appropriate Cgo flags:
+
+Note: Replace `$PATH_TO_LIBTENSORFLOW` with your TensorFlow installation.
+
+```bash
+# for go build, it is recommended to use LD_LIBRARY_PATH (or DYLD_LIBRARY_PATH on macOS) instead of -Wl,-rpath,$PATH_TO_LIBTENSORFLOW/lib
+CGO_CFLAGS="-I$PATH_TO_LIBTENSORFLOW/include" \
+CGO_LDFLAGS="-L$PATH_TO_LIBTENSORFLOW/lib  -Wl,-rpath,$PATH_TO_LIBTENSORFLOW/lib" \
+go run ./example/server/mly -c config.yaml &
+```
+
+### 5 Invoke a prediction
+
+Invoke a prediction with 
+
+```bash
+curl 'http://localhost:8086/v1/api/model/sli/eval?sa=v2&sl=v3&aux=v4&kf=v1'
+```
+
+### 6 Terminate the server
+
+Bring the server to the foreground by using the command `fg` .
+Use Ctrl+C to terminate the server.
 
 # Caching
 
@@ -256,8 +295,27 @@ all compatible with Apache License, Version 2. Please see individual files for d
 
 # Versioning Notes
 
-- `v0.14.1` last support for go 1.17
-- `v0.8.0` - numeric features are supported. 
+## API Surface
+
+In semantic versioning, it is required to define what the API surface covers, which will include:
+
+* Public Go modules, structs, functions, etc.
+* HTTP endpoints, including metric endpoints.
+* Command line flags, environment variables, [configuration file](service/endpoint/config.go) and formats.
+* [Data log entity schema](service/stream/service.go).
+* Edge case behavior changes, by default, will be a patch version bump.
+* Bug fixes will be a patch version bump.
+
+### Other notes
+
+Cache key generation logic is permanently tied to the client version.
+Changes to the cache key generation logic will result in a new client module version, and semantic versioning will follow accordingly.
+
+## Noted versions
+
+- `v0.14.4` - migrated TensorFlow Go from `tensorflow/tensorflow` to `wamuir/graft`
+- `v0.14.2` - go 1.17 to go 1.22
+- `v0.8.0` - numeric features are supported
 
 Until `v0.8.0`, only `StringLookup` and `IntegerLookup` layers are supported for caching.
 

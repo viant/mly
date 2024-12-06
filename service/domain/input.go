@@ -3,7 +3,7 @@ package domain
 import (
 	"reflect"
 
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	tf "github.com/wamuir/graft/tensorflow"
 )
 
 type Input struct {

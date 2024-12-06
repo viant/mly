@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/domain"
+	tf "github.com/wamuir/graft/tensorflow"
 )
 
 // Signature searches the Tensorflow operation graph for inputs and outputs.

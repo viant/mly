@@ -315,9 +315,11 @@ func (s *Service) reloadIfNeeded(ctx context.Context) error {
 // NewRequest should be used for Do()
 func (s *Service) NewRequest() *request.Request {
 	numKeyInputs := s.config.KeysLen()
+
 	// This may change mid-request, but that only matters
 	// under exceptional circumstances.
 	inputs := s.tfService.Inputs()
+
 	return request.NewRequest(numKeyInputs, inputs)
 }
 

@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
 	"github.com/viant/afs/option"
 	"github.com/viant/gmetric"
@@ -28,6 +27,7 @@ import (
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/stat"
+	tf "github.com/wamuir/graft/tensorflow"
 	"golang.org/x/sync/semaphore"
 	"gopkg.in/yaml.v2"
 )

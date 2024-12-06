@@ -12,7 +12,6 @@ import (
 	"reflect"
 	"sort"
 
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
 	"github.com/viant/afs/file"
 	"github.com/viant/afs/url"
@@ -26,6 +25,7 @@ import (
 	dconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/config/datastore"
 	"github.com/viant/scache"
+	tf "github.com/wamuir/graft/tensorflow"
 	"gopkg.in/yaml.v3"
 )
 
