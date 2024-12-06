@@ -295,6 +295,24 @@ all compatible with Apache License, Version 2. Please see individual files for d
 
 # Versioning Notes
 
+## API Surface
+
+In semantic versioning, it is required to define what the API surface covers, which will include:
+
+* Public Go modules, structs, functions, etc.
+* HTTP endpoints, including metric endpoints.
+* Command line flags, environment variables, [configuration file](service/endpoint/config.go) and formats.
+* [Data log entity schema](service/stream/service.go).
+* Edge case behavior changes, by default, will be a patch version bump.
+* Bug fixes will be a patch version bump.
+
+### Other notes
+
+Cache key generation logic is permanently tied to the client version.
+Changes to the cache key generation logic will result in a new client module version, and semantic versioning will follow accordingly.
+
+## Noted versions
+
 - `v0.14.4` - migrated TensorFlow Go from `tensorflow/tensorflow` to `wamuir/graft`
 - `v0.14.2` - go 1.17 to go 1.22
 - `v0.8.0` - numeric features are supported
