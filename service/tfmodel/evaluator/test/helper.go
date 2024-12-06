@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/tfmodel/evaluator"
 	"github.com/viant/mly/service/tfmodel/signature"
 	tfstat "github.com/viant/mly/service/tfmodel/stat"
+	tf "github.com/wamuir/graft/tensorflow"
 	"golang.org/x/sync/semaphore"
 )
 

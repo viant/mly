@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/jessevdk/go-flags"
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/afs"
+	tf "github.com/wamuir/graft/tensorflow"
 
 	slog "log"
 	"strings"

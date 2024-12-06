@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/service/tfmodel/signature"
+	tf "github.com/wamuir/graft/tensorflow"
 )
 
 func TestBasic(t *testing.T) {

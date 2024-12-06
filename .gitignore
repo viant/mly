@@ -1,4 +1,8 @@
+.vscode
+__debug_bin*
 .idea
 *.swp
 .DS_Cache
 /vendor
+# default go build output
+/mly

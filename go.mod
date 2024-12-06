@@ -13,7 +13,6 @@ require (
 	github.com/onsi/gomega v1.20.2 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.8.1
-	github.com/tensorflow/tensorflow v2.4.2+incompatible
 	github.com/viant/afs v1.16.1-0.20221201181023-455837320ec5
 	github.com/viant/afsc v1.8.0
 	github.com/viant/bintly v0.2.0
@@ -33,12 +32,12 @@ require (
 	github.com/cyningsun/heavy-hitters v0.0.0-20230601160639-238b21a6ddce
 	github.com/migotom/heavykeeper v0.0.0-20230118182531-d6958b4bb326
 	github.com/prometheus/client_golang v1.16.0
+	github.com/wamuir/graft v0.9.0
 	golang.org/x/sync v0.8.0
 )
 
 require (
 	cloud.google.com/go v0.105.0 // indirect
-	cloud.google.com/go/compute v1.14.0 // indirect
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	cloud.google.com/go/iam v0.7.0 // indirect
 	cloud.google.com/go/storage v1.27.0 // indirect
@@ -50,7 +49,6 @@ require (
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.2.0 // indirect
 	github.com/googleapis/gax-go/v2 v2.7.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	tf "github.com/wamuir/graft/tensorflow"
 )
 
 const (
@@ -45,7 +45,7 @@ func MatchOperation(graph *tf.Graph, name string) string {
 	return ""
 }
 
-//RunExport runs export
+// RunExport runs export
 func RunExport(session *tf.Session, exportOp *tf.Operation) (interface{}, error) {
 	ipOutput := exportOp.Output(0)
 	feeds := map[tf.Output]*tf.Tensor{}

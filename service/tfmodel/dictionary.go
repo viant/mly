@@ -5,9 +5,9 @@ import (
 	"sort"
 	"unsafe"
 
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/common"
+	tf "github.com/wamuir/graft/tensorflow"
 )
 
 // Dictionary uses domain.Signature to determine which inputs should have an encoding lookup

@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	tf "github.com/tensorflow/tensorflow/tensorflow/go"
 	"github.com/viant/mly/service/clienterr"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/stat"
 	"github.com/viant/mly/shared/stat/metric"
+	tf "github.com/wamuir/graft/tensorflow"
 )
 
 // Represents a TF session for running predictions.
