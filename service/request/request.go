@@ -54,6 +54,9 @@ func NewRequest(keyLen int, inputs map[string]*domain.Input) *Request {
 func (r *Request) Put(key string, value string) error {
 	if input, ok := r.inputs[key]; ok {
 		r.supplied[key] = exists
+		if input.Auxiliary {
+			return nil
+		}
 
 		switch input.Type.Kind() {
 		case reflect.String:
