@@ -4,6 +4,7 @@ import (
 	"github.com/viant/gmetric"
 	cconfig "github.com/viant/mly/shared/client/config"
 	"github.com/viant/mly/shared/datastore"
+	dscli "github.com/viant/mly/shared/datastore/client"
 )
 
 // Option is a pattern to apply a client option.
@@ -86,7 +87,7 @@ func (o *clientRemoteOption) Apply(c *Service) {
 	c.Config.Datastore.Init()
 }
 
-// WithRemoteConfig will provide a coded configuration instead of sending a request
+// WithRemoteConfig will provide a hard-coded configuration instead of sending a request
 // to the mly server to fetch the configuration.
 func WithRemoteConfig(config *cconfig.Remote) Option {
 	return &clientRemoteOption{config: config}
@@ -117,4 +118,18 @@ func (o *storerOption) Apply(c *Service) {
 // determining it based off configuration values.
 func WithDataStorer(storer datastore.Storer) Option {
 	return &storerOption{storer: storer}
+}
+
+type connectionSharingOption struct {
+	connections map[string]*dscli.Service
+}
+
+func (o *connectionSharingOption) Apply(c *Service) {
+	c.connections = o.connections
+}
+
+// WithConnectionSharing enables Aerospike connection sharing.
+// Note that connections are shared via ID, not by Hostnames.
+func WithConnectionSharing(connections map[string]*dscli.Service) Option {
+	return &connectionSharingOption{connections: connections}
 }

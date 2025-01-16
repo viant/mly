@@ -24,6 +24,7 @@ import (
 	"github.com/viant/mly/shared/common/storable"
 	sconfig "github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore"
+	"github.com/viant/mly/shared/datastore/client"
 	"github.com/viant/mly/shared/stat"
 	"github.com/viant/mly/shared/stat/metric"
 	"github.com/viant/mly/shared/tracker"
@@ -35,17 +36,26 @@ import (
 // Service represent mly client
 type Service struct {
 	Config
+
 	hostIndex   int64
 	httpClient  http.Client
 	newStorable func() common.Storable
 
 	messages Messages
-	poolErr  error
 
+	// Lock for dictionary.
 	sync.RWMutex
 	dict               *Dictionary
 	dictRefreshPending int32
-	datastore          datastore.Storer
+
+	// Override via WithDataStorer()
+	// nil safe.
+	datastore datastore.Storer
+
+	// Override via WithConnectionSharing().
+	// nil safe.
+	// TODO refactor out to a "Factory" context?
+	connections map[string]*client.Service
 
 	// container for Datastore gmetric objects
 	gmetrics *gmetric.Service
@@ -281,11 +291,7 @@ func (s *Service) dictionary() *Dictionary {
 	return dict
 }
 
-func (s *Service) init(options []Option) error {
-	for _, option := range options {
-		option.Apply(s)
-	}
-
+func (s *Service) init() error {
 	if s.gmetrics == nil {
 		s.gmetrics = gmetric.New()
 	}
@@ -314,11 +320,13 @@ func (s *Service) init(options []Option) error {
 			return err
 		}
 	}
+
 	if s.dict == nil {
 		if err := s.loadModelDictionary(); err != nil {
 			return err
 		}
 	}
+
 	if ds := s.Config.Datastore; ds != nil {
 		ds.Init()
 		if err = ds.Validate(); err != nil {
@@ -330,6 +338,7 @@ func (s *Service) init(options []Option) error {
 		err := s.initDatastore()
 		return err
 	}
+
 	s.messages = NewMessages(s.dictionary)
 	return nil
 }
@@ -451,7 +460,7 @@ func (s *Service) initDatastore() error {
 		Connections: remoteCfg.Connections,
 	}
 
-	if stores, err = datastore.NewStores(datastores, s.gmetrics); err != nil {
+	if stores, err = datastore.NewStoresV3(datastores, s.gmetrics, s.Config.Debug, s.connections); err != nil {
 		return err
 	}
 
@@ -494,7 +503,12 @@ func New(model string, hosts []*Host, options ...Option) (*Service, error) {
 			Hosts: hosts,
 		},
 	}
-	err := aClient.init(options)
+
+	for _, option := range options {
+		option.Apply(aClient)
+	}
+
+	err := aClient.init()
 	return aClient, err
 }
 
