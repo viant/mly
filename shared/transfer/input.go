@@ -21,7 +21,7 @@ func (i *Input) Init(size int) {
 }
 
 func (i *Input) KeyAt(index int) string {
-	if len(i.Keys.Values) < index {
+	if len(i.Keys.Values) <= index {
 		return ""
 	}
 
