@@ -133,3 +133,16 @@ func (o *connectionSharingOption) Apply(c *Service) {
 func WithConnectionSharing(connections map[string]*dscli.Service) Option {
 	return &connectionSharingOption{connections: connections}
 }
+
+type clientOptionsOption struct {
+	clientOptions []dscli.Option
+}
+
+func (o *clientOptionsOption) Apply(c *Service) {
+	c.clientOptions = o.clientOptions
+}
+
+// WithClientOptions adds shared/datastore/client.Option options.
+func WithClientOptions(clientOptions ...dscli.Option) Option {
+	return &clientOptionsOption{clientOptions: clientOptions}
+}

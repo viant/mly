@@ -12,24 +12,31 @@ import (
 	"github.com/viant/mly/shared/stat"
 )
 
-// Deprecated: use NewStoresV2 or NewStoresV3 instead.
+// Deprecated: use NewStoresV4.
 func NewStores(cfg *config.DatastoreList, gmetrics *gmetric.Service) (map[string]*Service, error) {
 	return NewStoresV2(cfg, gmetrics, false)
 }
 
-// NewStoresV2 verbose enables logging of connections.
-// Deprecated: use NewStoresV3.
+// NewStoresV2 verbose enables logging of connections on creation.
+// Deprecated: use NewStoresV4.
 func NewStoresV2(cfg *config.DatastoreList, gmetrics *gmetric.Service, verbose bool) (map[string]*Service, error) {
 	return NewStoresV3(cfg, gmetrics, verbose, nil)
 }
 
-// NewStoresV3 creates new stores.
-// verbose enables logging of connections.
+// NewStoresV3 creates new stores, see NewStoresV2 for more information.
 // connections is a map of connections to be used for datastores.
 // Note that connections shares via ID, not by Hostnames.
+// Deprecated: use NewStoresV4.
 func NewStoresV3(cfg *config.DatastoreList, gmetrics *gmetric.Service, verbose bool, connections map[string]*client.Service) (map[string]*Service, error) {
+	return NewStoresV4(cfg, gmetrics, verbose, connections, make([]client.Option, 0))
+}
+
+// NewStoresV4 creates new stores, see NewStoresV3 for more information.
+// Adds support for []client.Option.
+func NewStoresV4(cfg *config.DatastoreList, gmetrics *gmetric.Service, verbose bool,
+	connections map[string]*client.Service, clientOptions []client.Option) (map[string]*Service, error) {
+
 	var result = make(map[string]*Service)
-	location := reflect.TypeOf(Service{}).PkgPath()
 
 	if connections == nil {
 		connections = make(map[string]*client.Service)
@@ -46,7 +53,7 @@ func NewStoresV3(cfg *config.DatastoreList, gmetrics *gmetric.Service, verbose b
 				continue
 			}
 
-			aero, err := client.New(connection)
+			aero, err := client.NewWithOptions(connection, clientOptions...)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create client for %v, due to %w", connID, err)
 			}
@@ -69,6 +76,7 @@ func NewStoresV3(cfg *config.DatastoreList, gmetrics *gmetric.Service, verbose b
 
 		var rctr, wctr *gmetric.Operation
 		if dbID != "" {
+			location := reflect.TypeOf(Service{}).PkgPath()
 			rctr = gmetrics.MultiOperationCounter(location, dbID, dbID+" read cache performance", time.Microsecond, time.Minute, 2, stat.NewCache())
 			wctr = gmetrics.MultiOperationCounter(location, dbID+"CacheW", dbID+" write cache performance", time.Microsecond, time.Minute, 2, stat.NewWrite())
 		}

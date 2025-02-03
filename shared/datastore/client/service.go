@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	aero "github.com/aerospike/aerospike-client-go"
@@ -16,16 +15,24 @@ import (
 // Service represents aerospike client Service
 type Service struct {
 	*aero.Client
-	config       *datastore.Connection
-	basePolicy   *aero.BasePolicy
+
+	config *datastore.Connection
+
+	// bypassConfiguredTimeout is used to bypass the configured timeout if using WithClientPolicy or WithBasePolicy.
+	bypassConfiguredTimeout bool
+
+	// basePolicy can be overridden by WithBasePolicy.
+	// Even when overridden, the timeout will be applied UNLESS using WithBypassConfiguredTimeout.
+	basePolicy *aero.BasePolicy
+
+	// clientPolicy can be overridden by WithClientPolicy.
+	// Even when overridden, the timeout will be applied UNLESS using WithBypassConfiguredTimeout.
 	clientPolicy *aero.ClientPolicy
-	writePolicy  *aero.WritePolicy
-	mux          sync.RWMutex
-	key          *aero.Key
+
 	*circut.Breaker
 }
 
-//Get returns record for supplied key and optional bin names.
+// Get returns record for supplied key and optional bin names.
 func (s *Service) Get(ctx context.Context, key *aero.Key, binNames ...string) (record *aero.Record, err error) {
 	if !s.IsUp() {
 		return nil, common.ErrNodeDown
@@ -41,7 +48,7 @@ func (s *Service) Get(ctx context.Context, key *aero.Key, binNames ...string) (r
 }
 
 // Put puts a record to Aerospike.
-// TODO: Properly support context.
+// Context is not supported since the Aerospike library does not support it.
 func (s *Service) Put(writePolicy *aero.WritePolicy, key *aero.Key, value aero.BinMap) error {
 	if !s.IsUp() {
 		return common.ErrNodeDown
@@ -88,30 +95,49 @@ func (s *Service) hosts() []*aero.Host {
 	return hosts
 }
 
-func (s *Service) init() {
-	clientPolicy := aero.NewClientPolicy()
-	basePolicy := aero.NewPolicy()
+func (s *Service) init(options ...Option) {
+	for _, option := range options {
+		option(s)
+	}
 
-	timeout := s.config.Timeout
-	if timeout.Connection > 0 {
-		clientPolicy.Timeout = timeout.DurationUnit() * time.Duration(timeout.Connection)
+	clientPolicy := s.clientPolicy
+	if clientPolicy == nil {
+		clientPolicy = aero.NewClientPolicy()
+		s.clientPolicy = clientPolicy
 	}
-	if timeout.Socket > 0 {
-		basePolicy.SocketTimeout = timeout.DurationUnit() * time.Duration(timeout.Socket)
+
+	basePolicy := s.basePolicy
+	if basePolicy == nil {
+		basePolicy = aero.NewPolicy()
+		s.basePolicy = basePolicy
 	}
-	if timeout.Total > 0 {
-		basePolicy.TotalTimeout = timeout.DurationUnit() * time.Duration(timeout.Total)
+
+	if !s.bypassConfiguredTimeout {
+		timeout := s.config.Timeout
+		if timeout.Connection > 0 {
+			clientPolicy.Timeout = timeout.DurationUnit() * time.Duration(timeout.Connection)
+		}
+
+		if timeout.Socket > 0 {
+			basePolicy.SocketTimeout = timeout.DurationUnit() * time.Duration(timeout.Socket)
+		}
+
+		if timeout.Total > 0 {
+			basePolicy.TotalTimeout = timeout.DurationUnit() * time.Duration(timeout.Total)
+		}
 	}
-	s.basePolicy = basePolicy
-	s.clientPolicy = clientPolicy
 }
 
-//New creates a new Aerospike service
+// New creates a new Aerospike service
 func New(config *datastore.Connection) (*Service, error) {
+	return NewWithOptions(config, nil)
+}
+
+func NewWithOptions(config *datastore.Connection, options ...Option) (*Service, error) {
 	srv := &Service{
 		config: config,
 	}
-	srv.init()
+	srv.init(options...)
 	breaker := circut.New(time.Second, srv)
 	srv.Breaker = breaker
 	return srv, srv.connect()
