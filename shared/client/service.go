@@ -54,8 +54,9 @@ type Service struct {
 
 	// Override via WithConnectionSharing().
 	// nil safe.
-	// TODO refactor out to a "Factory" context?
 	connections map[string]*client.Service
+
+	clientOptions []client.Option
 
 	// container for Datastore gmetric objects
 	gmetrics *gmetric.Service
@@ -460,7 +461,7 @@ func (s *Service) initDatastore() error {
 		Connections: remoteCfg.Connections,
 	}
 
-	if stores, err = datastore.NewStoresV3(datastores, s.gmetrics, s.Config.Debug, s.connections); err != nil {
+	if stores, err = datastore.NewStoresV4(datastores, s.gmetrics, s.Config.Debug, s.connections, s.clientOptions); err != nil {
 		return err
 	}
 
