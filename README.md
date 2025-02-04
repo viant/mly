@@ -96,6 +96,8 @@ Connections:
     Hostnames: 127.0.0.1
 ```
 
+See [WORKFLOW.md](WORKFLOW.md) for Mermaid diagrams explaining the Client and more complex caching workflows.
+
 ## Dictionary hash code
 
 In caching mode, in order to manage cache and client/server consistency every time a model/dictionary gets re/loaded, `mly` computes a dictionary hash code.
@@ -104,7 +106,7 @@ Once a client detects a change in dictionary hash code, it automatically initiat
 
 # Configuration
 
-[See `CONFIG.md`](CONFIG.md).
+[See `CONFIG.md`](CONFIG.md), which also includes Client-side configurations.
 
 # Usage
 
@@ -165,6 +167,8 @@ func main() {
     fmt.Printf("response: %+v\n", response)
 }
 ```
+
+As noted before, see [WORKFLOW.md](WORKFLOW.md) for Mermaid diagrams explaining the Client and more complex caching workflows.
 
 # Transformer 
 

@@ -70,4 +70,13 @@ Where optional `options` can be of, but not limited to, the following:
   * `NewCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)`
   * `NewGmetric()` - custom instance of `gmetric` service
 
-See [`shared/client/option.go`](shared/client/option.go) for more options. 
+See [`shared/client/option.go`](shared/client/option.go) for more options.
+
+Since v0.16.0, there have been added options for Aerospike behavior.
+
+Since each `shared/client.Service` instance operates on 1 model, there was an added option to share Aerospike connections via [`WithConnectionSharing()`](shared/client/option.go).
+
+Additionally, Aerospike client `Policy` override options were provided.
+Use `WithClientOptions()` to provide `shared/datastore/client.Option` options.
+See [`shared/datastore/client/option.go`](shared/datastore/client/option.go).
+Note that even if a `ClientPolicy` or `BasePolicy` is set via `shared/datastore/client.Option`, the timeout values will be applied from the server configuration unless using `WithBypassConfiguredTimeout()`.
