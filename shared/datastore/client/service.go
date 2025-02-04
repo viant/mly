@@ -130,7 +130,7 @@ func (s *Service) init(options ...Option) {
 
 // New creates a new Aerospike service
 func New(config *datastore.Connection) (*Service, error) {
-	return NewWithOptions(config, nil)
+	return NewWithOptions(config)
 }
 
 func NewWithOptions(config *datastore.Connection, options ...Option) (*Service, error) {
