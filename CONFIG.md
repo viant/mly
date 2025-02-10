@@ -54,6 +54,7 @@ The server accepts configuration with the following options:
 * `EnableCPUProf`: `bool` - optional - enables endpoint for cpu profiling.
 * `AllowedSubnet`: `bool` - optional - restricts administrative endpoints to IP string prefixes.
   - Restricts the system configuration, memory profile, CPU profile, and health endpoints.
+* `ContinueOnRecover`: `bool` - optional - panics will not bubble up.
 
 ## Client
  
