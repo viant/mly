@@ -31,6 +31,10 @@ type Config struct {
 	// set BatchWait to < 0.
 	GlobalBatching *batchconfig.BatcherConfig `json:",omitempty" yaml:",omitempty"`
 
+	// ContinueOnRecover if true, then when service.Service panics, log and continue.
+	// Otherwise, it will log then panic().
+	ContinueOnRecover bool `json:",omitempty" yaml:",omitempty"`
+
 	Metrics *econfig.MetricsConfig `json:",omitempty" yaml:",omitempty"`
 
 	Endpoint econfig.Endpoint

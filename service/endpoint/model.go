@@ -89,6 +89,12 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 		return err
 	}
 
+	serviceOpts := make([]service.Option, 0)
+	if config.ContinueOnRecover {
+		log.Println("continueOnRecover is true")
+		serviceOpts = append(serviceOpts, service.WithContinueOnRecover(true))
+	}
+
 	log.Printf("init %d models...\n", numModels)
 
 	var lock sync.Mutex
@@ -102,7 +108,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 			log.Printf("[%s] model loading", model.ID)
 			e := func() error {
 				tfService := tfmodel.NewService(model, fs, metrics, sema, cfge.MaxEvaluatorWait)
-				modelSrv, err := service.New(context.Background(), model, tfService, fs, metrics, datastores)
+				modelSrv, err := service.New(context.Background(), model, tfService, fs, metrics, datastores, serviceOpts...)
 
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)
