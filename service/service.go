@@ -39,6 +39,9 @@ type Service struct {
 
 	maxEvaluatorWait time.Duration
 
+	// continueOnRecover if false, will re-panic on recover
+	continueOnRecover bool
+
 	// TODO how does this interact with Service.inputs
 	inputProvider *gtly.Provider
 
@@ -90,8 +93,19 @@ func (s *Service) Stats() map[string]interface{} {
 	return st
 }
 
-func (s *Service) Do(ctx context.Context, request *request.Request, response *Response) error {
-	err := s.do(ctx, request, response)
+func (s *Service) Do(ctx context.Context, request *request.Request, response *Response) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[%s do] panic:%v feeds:%+v", s.config.ID, r, request.Feeds)
+			if !s.continueOnRecover {
+				panic(r)
+			}
+
+			err = fmt.Errorf("panic model:%s, recovered:%v", s.config.ID, r)
+		}
+	}()
+
+	err = s.do(ctx, request, response)
 	if err != nil {
 		response.Error = err.Error()
 		response.Status = common.StatusError
@@ -251,7 +265,10 @@ func (s *Service) transformOutput(ctx context.Context, request *request.Request,
 }
 
 // New creates a service
-func New(ctx context.Context, cfg *config.Model, tfsrv *tfmodel.Service, fs afs.Service, metrics *gmetric.Service, datastores map[string]*datastore.Service, options ...Option) (*Service, error) {
+func New(ctx context.Context,
+	cfg *config.Model, tfsrv *tfmodel.Service, fs afs.Service, metrics *gmetric.Service, datastores map[string]*datastore.Service,
+	options ...Option) (*Service, error) {
+
 	if metrics == nil {
 		metrics = gmetric.New()
 	}

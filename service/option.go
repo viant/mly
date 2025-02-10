@@ -34,3 +34,15 @@ func (o *maxEvaluatorWait) Apply(s *Service) {
 func WithMaxEvaluatorWait(wait time.Duration) *maxEvaluatorWait {
 	return &maxEvaluatorWait{wait}
 }
+
+type continueOnRecover struct {
+	v bool
+}
+
+func (o *continueOnRecover) Apply(s *Service) {
+	s.continueOnRecover = o.v
+}
+
+func WithContinueOnRecover(v bool) *continueOnRecover {
+	return &continueOnRecover{v: v}
+}
