@@ -60,7 +60,6 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 	response := &Response{Status: common.StatusOK, started: time.Now()}
 	if httpRequest.Method == http.MethodGet {
-
 		request = h.service.NewRequest()
 		if err := h.buildRequestFromQuery(httpRequest, request); err != nil {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
@@ -73,7 +72,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 		stats := stat.NewValues()
 		data, size, err := buffer.Read(h.pool, httpRequest.Body)
 		defer h.pool.Put(data)
-		func() {
+		err = func() error {
 			defer func() { onDone(time.Now(), stats.Values()...) }()
 
 			if err != nil {
@@ -88,7 +87,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 				}
 
 				http.Error(writer, err.Error(), code)
-				return
+				return err
 			}
 
 			request = h.service.NewRequest()
@@ -108,9 +107,15 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 				rmsg := fmt.Sprintf("%s (are your input types correct?)", err.Error())
 				http.Error(writer, rmsg, http.StatusBadRequest)
-				return
+				return err
 			}
+
+			return nil
 		}()
+
+		if err != nil {
+			return
+		}
 	}
 
 	if request == nil {
