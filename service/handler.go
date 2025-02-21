@@ -91,6 +91,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 			}
 
 			request = h.service.NewRequest()
+			// MODIFICATION: data will be truncated, but if this caused a problem, then this function should have returned an error already.
 			request.Body = data[:size]
 			if isDebug {
 				trimmed := strings.Trim(string(request.Body), " \n\r")
@@ -99,7 +100,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 			err = gojay.Unmarshal(data[:size], request)
 			if err != nil {
-				stats.Append(sstat.UnmarshalError{err})
+				werr := fmt.Errorf("unmarshal error: %w data: %s", err, string(data[:size]))
+				stats.Append(sstat.UnmarshalError{werr})
 
 				if isDebug {
 					log.Printf("[%v http] unmarshal error: %v\n", h.service.config.ID, err)
@@ -119,6 +121,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	}
 
 	if request == nil {
+		// This isn't a particularly helpful message.
+		// Currently, the only case this handles is if the request is too large.
 		http.Error(writer, "no request", http.StatusBadRequest)
 		return
 	}
@@ -155,7 +159,6 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 
 		http.Error(writer, err.Error(), status)
 	}
-
 }
 
 func (h *Handler) buildRequestFromQuery(httpRequest *http.Request, request *request.Request) error {
