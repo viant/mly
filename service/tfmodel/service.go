@@ -47,8 +47,13 @@ type Service struct {
 	batcher   *batcher.Service
 	evaluator *evaluator.Service
 
+	// mux is used when running evaluations or reloading the model.
+	// For stating that we want to "read" the evalutor or batcher.
+	// For the "write" metaphor, it is when replacing the evaluator or batcher.
 	mux sync.RWMutex
-	wg  *sync.WaitGroup // prevents calling to a closed Evaluator
+
+	// wg prevents calling to a closed srveval.Evaluator
+	wg *sync.WaitGroup
 
 	inputs     map[string]*domain.Input
 	signature  *domain.Signature

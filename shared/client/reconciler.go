@@ -27,6 +27,7 @@ func reconcileData(prefix string, target interface{}, cachable Cachable, cached 
 			return nil
 		}
 
+		// TODO: This causes `-race` to fail.
 		// directly replace the target memory with cached value
 		*(*unsafe.Pointer)(targetPtr) = *(*unsafe.Pointer)(xunsafe.AsPointer(cached[0]))
 		return nil
