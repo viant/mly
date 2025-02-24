@@ -10,11 +10,23 @@ import (
 	"github.com/viant/mly/shared/circut"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/config/datastore"
+	"golang.org/x/sync/singleflight"
+)
+
+const (
+	// DefaultPutSingleflightTimeout is based off default value for BasePolicy.SocketTimeout
+	// Since retries are not recommended for Put operations, we will use this simple value
+	DefaultPutSingleflightTimeout = time.Second * 30
+
+	// This might be too short for a pure default configuration.
+	// It looks like it should be something like SocketTimeout + SleepBetweenRetries * cumulative product from 1 to MaxRetries of SleepMultiplier...
+	// But in our common use case, 30 seconds is very long, and the Aerospike Client should timeout first.
+	DefaultGetSingleflightTimeout = time.Second * 30
 )
 
 // Service represents aerospike client Service
 type Service struct {
-	*aero.Client
+	Client Aero
 
 	config *datastore.Connection
 
@@ -22,12 +34,16 @@ type Service struct {
 	bypassConfiguredTimeout bool
 
 	// basePolicy can be overridden by WithBasePolicy.
+	// basePolicy is only used for Get operations.
 	// Even when overridden, the timeout will be applied UNLESS using WithBypassConfiguredTimeout.
 	basePolicy *aero.BasePolicy
 
 	// clientPolicy can be overridden by WithClientPolicy.
 	// Even when overridden, the timeout will be applied UNLESS using WithBypassConfiguredTimeout.
 	clientPolicy *aero.ClientPolicy
+
+	// group is used to dedupe concurrent puts
+	group *singleflight.Group
 
 	*circut.Breaker
 }
@@ -37,11 +53,14 @@ func (s *Service) Get(ctx context.Context, key *aero.Key, binNames ...string) (r
 	if !s.IsUp() {
 		return nil, common.ErrNodeDown
 	}
+
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("failed to read data from aersopike: panic: %v", r)
+			connection := s.config.ID
+			err = fmt.Errorf("get aerospike[%s]: panic: %v", connection, r)
 		}
 	}()
+
 	record, err = s.Client.Get(s.basePolicy, key, binNames...)
 	s.checkConnectionError(err)
 	return record, err
@@ -49,13 +68,49 @@ func (s *Service) Get(ctx context.Context, key *aero.Key, binNames ...string) (r
 
 // Put puts a record to Aerospike.
 // Context is not supported since the Aerospike library does not support it.
-func (s *Service) Put(writePolicy *aero.WritePolicy, key *aero.Key, value aero.BinMap) error {
+func (s *Service) Put(writePolicy *aero.WritePolicy, key *aero.Key, value aero.BinMap) (err error) {
 	if !s.IsUp() {
 		return common.ErrNodeDown
 	}
 
-	err := s.Client.Put(writePolicy, key, value)
-	s.checkConnectionError(err)
+	if writePolicy == nil {
+		writePolicy = aero.NewWritePolicy(0, 0)
+	}
+
+	keyStr := keyString(key)
+
+	defer func() {
+		if r := recover(); r != nil {
+			connection := s.config.ID
+			err = fmt.Errorf("put aerospike[%s] key: %s panic: %v", connection, keyStr, r)
+		}
+	}()
+
+	var timeout time.Duration
+	if writePolicy.TotalTimeout > 0 {
+		timeout = time.Millisecond * writePolicy.TotalTimeout
+	} else {
+		timeout = DefaultPutSingleflightTimeout
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	ch := s.group.DoChan(keyStr, func() (interface{}, error) {
+		err := s.Client.Put(writePolicy, key, value)
+		s.checkConnectionError(err)
+		return nil, err
+	})
+
+	select {
+	case <-ctx.Done():
+		err = fmt.Errorf("put aerospike[%s] key: %s singleflight: %w", s.config.ID, keyStr, ctx.Err())
+	case res := <-ch:
+		if res.Err != nil {
+			err = fmt.Errorf("put aerospike[%s] key: %s error: %w", s.config.ID, keyStr, res.Err)
+		}
+	}
+
 	return err
 }
 
@@ -136,7 +191,9 @@ func New(config *datastore.Connection) (*Service, error) {
 func NewWithOptions(config *datastore.Connection, options ...Option) (*Service, error) {
 	srv := &Service{
 		config: config,
+		group:  new(singleflight.Group),
 	}
+
 	srv.init(options...)
 	breaker := circut.New(time.Second, srv)
 	srv.Breaker = breaker
