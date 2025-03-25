@@ -281,17 +281,20 @@ func reconcileIOFromSignature(config *config.Model, signature *domain.Signature)
 		configuredInput, ok := configuredInputsByName[modelInput.Name]
 		if !ok {
 			configuredInput = &shared.Field{Name: modelInput.Name}
+
 			config.Inputs = append(config.Inputs, configuredInput)
 		}
 
 		// !! MODIFICATION !!
 		modelInput.Vocab = !configuredInput.Wildcard && configuredInput.Precision <= 0
 
-		if configuredInput.DataType == "" {
-			// If the datatype is not provided in the configuration, overwrite it from the
-			// model signature.
-			configuredInput.SetRawType(modelInput.Type)
+		fdt := configuredInput.DataType
+		if fdt == "" {
+			fdt = "string"
 		}
+
+		fieldType := fieldDataTypeToRawType(fdt)
+		configuredInput.SetRawType(fieldType)
 
 		// remove the configured input as it is "handled"
 		delete(configuredInputsByName, configuredInput.Name)
@@ -307,9 +310,9 @@ func reconcileIOFromSignature(config *config.Model, signature *domain.Signature)
 			field := &shared.Field{Name: output.Name, DataType: output.DataType}
 			fdt := field.DataType
 			if fdt == "" {
-				// TODO handle this
 				fdt = "string"
 			}
+
 			fieldType := fieldDataTypeToRawType(fdt)
 			field.SetRawType(fieldType)
 
