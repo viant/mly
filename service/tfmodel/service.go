@@ -305,9 +305,13 @@ func reconcileIOFromSignature(config *config.Model, signature *domain.Signature)
 			}
 
 			field := &shared.Field{Name: output.Name, DataType: output.DataType}
-			if field.DataType == "" {
-				field.SetRawType(reflect.TypeOf(""))
+			fdt := field.DataType
+			if fdt == "" {
+				// TODO handle this
+				fdt = "string"
 			}
+			fieldType := fieldDataTypeToRawType(fdt)
+			field.SetRawType(fieldType)
 
 			config.Outputs = append(config.Outputs, field)
 		}
@@ -318,6 +322,7 @@ func reconcileIOFromSignature(config *config.Model, signature *domain.Signature)
 		keyFieldsByName[kf] = kf
 	}
 
+	// handle remaining inputs
 	for k, v := range configuredInputsByName {
 		if v.DataType == "" {
 			v.SetRawType(reflect.TypeOf(""))
@@ -327,7 +332,29 @@ func reconcileIOFromSignature(config *config.Model, signature *domain.Signature)
 
 		configuredInputsByName[k].Auxiliary = true
 		configuredInputsByName[k].Wildcard = isKeyField
+	}
+}
 
+func fieldDataTypeToRawType(dataType string) reflect.Type {
+	switch dataType {
+	case "int":
+		return reflect.TypeOf(int(0))
+	case "int32":
+		return reflect.TypeOf(int32(0))
+	case "int64":
+		return reflect.TypeOf(int64(0))
+	case "float":
+		return reflect.TypeOf(float32(0))
+	case "float32":
+		return reflect.TypeOf(float32(0))
+	case "float64":
+		return reflect.TypeOf(float64(0))
+	case "string":
+		return reflect.TypeOf("")
+	case "bool":
+		return reflect.TypeOf(false)
+	default:
+		panic(fmt.Sprintf("unsupported data type: %s", dataType))
 	}
 }
 
