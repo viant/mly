@@ -1,6 +1,6 @@
 init:
   tfPath: ${appPath}/example/lib/libtensorflow-cpu-${os.system}-x86_64-2.4.2.tar.gz
-  goVersion: 1.17
+  goVersion: 1.22
 
 # TODO fully build and run in Docker?
 pipeline:

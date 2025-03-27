@@ -1,10 +1,19 @@
 pipeline:
   deploy:
+    go_mod:
+      action: exec:run
+      target: $target
+      checkError: true
+      commands:
+        - cd ${appPath}
+        - go mod vendor
+
     unit_test:
       action: exec:run
       target: $target
       checkError: true
       commands:
+        - cd ${appPath}
         - go test $(find ${appPath} -name "*.go" -not -path "${appPath}/vendor/*" -exec dirname {} \; | sort -u)
       env:
         DYLD_LIBRARY_PATH: /usr/local/lib
