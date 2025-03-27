@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"fmt"
 	"reflect"
 )
 
@@ -23,6 +24,7 @@ type (
 		// and that it should be directly input as a cache key.
 		Precision int `json:",omitempty" yaml:",omitempty"`
 
+		// Used when unmarshaling and feeding into the model.
 		rawType reflect.Type
 	}
 
@@ -62,20 +64,45 @@ func (f *Field) RawType() reflect.Type {
 	return f.rawType
 }
 
-func (f *Field) SetRawType(t reflect.Type) {
-	switch t.Kind() {
-	case reflect.String:
-		f.DataType = "string"
-	case reflect.Float32:
-		f.DataType = "float"
-	case reflect.Int64:
-		f.DataType = "int64"
-	default:
-		f.DataType = t.Kind().String()
+func (f *Field) DataTypeToRawType() {
+	if f.DataType == "" {
+		return
 	}
+
+	f.rawType = fieldDataTypeToRawType(f.DataType)
+}
+
+// fieldDataTypeToRawType is a subset of reverse Name() to reflect.Type
+func fieldDataTypeToRawType(dataType string) reflect.Type {
+	switch dataType {
+	case "int":
+		return reflect.TypeOf(int(0))
+	case "int32":
+		return reflect.TypeOf(int32(0))
+	case "int64":
+		return reflect.TypeOf(int64(0))
+	case "float":
+		return reflect.TypeOf(float32(0))
+	case "float32":
+		return reflect.TypeOf(float32(0))
+	case "float64":
+		return reflect.TypeOf(float64(0))
+	case "string":
+		return reflect.TypeOf("")
+	case "bool":
+		return reflect.TypeOf(false)
+	default:
+		panic(fmt.Sprintf("unsupported data type: %s", dataType))
+	}
+}
+
+// SetRawType is used when pulling from the model.
+func (f *Field) SetRawType(t reflect.Type) {
+	f.DataType = t.Name()
 	f.rawType = t
 }
 
+// TODO Deprecate
 func (m *MetaInput) OutputIndex() map[string]int {
 	var outputIndex = map[string]int{}
 	if len(m.Outputs) == 0 {
@@ -85,6 +112,14 @@ func (m *MetaInput) OutputIndex() map[string]int {
 		outputIndex[f.Name] = i
 	}
 	return outputIndex
+}
+
+func (m *MetaInput) OutputByName() map[string]*Field {
+	var outputByName = map[string]*Field{}
+	for _, f := range m.Outputs {
+		outputByName[f.Name] = f
+	}
+	return outputByName
 }
 
 func (d *MetaInput) KeysLen() int {
@@ -114,9 +149,8 @@ func (m *MetaInput) Init() {
 	}
 
 	for i, input := range m.Inputs {
-		if input.rawType == nil {
-			// default input type is string
-			input.rawType = reflect.TypeOf("")
+		if input.rawType == nil && input.DataType != "" {
+			input.DataTypeToRawType()
 		}
 
 		m.Inputs[i].Index = i

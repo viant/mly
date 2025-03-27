@@ -9,5 +9,6 @@ type Signature struct {
 	Inputs  []Input
 	Outputs []Output
 
-	Output Output // Deprecated: Use Outputs[0] if there is only 1 output
+	// Deprecated: Use Outputs[0] if there is only 1 output
+	Output Output
 }
