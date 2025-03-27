@@ -12,6 +12,7 @@ pushd $TENSORFLOW_GIT_REPO
 
 go mod init github.com/tensorflow/tensorflow
 go get google.golang.org/protobuf/reflect/protoreflect@v1.26.0 
+go mod tidy || true
 
 export LD_LIBRARY_PATH=/usr/local/lib 
 go generate -v -x ./tensorflow/go/op || true
