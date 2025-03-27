@@ -10,11 +10,20 @@ pipeline:
       - /tmp/e2e/mlyc -m vec -a 'extra:c;tv:a;sl:b'
       - /tmp/e2e/mlyc -m vec -a 'tv|int:0;sl:b'
       - curl -s localhost:8086/v1/api/metric/operation/vecPerf
+      - curl -s localhost:8086/v1/api/metric/operation/vecHTTPOverhead
 
-  assertMetrics:
+  assertMetricsInvalid:
     action: validator:assert
     init:
       actual: $AsJSON($test.Cmd[3].Stdout)
     actual: $actual
     expect: $LoadJSON('${parentPath}/metrics.json')
+
+  assertMetricsJSONError:
+    action: validator:assert
+    init:
+      actual: $AsJSON($test.Cmd[4].Stdout)
+    actual: $actual
+    expect: $LoadJSON('${parentPath}/metrics-json.json')
+
 
