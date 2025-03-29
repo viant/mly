@@ -171,7 +171,7 @@ func main() {
 			return -1, err
 		}
 
-		asCluster := dsCli.Cluster()
+		asCluster := dsCli.Client.(*aerospike.Client).Cluster()
 		if asCluster == nil {
 			fmt.Printf("asCluster is nil\n")
 			return -1, nil

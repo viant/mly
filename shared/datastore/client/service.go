@@ -107,7 +107,7 @@ func (s *Service) Put(writePolicy *aero.WritePolicy, key *aero.Key, value aero.B
 		err = fmt.Errorf("put aerospike[%s] key: %s singleflight: %w", s.config.ID, keyStr, ctx.Err())
 	case res := <-ch:
 		if res.Err != nil {
-			err = fmt.Errorf("put aerospike[%s] key: %s error: %w", s.config.ID, keyStr, res.Err)
+			err = fmt.Errorf("put aerospike[%s] key: %s shared: %v error: %w", s.config.ID, keyStr, res.Shared, res.Err)
 		}
 	}
 
