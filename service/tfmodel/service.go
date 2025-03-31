@@ -86,10 +86,8 @@ func (s *Service) Predict(ctx context.Context, params []interface{}) ([]interfac
 	return tv, err
 }
 
-// Assumes that after the initial reload, there is no significant changes
-// to the inputs and outputs from reloading the model.
-// If a model reload results in changes to inputs or outputs, the resulting
-// behavior is undefined.
+// Assumes that after the initial reload, there is no significant changes to the inputs and outputs from reloading the model.
+// If a model reload results in changes to inputs or outputs, the resulting behavior is undefined.
 // TODO restructure to easily test configuration signature merging.
 func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	config := s.config
@@ -113,8 +111,11 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 		return fmt.Errorf("signature error:%w", err)
 	}
 
-	// modifies signature.Inputs[].Vocab for Dictionary()
-	reconcileIOFromSignature(config, signature)
+	// Modifies signature.Inputs[].Vocab for Dictionary()
+	modelInputsByName := reconcileIOFromSignature(config, signature)
+	if modelInputsByName == nil {
+		return fmt.Errorf("model %s has no inputs", config.ID)
+	}
 
 	var dictionary *common.Dictionary
 
@@ -129,7 +130,8 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 				return err
 			}
 		} else {
-			// extract dictionary from the graph, relies on signature being modified by reconcileIOFromSignature
+			// extract dictionary from the graph
+			// relies on signature being modified by reconcileIOFromSignature
 			dictionary, err = Dictionary(model.Session, model.Graph, signature)
 			if err != nil {
 				config.DictMeta.Error = err.Error()
@@ -145,47 +147,6 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 
 			dictionary.UpdateHash(filehash)
 		}
-	}
-
-	// modelInputsByName is eventually used to process new requests.
-	var modelInputsByName = make(map[string]*domain.Input)
-	for i, modelInput := range signature.Inputs {
-		modelInputsByName[modelInput.Name] = &signature.Inputs[i]
-	}
-
-	// key fields may or may not contain additional inputs that are provided in the
-	// request that should not be sent to the Tensorflow model.
-	keyFieldsByName := make(map[string]string, len(config.KeyFields))
-	for _, kf := range config.KeyFields {
-		keyFieldsByName[kf] = kf
-	}
-
-	// add inputs from the config that aren't in the model
-	for _, configInput := range config.Inputs {
-		configInputName := configInput.Name
-		if _, ok := modelInputsByName[configInputName]; ok {
-			continue
-		}
-
-		_, inKeyFields := keyFieldsByName[configInputName]
-		auxiliary := configInput.Auxiliary || inKeyFields
-
-		input := &domain.Input{
-			Name:      configInputName,
-			Index:     configInput.Index,
-			Auxiliary: auxiliary,
-		}
-
-		input.Type = configInput.RawType()
-		if input.Type == nil {
-			input.Type = reflect.TypeOf("")
-		}
-
-		modelInputsByName[configInputName] = input
-	}
-
-	if config.OutputType != "" {
-		signature.Output.DataType = config.OutputType
 	}
 
 	newEvaluator := evaluator.NewEvaluator(signature, model.Session, *s.evaluatorMeta)
@@ -250,10 +211,10 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	return nil
 }
 
-// Attempts to figure out input and output signatures of the model and compares them to
-// the configured inputs and outputs.
+// Attempts to figure out input and output signatures of the model and compares them to the configured inputs and outputs.
+// Add any inputs that are not specified in the config but available in the TF model.
 // Generally, the configured values will override actual values.
-// Additionally, any other inputs (auxiliary) will be added.
+// Additionally, any other inputs will be automatically marked as auxiliary.
 //
 // signature.Inputs[].Vocab may be modified.
 // config.Inputs may be modified.
@@ -261,74 +222,125 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 // config.Inputs[].rawType may be modified.
 // config.Inputs[].Auxiliary may be modified.
 // config.Outputs may be modified
-func reconcileIOFromSignature(config *config.Model, signature *domain.Signature) {
+func reconcileIOFromSignature(config *config.Model, signature *domain.Signature) map[string]*domain.Input {
 	if len(signature.Inputs) == 0 {
-		return
+		return nil
 	}
+
+	//
+	// Add Inputs from signature to config.
+	//
 
 	configuredInputsByName := config.FieldByName()
 
-	// go through inputs from the model
+	// add inputs from model to config
 	for modelInputName := range signature.Inputs {
 		// use pointer to modify object
 		modelInput := &signature.Inputs[modelInputName]
 
-		if modelInput.Type == nil {
-			// when would this happen?
-			modelInput.Type = reflect.TypeOf("")
+		modelInputType := modelInput.Type
+		if modelInputType == nil {
+			panic(fmt.Sprintf("[%s] modelInput.Type is nil for %s", config.ID, modelInput.Name))
 		}
 
+		// add inputs not in config
 		configuredInput, ok := configuredInputsByName[modelInput.Name]
 		if !ok {
 			configuredInput = &shared.Field{Name: modelInput.Name}
 			config.Inputs = append(config.Inputs, configuredInput)
 		}
 
-		// !! MODIFICATION !!
 		modelInput.Vocab = !configuredInput.Wildcard && configuredInput.Precision <= 0
 
+		// set configuration type from model if not provided
 		if configuredInput.DataType == "" {
-			// If the datatype is not provided in the configuration, overwrite it from the
-			// model signature.
-			configuredInput.SetRawType(modelInput.Type)
+			configuredInput.SetRawType(modelInputType)
+		}
+
+		if configuredInput.RawType() != modelInputType {
+			panic(fmt.Sprintf("[%s] configuredInput.RawType() != modelInput.Type for %s", config.ID, configuredInput.Name))
 		}
 
 		// remove the configured input as it is "handled"
 		delete(configuredInputsByName, configuredInput.Name)
 	}
 
-	if len(signature.Outputs) > 0 {
-		outputIndex := config.OutputIndex()
-		for _, output := range signature.Outputs {
-			if _, has := outputIndex[output.Name]; has {
-				continue
-			}
-
-			field := &shared.Field{Name: output.Name, DataType: output.DataType}
-			if field.DataType == "" {
-				field.SetRawType(reflect.TypeOf(""))
-			}
-
-			config.Outputs = append(config.Outputs, field)
-		}
+	if len(signature.Outputs) == 0 {
+		panic(fmt.Sprintf("[%s] signature.Outputs is empty", config.ID))
 	}
 
+	// used to determine if an input is used to make the cache key
 	keyFieldsByName := make(map[string]string, len(config.KeyFields))
 	for _, kf := range config.KeyFields {
 		keyFieldsByName[kf] = kf
 	}
 
-	for k, v := range configuredInputsByName {
-		if v.DataType == "" {
-			v.SetRawType(reflect.TypeOf(""))
-		}
-
+	// any remaining inputs are auxiliary and possibly wildcard
+	for k, _ := range configuredInputsByName {
 		_, isKeyField := keyFieldsByName[k]
 
 		configuredInputsByName[k].Auxiliary = true
 		configuredInputsByName[k].Wildcard = isKeyField
-
 	}
+
+	//
+	// Map consolidated shared.Field to domain.Input
+	//
+
+	// modelInputsByName is eventually used to process new requests.
+	var modelInputsByName = make(map[string]*domain.Input)
+	for i, modelInput := range signature.Inputs {
+		modelInputsByName[modelInput.Name] = &signature.Inputs[i]
+	}
+
+	// This should only add inputs that are not in the model - these _should_ be auxiliary only.
+	for _, configInput := range config.Inputs {
+		configInputName := configInput.Name
+		if _, ok := modelInputsByName[configInputName]; ok {
+			continue
+		}
+
+		input := &domain.Input{
+			Name: configInputName,
+			// since this should be true, we don't set Index
+			Auxiliary: configInput.Auxiliary,
+		}
+
+		input.Type = configInput.RawType()
+		if input.Type == nil {
+			input.Type = reflect.TypeOf("")
+		}
+
+		modelInputsByName[configInputName] = input
+	}
+
+	// add and override outputs from model to config
+	outputByName := config.OutputByName()
+	for _, output := range signature.Outputs {
+		configOutput, _ := outputByName[output.Name]
+
+		if configOutput == nil {
+			configOutput = &shared.Field{Name: output.Name, DataType: output.DataType}
+			configOutput.DataTypeToRawType()
+			config.Outputs = append(config.Outputs, configOutput)
+		}
+
+		// set configuration datatype if not provided
+		if configOutput.DataType == "" {
+			configOutput.SetRawType(output.Type())
+		}
+
+		rawT := configOutput.RawType()
+		if rawT != output.Type() {
+			panic(fmt.Sprintf("[%s] configOutput.RawType():%v != output.Type():%v for %s", config.ID, rawT, output.Type(), configOutput.Name))
+		}
+	}
+
+	if config.OutputType != "" {
+		signature.Output.DataType = config.OutputType
+	}
+
+	return modelInputsByName
 }
 
 func (s *Service) loadModel(ctx context.Context, err error) (*tf.SavedModel, error) {

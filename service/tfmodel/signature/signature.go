@@ -72,10 +72,16 @@ func Signature(model *tf.SavedModel) (*domain.Signature, error) {
 
 func tryAssignDataType(v tf.TensorInfo, output *domain.Output) {
 	defer func() {
-		_ = recover()
+		e := recover()
+		if e == nil {
+			return
+		}
+
+		panic(fmt.Sprintf("failed to assign data type: %v", e))
 	}()
 
 	oType := tf.TypeOf(v.DType, []int64{})
+	output.SetType(oType)
 	output.DataType = oType.Name()
 	output.DataTypeKind = oType.Kind()
 }
