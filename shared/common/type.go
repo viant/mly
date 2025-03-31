@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-//DataType return reflect.Type for supplied data type
+// DataType return reflect.Type for supplied data type, which should come from reflect.Type.Name().
+// dataType == "" is treated as a string type.
 func DataType(dataType string) (reflect.Type, error) {
 	switch strings.ToLower(dataType) {
 	case "string":

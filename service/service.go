@@ -370,8 +370,11 @@ func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datast
 
 	datastoreConfig := s.datastore.Config()
 	if datastoreConfig.Storable == "" && len(datastoreConfig.Fields) == 0 {
-		// TODO check for multi-output models
-		fields := storable.NewFields(signature.Output.Name, cfg.OutputType)
+		fields := []*storable.Field{}
+		for _, output := range signature.Outputs {
+			f := &storable.Field{Name: output.Name, DataType: output.DataType}
+			fields = append(fields, f)
+		}
 		_ = datastoreConfig.FieldsDescriptor(fields)
 	}
 
