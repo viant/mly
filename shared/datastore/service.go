@@ -383,7 +383,7 @@ func (s *Service) fromClient(ctx context.Context, client *client.Service, key *K
 	if err != nil {
 		return 0, err
 	}
-	if record == nil && len(record.Bins) == 0 {
+	if record == nil || len(record.Bins) == 0 {
 		return 0, nil
 	}
 
