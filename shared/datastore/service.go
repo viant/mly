@@ -50,10 +50,18 @@ func (s *Service) Config() *config.Datastore {
 }
 
 func (s *Service) debug() bool {
+	if s.config == nil {
+		return false
+	}
+
 	return s.config.Debug
 }
 
 func (s *Service) id() string {
+	if s.config == nil {
+		return ""
+	}
+
 	return s.config.ID
 }
 

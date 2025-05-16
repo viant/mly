@@ -67,10 +67,11 @@ func (s *Generic) Set(iter common.Iterator) error {
 		switch v.Kind() {
 		case reflect.Struct:
 			// Skip internal field used by iterator; not part of target struct mapping.
-			// See shared/datastore/service.go for how HashBin is used
+			// See shared/datastore/service.go for how common.HashBin is used
 			if key == common.HashBin {
 				return nil
 			}
+
 			fieldType, ok := aStruct.byName[key]
 			if !ok {
 				return fmt.Errorf("unknown field")
