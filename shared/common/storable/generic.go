@@ -2,16 +2,17 @@ package storable
 
 import (
 	"fmt"
-	"github.com/viant/mly/shared/common"
 	"reflect"
+
+	"github.com/viant/mly/shared/common"
 )
 
-//Generic represents generic storable
+// Generic represents generic storable
 type Generic struct {
 	Value interface{}
 }
 
-//Iterator returns iterator
+// Iterator returns iterator
 func (s Generic) Iterator() common.Iterator {
 	v := reflect.ValueOf(s.Value)
 	if v.Kind() == reflect.Ptr {
@@ -52,7 +53,7 @@ func (s Generic) Iterator() common.Iterator {
 	}
 }
 
-//Set sets values
+// Set sets values
 func (s *Generic) Set(iter common.Iterator) error {
 	v := reflect.ValueOf(s.Value)
 	if v.Kind() == reflect.Ptr {
@@ -65,6 +66,11 @@ func (s *Generic) Set(iter common.Iterator) error {
 	return iter(func(key string, value interface{}) error {
 		switch v.Kind() {
 		case reflect.Struct:
+			// Skip internal field used by iterator; not part of target struct mapping.
+			// See shared/datastore/service.go for how HashBin is used
+			if key == common.HashBin {
+				return nil
+			}
 			fieldType, ok := aStruct.byName[key]
 			if !ok {
 				return fmt.Errorf("unknown field")
@@ -94,7 +100,7 @@ func (s *Generic) Set(iter common.Iterator) error {
 	})
 }
 
-//NewGeneric creates a Generic storable (for struct/map)
+// NewGeneric creates a Generic storable (for struct/map)
 func NewGeneric(value interface{}) *Generic {
 	return &Generic{Value: value}
 }

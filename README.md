@@ -104,6 +104,8 @@ In caching mode, in order to manage cache and client/server consistency every ti
 This hash code gets stored in the cache along with model prediction and is passed to the client in every response. 
 Once a client detects a change in dictionary hash code, it automatically initiates a dictionary reload and invalidates cache entries.
 
+Note: The dictionary hash code is stored under a special key in Aerospike defined in `shared/common.HashBin`. To prevent conflicts, do not use that same key name for storing your own model predictions.
+
 # Configuration
 
 [See `CONFIG.md`](CONFIG.md), which also includes Client-side configurations.
