@@ -66,6 +66,7 @@ func (s *Generic) Set(iter common.Iterator) error {
 	return iter(func(key string, value interface{}) error {
 		switch v.Kind() {
 		case reflect.Struct:
+			// Skip internal field used by iterator; not part of target struct mapping.
 			if key == "dictHash" {
 				return nil
 			}
