@@ -55,10 +55,9 @@ func TestFromClientMapsRecordAndDoesNotMapHashBin(t *testing.T) {
 	foo := &Foo{Field: "", HashVal: -1}
 	dictHash, err := svc.fromClient(context.Background(), clientSvc, key, foo)
 	assert.Nil(t, err)
-	// fromClient should return the HashBin value
+
 	assert.EqualValues(t, 123, dictHash)
-	// Field should be mapped
+
 	assert.EqualValues(t, "value", foo.Field)
-	// HashVal should remain unchanged because generic.Set skips HashBin mapping
 	assert.EqualValues(t, -1, foo.HashVal)
 }
