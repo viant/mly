@@ -17,6 +17,10 @@ type Model struct {
 	ID    string
 	Debug bool
 
+	// Platform specifies the model platform (tensorflow, triton)
+	// Defaults to "tensorflow" for backward compatibility
+	Platform string `json:",omitempty" yaml:",omitempty"`
+
 	// Location is the path the model will be copied to.
 	Location string `json:",omitempty" yaml:",omitempty"`
 
@@ -51,6 +55,9 @@ type Model struct {
 	// Stream is a github.com/viant/tapper configuration.
 	// All requests are eligible to be logged.
 	Stream *config.Stream `json:",omitempty" yaml:",omitempty"`
+
+	// Triton configuration for Triton Inference Server models
+	Triton *TritonConfig `json:",omitempty" yaml:",omitempty"`
 
 	// Modified shows the state of the model files.
 	Modified *Modified `json:",omitempty" yaml:",omitempty"`
@@ -122,9 +129,54 @@ func (m *Model) Validate() error {
 		return fmt.Errorf("model.ID was empty")
 	}
 
-	if m.URL == "" {
-		return fmt.Errorf("model.URL was empty")
+	// Platform-specific validation
+	platform := m.GetPlatform()
+	switch platform {
+	case "tensorflow":
+		if m.URL == "" {
+			return fmt.Errorf("tensorflow model %s requires URL", m.ID)
+		}
+	case "triton":
+		// Triton models require Triton configuration
+		if m.Triton == nil {
+			return fmt.Errorf("triton model %s requires Triton configuration", m.ID)
+		}
+		if err := m.Triton.Validate(); err != nil {
+			return fmt.Errorf("triton model %s config invalid: %w", m.ID, err)
+		}
+		// For Triton models, URL is optional (used only for validation placeholder)
+	default:
+		return fmt.Errorf("unsupported platform '%s' for model %s (supported: tensorflow, triton)", platform, m.ID)
 	}
 
 	return nil
+}
+
+// TritonConfig represents Triton Inference Server specific configuration
+type TritonConfig struct {
+	ServerURL string `json:",omitempty" yaml:",omitempty"` // Triton server URL (e.g., "http://localhost:8000")
+	ModelName string `json:",omitempty" yaml:",omitempty"` // Model name in Triton
+	Version   string `json:",omitempty" yaml:",omitempty"` // Model version (defaults to "1")
+	Timeout   int    `json:",omitempty" yaml:",omitempty"` // HTTP timeout in seconds
+}
+
+// Validate validates Triton configuration
+func (t *TritonConfig) Validate() error {
+	if t.ServerURL == "" {
+		return fmt.Errorf("Triton ServerURL is required")
+	}
+	if t.ModelName == "" {
+		return fmt.Errorf("Triton ModelName is required")
+	}
+	// Version defaults to "1" if not specified, so we don't require it
+	// Timeout defaults to reasonable value if not specified
+	return nil
+}
+
+// GetPlatform returns the platform with default to "tensorflow" for backward compatibility
+func (m *Model) GetPlatform() string {
+	if m.Platform == "" {
+		return "tensorflow"
+	}
+	return m.Platform
 }

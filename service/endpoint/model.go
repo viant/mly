@@ -106,9 +106,31 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 			mstart := time.Now()
 
 			log.Printf("[%s] model loading", model.ID)
+
+			// Validate model configuration first
+			if validateErr := model.Validate(); validateErr != nil {
+				log.Printf("[%s] ERROR: Model validation failed: %v", model.ID, validateErr)
+				lock.Lock()
+				err = fmt.Errorf("model %s validation failed: %w", model.ID, validateErr)
+				lock.Unlock()
+				return
+			}
+			log.Printf("[%s] Model configuration validated successfully", model.ID)
+
 			e := func() error {
-				tfService := tfmodel.NewService(model, fs, metrics, sema, cfge.MaxEvaluatorWait)
-				modelSrv, err := service.New(context.Background(), model, tfService, fs, metrics, datastores, serviceOpts...)
+				var modelSrv *service.Service
+				var err error
+
+				// Use platform router if platform is specified, otherwise fall back to legacy TensorFlow
+				if model.Platform != "" {
+					log.Printf("[%s] Using platform-specific service creation for platform: %s", model.ID, model.Platform)
+					modelSrv, err = service.NewWithPlatform(context.Background(), model, fs, metrics, datastores, sema, cfge.MaxEvaluatorWait, serviceOpts...)
+				} else {
+					log.Printf("[%s] Using legacy TensorFlow service creation (backward compatibility)", model.ID)
+					// Legacy path for backward compatibility
+					tfService := tfmodel.NewService(model, fs, metrics, sema, cfge.MaxEvaluatorWait)
+					modelSrv, err = service.New(context.Background(), model, tfService, fs, metrics, datastores, serviceOpts...)
+				}
 
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)
@@ -139,7 +161,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 				lock.Unlock()
 			}
 
-			log.Printf("[%s] model loaded (%s)", model.ID, time.Now().Sub(mstart))
+			log.Printf("[%s] model loaded (%s)", model.ID, time.Since(mstart))
 		}(m)
 	}
 
