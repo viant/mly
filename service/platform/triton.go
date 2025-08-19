@@ -258,82 +258,96 @@ func (t *TritonEvaluator) convertFromTritonResponse(response *TritonResponse) []
 	var result []interface{}
 
 	// Convert each output to MLY format
-	// MLY expects outputs in the format that the transformer can handle: [][]T
 	for _, output := range response.Outputs {
-		switch data := output.Data.(type) {
-		case []interface{}:
-			// If Triton returns []interface{}, convert to [][]float64 (common case for predictions)
-			if len(data) > 0 {
-				// MLY expects batch format: [][]T where len(outer) = batch_size
-				// Each data[i] is a prediction for batch item i
-				batchSize := len(data)
-				floatArray := make([][]float64, batchSize)
-
-				for i, v := range data {
-					switch val := v.(type) {
-					case float64:
-						floatArray[i] = []float64{val}
-					case float32:
-						floatArray[i] = []float64{float64(val)}
-					case int:
-						floatArray[i] = []float64{float64(val)}
-					case int64:
-						floatArray[i] = []float64{float64(val)}
-					default:
-						// If we can't convert to float, use string format
-						stringArray := make([][]string, batchSize)
-						for j, sv := range data {
-							stringArray[j] = []string{fmt.Sprintf("%v", sv)}
-						}
-						result = append(result, stringArray)
-						goto nextOutput
-					}
-				}
-				result = append(result, floatArray)
-			}
-		case []float64:
-			// Direct float64 array - wrap in MLY format
-			result = append(result, [][]float64{data})
-		case []float32:
-			// Convert float32 to float64 array
-			converted := make([]float64, len(data))
-			for i, v := range data {
-				converted[i] = float64(v)
-			}
-			result = append(result, [][]float64{converted})
-		case []string:
-			// String array - wrap in MLY format
-			result = append(result, [][]string{data})
-		case float64:
-			// Single float value
-			result = append(result, [][]float64{{data}})
-		case float32:
-			// Single float32 value
-			result = append(result, [][]float64{{float64(data)}})
-		case string:
-			// Single string value
-			result = append(result, [][]string{{data}})
-		default:
-			// Fallback: convert to string
-			result = append(result, [][]string{{fmt.Sprintf("%v", data)}})
-		}
-	nextOutput:
+		converted := t.convertToMLYFormat(output.Data)
+		result = append(result, converted)
 	}
 
 	return result
 }
 
+func (t *TritonEvaluator) convertToMLYFormat(data interface{}) interface{} {
+	switch d := data.(type) {
+	case []interface{}:
+		if len(d) > 0 {
+			batchSize := len(d)
+			// Default to float32
+			floatArray := make([][]float32, batchSize)
+			for i, v := range d {
+				switch val := v.(type) {
+				case float64:
+					floatArray[i] = []float32{float32(val)}
+				case float32:
+					floatArray[i] = []float32{val}
+				case int:
+					floatArray[i] = []float32{float32(val)}
+				case int32:
+					floatArray[i] = []float32{float32(val)}
+				case int64:
+					floatArray[i] = []float32{float32(val)}
+				default:
+					// Fallback to string if not numeric
+					stringArray := make([][]string, batchSize)
+					for j, sv := range d {
+						stringArray[j] = []string{fmt.Sprintf("%v", sv)}
+					}
+					return stringArray
+				}
+			}
+			return floatArray
+		}
+	case []float64:
+		converted := make([]float32, len(d))
+		for i, v := range d {
+			converted[i] = float32(v)
+		}
+		return [][]float32{converted}
+	case []float32:
+		return [][]float32{d}
+	case []string:
+		return [][]string{d}
+	case float64:
+		return [][]float32{{float32(d)}}
+	case float32:
+		return [][]float32{{d}}
+	case string:
+		return [][]string{{d}}
+	default:
+		return [][]string{{fmt.Sprintf("%v", d)}}
+	}
+
+	return [][]float32{{0.0}}
+}
+
 // Signature returns model signature information
 func (t *TritonEvaluator) Signature() interface{} {
-	// For Triton models, we return a basic signature based on the model configuration
-	// In a full implementation, this would query Triton's model metadata endpoint
-	return &domain.Signature{
-		Inputs: []domain.Input{
+	var inputs []domain.Input
+	var outputs []domain.Output
+
+	if len(t.config.Inputs) > 0 {
+		for _, input := range t.config.Inputs {
+			inputs = append(inputs, domain.Input{
+				Name:      input.Name,
+				Index:     input.Index,
+				Vocab:     !input.Wildcard,
+				Auxiliary: input.Auxiliary,
+			})
+		}
+	} else {
+		// Fallback: single generic input
+		inputs = []domain.Input{
 			{Name: "triton_input", Index: 0},
-		},
-		Outputs: []domain.Output{
-			{Name: "output_0", Index: 0, DataType: "float64"}, // Use standard output name and type
-		},
+		}
+	}
+
+	outputs = []domain.Output{
+		{Name: "output_0", Index: 0, DataType: "float32"},
+	}
+
+	return &domain.Signature{
+		Inputs:  inputs,
+		Outputs: outputs,
+		Output:  outputs[0],
 	}
 }
 

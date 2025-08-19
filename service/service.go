@@ -302,7 +302,12 @@ func (s *Service) transformOutput(ctx context.Context, request *request.Request,
 		cacheKey := request.Input.KeyAt(inputIndex)
 		key := s.datastore.Key(cacheKey)
 
-		dictHash := s.Dictionary().Hash
+		var dictHash int
+		if dict := s.Dictionary(); dict != nil {
+			dictHash = dict.Hash
+		} else {
+			dictHash = 0
+		}
 
 		go func() {
 			err := s.datastore.Put(ctx, key, transformed, dictHash)
