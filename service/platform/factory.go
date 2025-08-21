@@ -23,7 +23,6 @@ func CreateEvaluator(cfg *config.Model, fs afs.Service, metrics *gmetric.Service
 		return evaluator, PlatformTensorFlow, nil
 
 	case "triton":
-		// Create Triton evaluator (stub for now)
 		evaluator := NewTritonEvaluator(cfg)
 		return evaluator, PlatformTriton, nil
 
@@ -32,12 +31,12 @@ func CreateEvaluator(cfg *config.Model, fs afs.Service, metrics *gmetric.Service
 	}
 }
 
-// CreateRouter creates a platform router with the appropriate evaluator
-func CreateRouter(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sema *semaphore.Weighted, maxEvaluatorWait time.Duration) (*Router, error) {
+// CreateEvaluatorContext creates a platform evaluator with context
+func CreateEvaluatorContext(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sema *semaphore.Weighted, maxEvaluatorWait time.Duration) (*PlatformEvaluatorContext, error) {
 	evaluator, platform, err := CreateEvaluator(cfg, fs, metrics, sema, maxEvaluatorWait)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewRouter(cfg, evaluator, platform), nil
+	return NewEvaluatorContext(cfg, evaluator, platform), nil
 }

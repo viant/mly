@@ -423,3 +423,19 @@ func (t *TritonEvaluator) Close() error {
 	// HTTP client doesn't need explicit cleanup
 	return nil
 }
+
+// SetReloadOK is a no-op for Triton models (they don't support reloading)
+func (t *TritonEvaluator) SetReloadOK(reloadOK *int32) {
+	// No-op: Triton models are managed externally
+}
+
+// ReloadIfNeeded is a no-op for Triton models (they don't support reloading)
+func (t *TritonEvaluator) ReloadIfNeeded(ctx context.Context) error {
+	// No-op: Triton models are managed externally
+	return nil
+}
+
+// SupportsReload returns false since Triton models don't support reloading through MLY
+func (t *TritonEvaluator) SupportsReload() bool {
+	return false
+}

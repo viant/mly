@@ -2,7 +2,6 @@ package platform
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/shared/common"
@@ -35,85 +34,29 @@ type PlatformEvaluator interface {
 
 	// Close releases resources
 	Close() error
+
+	// SetReloadOK sets the reload status flag (for platforms that support reloading)
+	SetReloadOK(reloadOK *int32)
+
+	// ReloadIfNeeded performs model reload if needed (no-op for platforms that don't support reload)
+	ReloadIfNeeded(ctx context.Context) error
+
+	// SupportsReload returns true if this platform supports model reloading
+	SupportsReload() bool
 }
 
-// PlatformRouter routes inference requests to the appropriate platform evaluator
-type PlatformRouter interface {
-	// Predict routes the request to the appropriate platform evaluator
-	Predict(ctx context.Context, params []interface{}) ([]interface{}, error)
-
-	// Signature returns the signature from the active evaluator
-	Signature() interface{}
-
-	// Dictionary returns the dictionary from the active evaluator
-	Dictionary() *common.Dictionary
-
-	// Stats aggregates statistics from all evaluators
-	Stats(stats map[string]interface{})
-
-	// Close closes all evaluators
-	Close() error
+// PlatformEvaluatorContext holds platform evaluator with context
+type PlatformEvaluatorContext struct {
+	Evaluator PlatformEvaluator
+	Platform  ModelPlatform
+	Config    *config.Model
 }
 
-// Router implements PlatformRouter
-type Router struct {
-	config    *config.Model
-	Evaluator PlatformEvaluator // Exported for access from service package
-	platform  ModelPlatform
-}
-
-// NewRouter creates a new platform router with the specified evaluator
-func NewRouter(config *config.Model, evaluator PlatformEvaluator, platform ModelPlatform) *Router {
-	return &Router{
-		config:    config,
+// NewEvaluatorContext creates a new platform evaluator context
+func NewEvaluatorContext(config *config.Model, evaluator PlatformEvaluator, platform ModelPlatform) *PlatformEvaluatorContext {
+	return &PlatformEvaluatorContext{
 		Evaluator: evaluator,
-		platform:  platform,
+		Platform:  platform,
+		Config:    config,
 	}
-}
-
-// Predict routes the request to the platform evaluator
-func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
-	if r.Evaluator == nil {
-		return nil, fmt.Errorf("no evaluator configured for model %s", r.config.ID)
-	}
-
-	return r.Evaluator.Predict(ctx, params)
-}
-
-// Signature returns the signature from the active evaluator
-func (r *Router) Signature() interface{} {
-	if r.Evaluator == nil {
-		return nil
-	}
-	return r.Evaluator.Signature()
-}
-
-// Dictionary returns the dictionary from the active evaluator
-func (r *Router) Dictionary() *common.Dictionary {
-	if r.Evaluator == nil {
-		return nil
-	}
-	return r.Evaluator.Dictionary()
-}
-
-// Stats aggregates statistics from the evaluator
-func (r *Router) Stats(stats map[string]interface{}) {
-	if r.Evaluator != nil {
-		// Add platform identifier to stats
-		stats["platform"] = string(r.platform)
-		r.Evaluator.Stats(stats)
-	}
-}
-
-// Close closes the evaluator
-func (r *Router) Close() error {
-	if r.Evaluator == nil {
-		return nil
-	}
-	return r.Evaluator.Close()
-}
-
-// GetPlatform returns the platform type
-func (r *Router) GetPlatform() ModelPlatform {
-	return r.platform
 }

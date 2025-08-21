@@ -21,7 +21,6 @@ import (
 	"github.com/viant/mly/service/request"
 	"github.com/viant/mly/service/stat"
 	"github.com/viant/mly/service/stream"
-	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/service/transform"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
@@ -50,11 +49,8 @@ type Service struct {
 	// reload TODO finish refactor
 	ReloadOK int32
 
-	// Platform router for multi-platform support
-	platformRouter platform.PlatformRouter
-
-	// tensorflow evaluator factory & instance (kept for backward compatibility)
-	tfService *tfmodel.Service
+	// Platform evaluator context for multi-platform support
+	evaluatorContext *platform.PlatformEvaluatorContext
 
 	// caching
 	useDatastore bool
@@ -77,13 +73,8 @@ func (s *Service) Close() error {
 		return fmt.Errorf("already closed")
 	}
 
-	if s.platformRouter != nil {
-		return s.platformRouter.Close()
-	}
-
-	// Fallback to TensorFlow service for backward compatibility
-	if s.tfService != nil {
-		return s.tfService.Close()
+	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
+		return s.evaluatorContext.Evaluator.Close()
 	}
 
 	return nil
@@ -94,43 +85,37 @@ func (s *Service) Config() *config.Model {
 }
 
 func (s *Service) Signature() *domain.Signature {
-	if s.platformRouter != nil {
-		if sig := s.platformRouter.Signature(); sig != nil {
+	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
+		if sig := s.evaluatorContext.Evaluator.Signature(); sig != nil {
 			if domainSig, ok := sig.(*domain.Signature); ok {
 				return domainSig
 			}
 		}
 	}
-
-	// Fallback to TensorFlow service for backward compatibility
-	if s.tfService != nil {
-		return s.tfService.Signature()
-	}
-
 	return nil
 }
 
 func (s *Service) Dictionary() *common.Dictionary {
-	if s.platformRouter != nil {
-		return s.platformRouter.Dictionary()
+	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
+		return s.evaluatorContext.Evaluator.Dictionary()
 	}
+	return nil
+}
 
-	// Fallback to TensorFlow service for backward compatibility
-	if s.tfService != nil {
-		return s.tfService.Dictionary()
+// Inputs returns the model input definitions for request validation
+func (s *Service) Inputs() map[string]interface{} {
+	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
+		return s.evaluatorContext.Evaluator.Inputs()
 	}
-
 	return nil
 }
 
 func (s *Service) Stats() map[string]interface{} {
 	st := make(map[string]interface{})
 
-	if s.platformRouter != nil {
-		s.platformRouter.Stats(st)
-	} else if s.tfService != nil {
-		// Fallback to TensorFlow service for backward compatibility
-		s.tfService.Stats(st)
+	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
+		st["platform"] = string(s.evaluatorContext.Platform)
+		s.evaluatorContext.Evaluator.Stats(st)
 	}
 
 	return st
@@ -211,11 +196,8 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	var result []interface{}
 	var err error
 
-	if s.platformRouter != nil {
-		result, err = s.platformRouter.Predict(ctx, request.Feeds)
-	} else if s.tfService != nil {
-		// Fallback to TensorFlow service for backward compatibility
-		result, err = s.tfService.Predict(ctx, request.Feeds)
+	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
+		result, err = s.evaluatorContext.Evaluator.Predict(ctx, request.Feeds)
 	} else {
 		return nil, fmt.Errorf("no evaluator configured for model %s", s.config.ID)
 	}
@@ -324,43 +306,6 @@ func (s *Service) transformOutput(ctx context.Context, request *request.Request,
 	return transformed, nil
 }
 
-// New creates a service with TensorFlow service (legacy)
-func New(ctx context.Context,
-	cfg *config.Model, tfsrv *tfmodel.Service, fs afs.Service, metrics *gmetric.Service, datastores map[string]*datastore.Service,
-	options ...Option) (*Service, error) {
-
-	if metrics == nil {
-		metrics = gmetric.New()
-	}
-
-	location := reflect.TypeOf(Service{}).PkgPath()
-
-	cfg.Init(nil)
-
-	srv := &Service{
-		config:        cfg,
-		tfService:     tfsrv,
-		useDatastore:  cfg.UseDictionary() && cfg.DataStore != "",
-		serviceMetric: metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
-		reloadMetric:  metrics.MultiOperationCounter(location, cfg.ID+"Reload", cfg.ID+" reloading", time.Microsecond, time.Minute, 1, sstat.NewCtxErrOnly()),
-	}
-
-	tfsrv.ReloadOK = &srv.ReloadOK
-
-	for _, opt := range options {
-		opt.Apply(srv)
-	}
-
-	err := srv.initializeService(ctx, cfg, fs, metrics, datastores)
-	if err != nil {
-		return nil, err
-	}
-
-	go srv.scheduleModelReload()
-
-	return srv, err
-}
-
 func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs afs.Service, metrics *gmetric.Service, datastores map[string]*datastore.Service) error {
 	err := s.reloadIfNeeded(ctx)
 	if err != nil {
@@ -409,30 +354,22 @@ func NewWithPlatform(ctx context.Context,
 
 	cfg.Init(nil)
 
-	// Create platform router
-	router, err := platform.CreateRouter(cfg, fs, metrics, sema, maxEvaluatorWait)
+	// Create platform evaluator context
+	evaluatorContext, err := platform.CreateEvaluatorContext(cfg, fs, metrics, sema, maxEvaluatorWait)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create platform router for model %s: %w", cfg.ID, err)
+		return nil, fmt.Errorf("failed to create platform evaluator for model %s: %w", cfg.ID, err)
 	}
 
 	srv := &Service{
-		config:         cfg,
-		platformRouter: router,
-		tfService:      nil, // Will be set for TensorFlow platform for backward compatibility
-		useDatastore:   cfg.UseDictionary() && cfg.DataStore != "",
-		serviceMetric:  metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
+		config:           cfg,
+		evaluatorContext: evaluatorContext,
+		useDatastore:     cfg.UseDictionary() && cfg.DataStore != "",
+		serviceMetric:    metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
 	}
 
-	if cfg.GetPlatform() != "triton" {
+	if evaluatorContext.Evaluator.SupportsReload() {
 		srv.reloadMetric = metrics.MultiOperationCounter(location, cfg.ID+"Reload", cfg.ID+" reloading", time.Microsecond, time.Minute, 1, sstat.NewCtxErrOnly())
-	}
-
-	// For backward compatibility, still expose tfService for TensorFlow models
-	if cfg.GetPlatform() == "tensorflow" {
-		if tfWrapper, ok := router.Evaluator.(*platform.TensorFlowEvaluator); ok {
-			srv.tfService = tfWrapper.TfService
-			srv.tfService.ReloadOK = &srv.ReloadOK
-		}
+		evaluatorContext.Evaluator.SetReloadOK(&srv.ReloadOK)
 	}
 
 	for _, opt := range options {
@@ -444,7 +381,7 @@ func NewWithPlatform(ctx context.Context,
 		return nil, err
 	}
 
-	if cfg.GetPlatform() != "triton" {
+	if evaluatorContext.Evaluator.SupportsReload() {
 		go srv.scheduleModelReload()
 	}
 
@@ -452,19 +389,10 @@ func NewWithPlatform(ctx context.Context,
 }
 
 func (s *Service) reloadIfNeeded(ctx context.Context) error {
-	if s.tfService != nil {
-		return s.tfService.ReloadIfNeeded(ctx)
-	}
 
-	// For platform router, we need to handle reload through the evaluator
-	if s.platformRouter != nil {
-		if router, ok := s.platformRouter.(*platform.Router); ok {
-			if tfEvaluator, ok := router.Evaluator.(*platform.TensorFlowEvaluator); ok {
-				return tfEvaluator.TfService.ReloadIfNeeded(ctx)
-			}
-		}
+	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
+		return s.evaluatorContext.Evaluator.ReloadIfNeeded(ctx)
 	}
-
 	return nil
 }
 
@@ -476,18 +404,13 @@ func (s *Service) NewRequest() *request.Request {
 
 	var inputs map[string]*domain.Input
 
-	if s.tfService != nil {
-		inputs = s.tfService.Inputs()
-	} else if s.platformRouter != nil {
-		// For platform router, get inputs from the evaluator
-		if router, ok := s.platformRouter.(*platform.Router); ok {
-			evaluatorInputs := router.Evaluator.Inputs()
-			// Convert from map[string]interface{} to map[string]*domain.Input
-			inputs = make(map[string]*domain.Input)
-			for k, v := range evaluatorInputs {
-				if domainInput, ok := v.(*domain.Input); ok {
-					inputs[k] = domainInput
-				}
+	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
+		evaluatorInputs := s.evaluatorContext.Evaluator.Inputs()
+		// Convert from map[string]interface{} to map[string]*domain.Input
+		inputs = make(map[string]*domain.Input)
+		for k, v := range evaluatorInputs {
+			if domainInput, ok := v.(*domain.Input); ok {
+				inputs[k] = domainInput
 			}
 		}
 	}
@@ -540,8 +463,17 @@ func (s *Service) scheduleModelReload() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		onDone := s.reloadMetric.Begin(time.Now())
+		// Only record metrics if reloadMetric is initialized
+		var onDone func(time.Time, ...interface{})
 		stats := sstat.NewValues()
+		if s.reloadMetric != nil {
+			realOnDone := s.reloadMetric.Begin(time.Now())
+			onDone = func(t time.Time, values ...interface{}) {
+				realOnDone(t, values...)
+			}
+		} else {
+			onDone = func(time.Time, ...interface{}) {} // No-op for non-reloadable platforms
+		}
 		defer func() {
 			onDone(time.Now(), stats.Values()...)
 		}()

@@ -16,7 +16,6 @@ import (
 	"github.com/viant/mly/service/config"
 	serviceConfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/endpoint/meta"
-	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
 	"golang.org/x/sync/semaphore"
@@ -121,16 +120,12 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 				var modelSrv *service.Service
 				var err error
 
-				// Use platform router if platform is specified, otherwise fall back to legacy TensorFlow
-				if model.Platform != "" {
-					log.Printf("[%s] Using platform-specific service creation for platform: %s", model.ID, model.Platform)
-					modelSrv, err = service.NewWithPlatform(context.Background(), model, fs, metrics, datastores, sema, cfge.MaxEvaluatorWait, serviceOpts...)
-				} else {
-					log.Printf("[%s] Using legacy TensorFlow service creation (backward compatibility)", model.ID)
-					// Legacy path for backward compatibility
-					tfService := tfmodel.NewService(model, fs, metrics, sema, cfge.MaxEvaluatorWait)
-					modelSrv, err = service.New(context.Background(), model, tfService, fs, metrics, datastores, serviceOpts...)
+				if model.Platform == "" {
+					// Default to TensorFlow for models without explicit platform
+					model.Platform = "tensorflow"
 				}
+				log.Printf("[%s] Using platform-specific service creation for platform: %s", model.ID, model.Platform)
+				modelSrv, err = service.NewWithPlatform(context.Background(), model, fs, metrics, datastores, sema, cfge.MaxEvaluatorWait, serviceOpts...)
 
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)

@@ -54,3 +54,18 @@ func (t *TensorFlowEvaluator) Inputs() map[string]interface{} {
 	}
 	return result
 }
+
+// SetReloadOK sets the reload status flag for TensorFlow models
+func (t *TensorFlowEvaluator) SetReloadOK(reloadOK *int32) {
+	t.TfService.ReloadOK = reloadOK
+}
+
+// ReloadIfNeeded performs model reload if needed for TensorFlow models
+func (t *TensorFlowEvaluator) ReloadIfNeeded(ctx context.Context) error {
+	return t.TfService.ReloadIfNeeded(ctx)
+}
+
+// SupportsReload returns true since TensorFlow models support reloading
+func (t *TensorFlowEvaluator) SupportsReload() bool {
+	return true
+}
