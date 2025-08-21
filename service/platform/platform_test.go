@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/viant/mly/service/config"
+	"github.com/viant/mly/service/domain"
+	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/transfer"
 )
 
@@ -15,9 +17,9 @@ func TestModelPlatformConstants(t *testing.T) {
 
 func TestTritonEvaluator_Creation(t *testing.T) {
 	cfg := &config.Model{
-		ID: "test_triton",
+		ID:  "test_triton",
+		URL: "http://localhost:8000",
 		Triton: &config.TritonConfig{
-			ServerURL: "http://localhost:8000",
 			ModelName: "test_model",
 			Version:   "1",
 			Timeout:   30,
@@ -37,12 +39,27 @@ func TestTritonEvaluator_Signature(t *testing.T) {
 		Triton: &config.TritonConfig{
 			ModelName: "test_model",
 		},
+		MetaInput: shared.MetaInput{
+			Inputs: []*shared.Field{
+				{Name: "input1", Index: 0, DataType: "string"},
+				{Name: "input2", Index: 1, DataType: "float32"},
+			},
+		},
 	}
 
 	evaluator := NewTritonEvaluator(cfg)
 	signature := evaluator.Signature()
 
 	assert.NotNil(t, signature)
+
+	// Verify signature structure
+	if sig, ok := signature.(*domain.Signature); ok {
+		assert.Len(t, sig.Inputs, 2)
+		assert.Equal(t, "input1", sig.Inputs[0].Name)
+		assert.Equal(t, "input2", sig.Inputs[1].Name)
+		assert.Len(t, sig.Outputs, 1)
+		assert.Equal(t, "output_0", sig.Outputs[0].Name)
+	}
 }
 
 func TestTritonEvaluator_Dictionary(t *testing.T) {
@@ -54,28 +71,36 @@ func TestTritonEvaluator_Dictionary(t *testing.T) {
 }
 
 func TestTritonEvaluator_InputsWithConfig(t *testing.T) {
-	// Test that we can create an evaluator and call Inputs method
+	// Test that we can create an evaluator and call Inputs method with explicit configuration
 	cfg := &config.Model{
 		ID: "test_triton",
+		MetaInput: shared.MetaInput{
+			Inputs: []*shared.Field{
+				{Name: "src", Index: 0, DataType: "string"},
+				{Name: "platform", Index: 1, DataType: "string"},
+			},
+		},
 	}
 
 	evaluator := NewTritonEvaluator(cfg)
 	inputs := evaluator.Inputs()
 
-	// Should return some inputs (exact count depends on implementation)
+	// Should return the configured inputs
 	assert.NotNil(t, inputs)
+	assert.Len(t, inputs, 2)
+	assert.Contains(t, inputs, "src")
+	assert.Contains(t, inputs, "platform")
 }
 
 func TestTritonEvaluator_InputsDefault(t *testing.T) {
 	cfg := &config.Model{ID: "test_triton"}
 	evaluator := NewTritonEvaluator(cfg)
-	inputs := evaluator.Inputs()
 
-	// Should return empty inputs when no configuration is provided
+	// Should panic when no input configuration is provided
 	// This forces explicit configuration and prevents runtime errors
-	// from hardcoded defaults that don't match the actual model schema
-	assert.Len(t, inputs, 0)
-	assert.Empty(t, inputs)
+	assert.Panics(t, func() {
+		evaluator.Inputs()
+	}, "Expected panic when calling Inputs() without explicit configuration")
 }
 
 func TestTritonEvaluator_Stats(t *testing.T) {
@@ -146,9 +171,8 @@ func TestModelValidation(t *testing.T) {
 			config: &config.Model{
 				ID:       "test_triton",
 				Platform: "triton",
-				URL:      "http://localhost:8000", // Optional for Triton
+				URL:      "http://localhost:8000",
 				Triton: &config.TritonConfig{
-					ServerURL: "http://localhost:8000",
 					ModelName: "test_model",
 					Version:   "1",
 					Timeout:   30,
@@ -184,16 +208,15 @@ func TestModelValidation(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "Triton ServerURL is required",
+			errorMsg:    "requires URL (Triton server endpoint)",
 		},
 		{
 			name: "triton_missing_model_name",
 			config: &config.Model{
 				ID:       "test_triton_no_model",
 				Platform: "triton",
-				Triton: &config.TritonConfig{
-					ServerURL: "http://localhost:8000",
-				},
+				URL:      "http://localhost:8000",
+				Triton:   &config.TritonConfig{},
 			},
 			expectError: true,
 			errorMsg:    "Triton ModelName is required",
@@ -254,7 +277,6 @@ func TestTritonConfigValidation(t *testing.T) {
 		{
 			name: "valid_triton_config",
 			config: &config.TritonConfig{
-				ServerURL: "http://localhost:8000",
 				ModelName: "test_model",
 				Version:   "1",
 				Timeout:   30,
@@ -264,41 +286,20 @@ func TestTritonConfigValidation(t *testing.T) {
 		{
 			name: "valid_triton_config_minimal",
 			config: &config.TritonConfig{
-				ServerURL: "http://localhost:8000",
 				ModelName: "test_model",
 				// Version and Timeout are optional
 			},
 			expectError: false,
 		},
 		{
-			name: "missing_server_url",
-			config: &config.TritonConfig{
-				ModelName: "test_model",
-			},
-			expectError: true,
-			errorMsg:    "Triton ServerURL is required",
-		},
-		{
-			name: "missing_model_name",
-			config: &config.TritonConfig{
-				ServerURL: "http://localhost:8000",
-			},
+			name:        "missing_model_name",
+			config:      &config.TritonConfig{},
 			expectError: true,
 			errorMsg:    "Triton ModelName is required",
 		},
 		{
-			name: "empty_server_url",
-			config: &config.TritonConfig{
-				ServerURL: "",
-				ModelName: "test_model",
-			},
-			expectError: true,
-			errorMsg:    "Triton ServerURL is required",
-		},
-		{
 			name: "empty_model_name",
 			config: &config.TritonConfig{
-				ServerURL: "http://localhost:8000",
 				ModelName: "",
 			},
 			expectError: true,
@@ -479,8 +480,8 @@ func TestModelConfigurationImpactOnCacheKeys(t *testing.T) {
 		{
 			ID:       "model3",
 			Platform: "triton",
+			URL:      "http://localhost:8000",
 			Triton: &config.TritonConfig{
-				ServerURL: "http://localhost:8000",
 				ModelName: "model3",
 			},
 		},

@@ -123,7 +123,6 @@ func (m *Model) Init(globalBatchConfig *batchconfig.BatcherConfig) {
 	}
 }
 
-// Validate validates model config
 func (m *Model) Validate() error {
 	if m.ID == "" {
 		return fmt.Errorf("model.ID was empty")
@@ -141,10 +140,12 @@ func (m *Model) Validate() error {
 		if m.Triton == nil {
 			return fmt.Errorf("triton model %s requires Triton configuration", m.ID)
 		}
+		if m.URL == "" {
+			return fmt.Errorf("triton model %s requires URL (Triton server endpoint)", m.ID)
+		}
 		if err := m.Triton.Validate(); err != nil {
 			return fmt.Errorf("triton model %s config invalid: %w", m.ID, err)
 		}
-		// For Triton models, URL is optional (used only for validation placeholder)
 	default:
 		return fmt.Errorf("unsupported platform '%s' for model %s (supported: tensorflow, triton)", platform, m.ID)
 	}
@@ -154,22 +155,21 @@ func (m *Model) Validate() error {
 
 // TritonConfig represents Triton Inference Server specific configuration
 type TritonConfig struct {
-	ServerURL string `json:",omitempty" yaml:",omitempty"` // Triton server URL (e.g., "http://localhost:8000")
 	ModelName string `json:",omitempty" yaml:",omitempty"` // Model name in Triton
 	Version   string `json:",omitempty" yaml:",omitempty"` // Model version (defaults to "1")
-	Timeout   int    `json:",omitempty" yaml:",omitempty"` // HTTP timeout in seconds
+	Timeout   int    `json:",omitempty" yaml:",omitempty"` // HTTP timeout in milliseconds
 }
 
-// Validate validates Triton configuration
 func (t *TritonConfig) Validate() error {
-	if t.ServerURL == "" {
-		return fmt.Errorf("Triton ServerURL is required")
-	}
 	if t.ModelName == "" {
 		return fmt.Errorf("Triton ModelName is required")
 	}
-	// Version defaults to "1" if not specified, so we don't require it
-	// Timeout defaults to reasonable value if not specified
+	if t.Version == "" {
+		t.Version = "1" // Default version
+	}
+	if t.Timeout <= 0 {
+		t.Timeout = 100
+	}
 	return nil
 }
 

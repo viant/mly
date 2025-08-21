@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"time"
 
+	"github.com/francoispqt/gojay"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/common"
@@ -38,6 +40,66 @@ type TritonResponse struct {
 	Outputs []TritonOutput `json:"outputs"`
 }
 
+func (t *TritonInput) MarshalJSONObject(enc *gojay.Encoder) {
+	enc.StringKey("name", t.Name)
+	enc.ArrayKey("shape", gojay.EncodeArrayFunc(func(enc *gojay.Encoder) {
+		for _, v := range t.Shape {
+			enc.AddInt(v)
+		}
+	}))
+	enc.StringKey("datatype", t.DataType)
+
+	enc.ArrayKey("data", gojay.EncodeArrayFunc(func(enc *gojay.Encoder) {
+		switch data := t.Data.(type) {
+		case []string:
+			for _, v := range data {
+				enc.AddString(v)
+			}
+		case []int:
+			for _, v := range data {
+				enc.AddInt(v)
+			}
+		case []float32:
+			for _, v := range data {
+				enc.AddFloat32(v)
+			}
+		case []float64:
+			for _, v := range data {
+				enc.AddFloat64(v)
+			}
+		default:
+			for i := 0; i < reflect.ValueOf(data).Len(); i++ {
+				val := reflect.ValueOf(data).Index(i).Interface()
+				enc.AddInterface(val)
+			}
+		}
+	}))
+}
+
+func (t *TritonInput) IsNil() bool {
+	return t == nil
+}
+
+func (t *TritonRequest) MarshalJSONObject(enc *gojay.Encoder) {
+	enc.ArrayKey("inputs", (*TritonInputs)(&t.Inputs))
+}
+
+func (t *TritonRequest) IsNil() bool {
+	return t == nil
+}
+
+type TritonInputs []TritonInput
+
+func (t *TritonInputs) MarshalJSONArray(enc *gojay.Encoder) {
+	for i := range *t {
+		enc.AddObject(&(*t)[i])
+	}
+}
+
+func (t *TritonInputs) IsNil() bool {
+	return t == nil || len(*t) == 0
+}
+
 // TritonEvaluator implements PlatformEvaluator for Triton Inference Server
 type TritonEvaluator struct {
 	config     *config.Model
@@ -49,17 +111,13 @@ type TritonEvaluator struct {
 
 // NewTritonEvaluator creates a new Triton evaluator
 func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
-	// Extract Triton configuration
-	serverURL := "http://localhost:8000" // Default
-	modelName := config.ID               // Default to model ID
-	version := "1"                       // Default version
-	timeout := 30 * time.Second          // Default timeout
+	serverURL := config.URL           // Use model's URL field for Triton server endpoint
+	modelName := config.ID            // Default to model ID
+	version := "1"                    // Default version
+	timeout := 100 * time.Millisecond // Default timeout
 
-	// Use configuration if provided
+	// Use Triton-specific configuration if provided
 	if config.Triton != nil {
-		if config.Triton.ServerURL != "" {
-			serverURL = config.Triton.ServerURL
-		}
 		if config.Triton.ModelName != "" {
 			modelName = config.Triton.ModelName
 		}
@@ -67,7 +125,7 @@ func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 			version = config.Triton.Version
 		}
 		if config.Triton.Timeout > 0 {
-			timeout = time.Duration(config.Triton.Timeout) * time.Second
+			timeout = time.Duration(config.Triton.Timeout) * time.Millisecond
 		}
 	}
 
@@ -84,19 +142,16 @@ func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 
 // Predict performs inference via Triton Inference Server
 func (t *TritonEvaluator) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
-	// Convert MLY params to Triton request format
 	tritonRequest, err := t.convertToTritonRequest(params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert params to Triton format: %w", err)
 	}
 
-	// Send request to Triton
 	tritonResponse, err := t.sendTritonRequest(ctx, tritonRequest)
 	if err != nil {
 		return nil, fmt.Errorf("triton inference failed for model %s: %w", t.config.ID, err)
 	}
 
-	// Convert Triton response to MLY format
 	result := t.convertFromTritonResponse(tritonResponse)
 	return result, nil
 }
@@ -109,27 +164,21 @@ func (t *TritonEvaluator) convertToTritonRequest(params []interface{}) (*TritonR
 
 	var inputs []TritonInput
 
-	// MLY params are processed into []interface{} where each element corresponds to a model input
-	// The format is [][]T where the first slice is for different examples in a batch
-	// and the second slice is always length 1 for single values
-
 	// Get the input definitions to map indices to names
 	inputDefs := t.getInputDefinitions()
 
+	// Build index-to-name map
+	indexToName := make(map[int]string)
+	for name, input := range inputDefs {
+		if domainInput, ok := input.(*domain.Input); ok && !domainInput.Auxiliary {
+			indexToName[domainInput.Index] = name
+		}
+	}
+
 	// Convert each parameter to Triton input format
 	for i, param := range params {
-		// Find the input name for this index
-		inputName := ""
-		for name, input := range inputDefs {
-			if domainInput, ok := input.(*domain.Input); ok {
-				if domainInput.Index == i && !domainInput.Auxiliary {
-					inputName = name
-					break
-				}
-			}
-		}
-
-		if inputName == "" {
+		inputName, exists := indexToName[i]
+		if !exists {
 			return nil, fmt.Errorf("no input name found for index %d", i)
 		}
 
@@ -148,7 +197,7 @@ func (t *TritonEvaluator) convertToTritonRequest(params []interface{}) (*TritonR
 				}
 				inputs = append(inputs, TritonInput{
 					Name:     inputName,
-					Shape:    []int{batchSize, 1}, // Dynamic batch size
+					Shape:    []int{batchSize, 1},
 					DataType: "BYTES",
 					Data:     data,
 				})
@@ -156,48 +205,48 @@ func (t *TritonEvaluator) convertToTritonRequest(params []interface{}) (*TritonR
 		case [][]int:
 			if len(v) > 0 {
 				batchSize := len(v)
-				data := make([]string, batchSize)
+				data := make([]int, batchSize)
 				for j := 0; j < batchSize; j++ {
 					if len(v[j]) > 0 {
-						data[j] = fmt.Sprintf("%d", v[j][0])
+						data[j] = v[j][0]
 					}
 				}
 				inputs = append(inputs, TritonInput{
 					Name:     inputName,
 					Shape:    []int{batchSize, 1},
-					DataType: "BYTES",
+					DataType: "INT32",
 					Data:     data,
 				})
 			}
 		case [][]float32:
 			if len(v) > 0 {
 				batchSize := len(v)
-				data := make([]string, batchSize)
+				data := make([]float32, batchSize)
 				for j := 0; j < batchSize; j++ {
 					if len(v[j]) > 0 {
-						data[j] = fmt.Sprintf("%f", v[j][0])
+						data[j] = v[j][0]
 					}
 				}
 				inputs = append(inputs, TritonInput{
 					Name:     inputName,
 					Shape:    []int{batchSize, 1},
-					DataType: "BYTES",
+					DataType: "FP32",
 					Data:     data,
 				})
 			}
 		case [][]float64:
 			if len(v) > 0 {
 				batchSize := len(v)
-				data := make([]string, batchSize)
+				data := make([]float64, batchSize)
 				for j := 0; j < batchSize; j++ {
 					if len(v[j]) > 0 {
-						data[j] = fmt.Sprintf("%f", v[j][0])
+						data[j] = v[j][0]
 					}
 				}
 				inputs = append(inputs, TritonInput{
 					Name:     inputName,
 					Shape:    []int{batchSize, 1},
-					DataType: "BYTES",
+					DataType: "FP64",
 					Data:     data,
 				})
 			}
@@ -216,14 +265,14 @@ func (t *TritonEvaluator) getInputDefinitions() map[string]interface{} {
 
 // sendTritonRequest sends HTTP request to Triton server
 func (t *TritonEvaluator) sendTritonRequest(ctx context.Context, request *TritonRequest) (*TritonResponse, error) {
-	// Build Triton inference URL
-	url := fmt.Sprintf("%s/v2/models/%s/infer", t.serverURL, t.modelName)
+	url := t.serverURL + "/v2/models/" + t.modelName + "/infer"
 
-	// Marshal request to JSON
-	jsonData, err := json.Marshal(request)
-	if err != nil {
+	buf := bytes.NewBuffer(make([]byte, 0, 1024))
+	enc := gojay.NewEncoder(buf)
+	if err := enc.EncodeObject(request); err != nil {
 		return nil, fmt.Errorf("failed to marshal Triton request: %w", err)
 	}
+	jsonData := buf.Bytes()
 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
@@ -232,19 +281,29 @@ func (t *TritonEvaluator) sendTritonRequest(ctx context.Context, request *Triton
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	// Send request
-	resp, err := t.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("http request failed: %w", err)
+	// Send request with retry logic
+	var resp *http.Response
+	maxRetries := 3
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		resp, err = t.httpClient.Do(httpReq)
+		if err == nil {
+			break
+		}
+		if attempt == maxRetries {
+			return nil, fmt.Errorf("http request failed after %d attempts: %w", maxRetries+1, err)
+		}
+		time.Sleep(time.Duration(5*(1<<attempt)) * time.Millisecond)
+
+		if attempt < maxRetries {
+			httpReq.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+		}
 	}
 	defer resp.Body.Close()
 
-	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("triton server returned status %d", resp.StatusCode)
 	}
 
-	// Parse response
 	var tritonResponse TritonResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tritonResponse); err != nil {
 		return nil, fmt.Errorf("failed to parse Triton response: %w", err)
@@ -257,66 +316,24 @@ func (t *TritonEvaluator) sendTritonRequest(ctx context.Context, request *Triton
 func (t *TritonEvaluator) convertFromTritonResponse(response *TritonResponse) []interface{} {
 	var result []interface{}
 
-	// Convert each output to MLY format
 	for _, output := range response.Outputs {
-		converted := t.convertToMLYFormat(output.Data)
-		result = append(result, converted)
+		if data, ok := output.Data.([]interface{}); ok && len(data) > 0 {
+			batchSize := len(data)
+			converted := make([][]float32, batchSize)
+			for i, v := range data {
+				if f, ok := v.(float64); ok {
+					converted[i] = []float32{float32(f)}
+				} else {
+					converted[i] = []float32{0.0}
+				}
+			}
+			result = append(result, converted)
+		} else {
+			result = append(result, [][]float32{{0.0}})
+		}
 	}
 
 	return result
-}
-
-func (t *TritonEvaluator) convertToMLYFormat(data interface{}) interface{} {
-	switch d := data.(type) {
-	case []interface{}:
-		if len(d) > 0 {
-			batchSize := len(d)
-			// Default to float32
-			floatArray := make([][]float32, batchSize)
-			for i, v := range d {
-				switch val := v.(type) {
-				case float64:
-					floatArray[i] = []float32{float32(val)}
-				case float32:
-					floatArray[i] = []float32{val}
-				case int:
-					floatArray[i] = []float32{float32(val)}
-				case int32:
-					floatArray[i] = []float32{float32(val)}
-				case int64:
-					floatArray[i] = []float32{float32(val)}
-				default:
-					// Fallback to string if not numeric
-					stringArray := make([][]string, batchSize)
-					for j, sv := range d {
-						stringArray[j] = []string{fmt.Sprintf("%v", sv)}
-					}
-					return stringArray
-				}
-			}
-			return floatArray
-		}
-	case []float64:
-		converted := make([]float32, len(d))
-		for i, v := range d {
-			converted[i] = float32(v)
-		}
-		return [][]float32{converted}
-	case []float32:
-		return [][]float32{d}
-	case []string:
-		return [][]string{d}
-	case float64:
-		return [][]float32{{float32(d)}}
-	case float32:
-		return [][]float32{{d}}
-	case string:
-		return [][]string{{d}}
-	default:
-		return [][]string{{fmt.Sprintf("%v", d)}}
-	}
-
-	return [][]float32{{0.0}}
 }
 
 // Signature returns model signature information
@@ -334,14 +351,12 @@ func (t *TritonEvaluator) Signature() interface{} {
 			})
 		}
 	} else {
-		// Fallback: single generic input
-		inputs = []domain.Input{
-			{Name: "triton_input", Index: 0},
-		}
+		panic("Triton model" + t.config.ID + " requires explicit input configuration. " +
+			"Add 'inputs' section to your model configuration YAML with field definitions")
 	}
 
 	outputs = []domain.Output{
-		{Name: "output_0", Index: 0, DataType: "float32"},
+		{Name: "output_0", Index: 0, DataType: "float64"},
 	}
 
 	return &domain.Signature{
@@ -391,27 +406,13 @@ func (t *TritonEvaluator) Inputs() map[string]interface{} {
 				Name:      input.Name,
 				Index:     input.Index,
 				Type:      inputType,
-				Vocab:     !input.Wildcard, // Vocab false means wildcard (no vocabulary restriction)
+				Vocab:     !input.Wildcard,
 				Auxiliary: input.Auxiliary,
 			}
 		}
 	} else {
-		// For Triton models without explicit input configuration,
-		// we should discover the schema from Triton's model metadata API
-		// or require explicit configuration. Hardcoded defaults are error-prone.
-		// TODO: Implement Triton model metadata discovery via /v2/models/{model}/config
-
-		// For now, return empty inputs to signal that schema discovery is needed
-		// This will cause validation errors at request time if inputs are missing,
-		// which is safer than hardcoded defaults that may not match the actual model
-		//
-		// To fix this, users should specify inputs in their model configuration YAML:
-		// inputs:
-		//   - name: "input_field_name"
-		//     dataType: "string"
-		//     wildcard: false
-		//     auxiliary: false
-		return make(map[string]interface{})
+		panic("Triton model" + t.config.ID + " requires explicit input configuration. " +
+			"Add 'inputs' section to your model configuration YAML with field definitions")
 	}
 
 	return inputs

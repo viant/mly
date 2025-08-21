@@ -351,38 +351,7 @@ func New(ctx context.Context,
 		opt.Apply(srv)
 	}
 
-	err := func() error {
-		err := srv.reloadIfNeeded(ctx)
-		if err != nil {
-			return err
-		}
-
-		srv.transformer, err = transform.Get(cfg.Transformer)
-		if err != nil {
-			return err
-		}
-
-		if err = srv.initDatastore(cfg, datastores); err != nil {
-			return err
-		}
-
-		if cfg.Stream != nil {
-			srv.stream, err = stream.NewService(cfg.ID, cfg.Stream, fs, srv.Dictionary, func() []domain.Output {
-				return srv.Signature().Outputs
-			}, metrics)
-		}
-
-		if err != nil {
-			return err
-		}
-
-		if srv.inputProvider, err = gtlyop.NewObjectProvider(cfg); err != nil {
-			return err
-		}
-
-		return nil
-	}()
-
+	err := srv.initializeService(ctx, cfg, fs, metrics, datastores)
 	if err != nil {
 		return nil, err
 	}
@@ -390,6 +359,41 @@ func New(ctx context.Context,
 	go srv.scheduleModelReload()
 
 	return srv, err
+}
+
+func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs afs.Service, metrics *gmetric.Service, datastores map[string]*datastore.Service) error {
+	err := s.reloadIfNeeded(ctx)
+	if err != nil {
+		return err
+	}
+
+	s.transformer, err = transform.Get(cfg.Transformer)
+	if err != nil {
+		return err
+	}
+
+	if err = s.initDatastore(cfg, datastores); err != nil {
+		return err
+	}
+
+	if cfg.Stream != nil {
+		s.stream, err = stream.NewService(cfg.ID, cfg.Stream, fs, s.Dictionary, func() []domain.Output {
+			if sig := s.Signature(); sig != nil {
+				return sig.Outputs
+			}
+			return nil
+		}, metrics)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if s.inputProvider, err = gtlyop.NewObjectProvider(cfg); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // NewWithPlatform creates a service with platform router support
@@ -417,7 +421,10 @@ func NewWithPlatform(ctx context.Context,
 		tfService:      nil, // Will be set for TensorFlow platform for backward compatibility
 		useDatastore:   cfg.UseDictionary() && cfg.DataStore != "",
 		serviceMetric:  metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
-		reloadMetric:   metrics.MultiOperationCounter(location, cfg.ID+"Reload", cfg.ID+" reloading", time.Microsecond, time.Minute, 1, sstat.NewCtxErrOnly()),
+	}
+
+	if cfg.GetPlatform() != "triton" {
+		srv.reloadMetric = metrics.MultiOperationCounter(location, cfg.ID+"Reload", cfg.ID+" reloading", time.Microsecond, time.Minute, 1, sstat.NewCtxErrOnly())
 	}
 
 	// For backward compatibility, still expose tfService for TensorFlow models
@@ -432,46 +439,14 @@ func NewWithPlatform(ctx context.Context,
 		opt.Apply(srv)
 	}
 
-	err = func() error {
-		err := srv.reloadIfNeeded(ctx)
-		if err != nil {
-			return err
-		}
-
-		srv.transformer, err = transform.Get(cfg.Transformer)
-		if err != nil {
-			return err
-		}
-
-		if err = srv.initDatastore(cfg, datastores); err != nil {
-			return err
-		}
-
-		if cfg.Stream != nil {
-			srv.stream, err = stream.NewService(cfg.ID, cfg.Stream, fs, srv.Dictionary, func() []domain.Output {
-				if sig := srv.Signature(); sig != nil {
-					return sig.Outputs
-				}
-				return nil
-			}, metrics)
-		}
-
-		if err != nil {
-			return err
-		}
-
-		if srv.inputProvider, err = gtlyop.NewObjectProvider(cfg); err != nil {
-			return err
-		}
-
-		return nil
-	}()
-
+	err = srv.initializeService(ctx, cfg, fs, metrics, datastores)
 	if err != nil {
 		return nil, err
 	}
 
-	go srv.scheduleModelReload()
+	if cfg.GetPlatform() != "triton" {
+		go srv.scheduleModelReload()
+	}
 
 	return srv, err
 }
