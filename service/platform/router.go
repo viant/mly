@@ -28,7 +28,7 @@ type PlatformEvaluator interface {
 	Dictionary() *common.Dictionary
 
 	// Inputs returns the model input definitions for request validation
-	Inputs() map[string]interface{}
+	Inputs() map[string]*domain.Input
 
 	// Stats returns platform-specific statistics
 	Stats(stats map[string]interface{})

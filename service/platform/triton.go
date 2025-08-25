@@ -109,7 +109,7 @@ type TritonEvaluator struct {
 	version    string
 
 	signature *domain.Signature
-	inputs    map[string]interface{}
+	inputs    map[string]*domain.Input
 }
 
 // NewTritonEvaluator creates a new Triton evaluator
@@ -178,8 +178,8 @@ func (t *TritonEvaluator) convertToTritonRequest(params []interface{}) (*TritonR
 	// Build index-to-name map
 	indexToName := make(map[int]string)
 	for name, input := range inputDefs {
-		if domainInput, ok := input.(*domain.Input); ok && !domainInput.Auxiliary {
-			indexToName[domainInput.Index] = name
+		if !input.Auxiliary {
+			indexToName[input.Index] = name
 		}
 	}
 
@@ -267,7 +267,7 @@ func (t *TritonEvaluator) convertToTritonRequest(params []interface{}) (*TritonR
 }
 
 // getInputDefinitions returns the input definitions for mapping indices to names
-func (t *TritonEvaluator) getInputDefinitions() map[string]interface{} {
+func (t *TritonEvaluator) getInputDefinitions() map[string]*domain.Input {
 	return t.Inputs()
 }
 
@@ -364,7 +364,6 @@ func (t *TritonEvaluator) computeSignature() *domain.Signature {
 	}
 
 	if len(t.config.Outputs) > 0 {
-		// Use configured outputs
 		for i, output := range t.config.Outputs {
 			outputs = append(outputs, domain.Output{
 				Name:     output.Name,
@@ -373,10 +372,8 @@ func (t *TritonEvaluator) computeSignature() *domain.Signature {
 			})
 		}
 	} else {
-		// Default output when no configuration provided
-		outputs = []domain.Output{
-			{Name: "output_0", Index: 0, DataType: "float32"},
-		}
+		panic("Triton model " + t.config.ID + " requires explicit output configuration. " +
+			"Add 'outputs' section to your model configuration YAML with field definitions")
 	}
 
 	return &domain.Signature{
@@ -406,8 +403,8 @@ func (t *TritonEvaluator) Stats(stats map[string]interface{}) {
 }
 
 // computeInputs calculates the inputs map once at instantiation time
-func (t *TritonEvaluator) computeInputs() map[string]interface{} {
-	inputs := make(map[string]interface{})
+func (t *TritonEvaluator) computeInputs() map[string]*domain.Input {
+	inputs := make(map[string]*domain.Input)
 
 	// If the model config specifies inputs, use those (like mlfdv3 model)
 	if len(t.config.Inputs) > 0 {
@@ -444,7 +441,7 @@ func (t *TritonEvaluator) computeInputs() map[string]interface{} {
 }
 
 // Inputs returns the cached model inputs for request validation
-func (t *TritonEvaluator) Inputs() map[string]interface{} {
+func (t *TritonEvaluator) Inputs() map[string]*domain.Input {
 	return t.inputs
 }
 

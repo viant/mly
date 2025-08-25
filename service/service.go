@@ -392,14 +392,7 @@ func (s *Service) NewRequest() *request.Request {
 	var inputs map[string]*domain.Input
 
 	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		evaluatorInputs := s.evaluatorContext.Evaluator.Inputs()
-		// Convert from map[string]interface{} to map[string]*domain.Input
-		inputs = make(map[string]*domain.Input)
-		for k, v := range evaluatorInputs {
-			if domainInput, ok := v.(*domain.Input); ok {
-				inputs[k] = domainInput
-			}
-		}
+		inputs = s.evaluatorContext.Evaluator.Inputs()
 	}
 
 	return request.NewRequest(numKeyInputs, inputs)
@@ -450,20 +443,13 @@ func (s *Service) scheduleModelReload() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		// Only record metrics if reloadMetric is initialized
-		var onDone func(time.Time, ...interface{})
 		stats := sstat.NewValues()
 		if s.reloadMetric != nil {
-			realOnDone := s.reloadMetric.Begin(time.Now())
-			onDone = func(t time.Time, values ...interface{}) {
-				realOnDone(t, values...)
-			}
-		} else {
-			onDone = func(time.Time, ...interface{}) {} // No-op for non-reloadable platforms
+			onDone := s.reloadMetric.Begin(time.Now())
+			defer func() {
+				onDone(time.Now(), stats.Values()...)
+			}()
 		}
-		defer func() {
-			onDone(time.Now(), stats.Values()...)
-		}()
 
 		err := s.reloadIfNeeded(ctx)
 		if err != nil {

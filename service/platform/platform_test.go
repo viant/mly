@@ -27,6 +27,9 @@ func TestTritonEvaluator_Creation(t *testing.T) {
 			Inputs: []*shared.Field{
 				{Name: "test_input", Index: 0, DataType: "string"},
 			},
+			Outputs: []*shared.Field{
+				{Name: "output", Index: 0, DataType: "float32"},
+			},
 		},
 	}
 
@@ -47,6 +50,9 @@ func TestTritonEvaluator_Signature(t *testing.T) {
 			Inputs: []*shared.Field{
 				{Name: "input1", Index: 0, DataType: "string"},
 				{Name: "input2", Index: 1, DataType: "float32"},
+			},
+			Outputs: []*shared.Field{
+				{Name: "output_0", Index: 0, DataType: "float32"},
 			},
 		},
 	}
@@ -109,6 +115,9 @@ func TestTritonEvaluator_Dictionary(t *testing.T) {
 			Inputs: []*shared.Field{
 				{Name: "test_input", Index: 0, DataType: "string"},
 			},
+			Outputs: []*shared.Field{
+				{Name: "output", Index: 0, DataType: "float32"},
+			},
 		},
 	}
 	evaluator := NewTritonEvaluator(cfg)
@@ -125,6 +134,9 @@ func TestTritonEvaluator_InputsWithConfig(t *testing.T) {
 			Inputs: []*shared.Field{
 				{Name: "src", Index: 0, DataType: "string"},
 				{Name: "platform", Index: 1, DataType: "string"},
+			},
+			Outputs: []*shared.Field{
+				{Name: "output", Index: 0, DataType: "float32"},
 			},
 		},
 	}
@@ -148,12 +160,32 @@ func TestTritonEvaluator_InputsDefault(t *testing.T) {
 	})
 }
 
+func TestTritonEvaluator_OutputsDefault(t *testing.T) {
+	cfg := &config.Model{
+		ID: "test_triton",
+		MetaInput: shared.MetaInput{
+			Inputs: []*shared.Field{
+				{Name: "test_input", Index: 0, DataType: "string"},
+			},
+			// No outputs configured - should panic
+		},
+	}
+
+	// This should panic because no outputs are configured
+	assert.Panics(t, func() {
+		NewTritonEvaluator(cfg)
+	})
+}
+
 func TestTritonEvaluator_Stats(t *testing.T) {
 	evaluator := NewTritonEvaluator(&config.Model{
 		ID: "test",
 		MetaInput: shared.MetaInput{
 			Inputs: []*shared.Field{
 				{Name: "test_input", Index: 0, DataType: "string"},
+			},
+			Outputs: []*shared.Field{
+				{Name: "output", Index: 0, DataType: "float32"},
 			},
 		},
 	})
@@ -170,6 +202,9 @@ func TestTritonEvaluator_Close(t *testing.T) {
 		MetaInput: shared.MetaInput{
 			Inputs: []*shared.Field{
 				{Name: "test_input", Index: 0, DataType: "string"},
+			},
+			Outputs: []*shared.Field{
+				{Name: "output", Index: 0, DataType: "float32"},
 			},
 		},
 	})

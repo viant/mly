@@ -46,14 +46,8 @@ func (t *TensorFlowEvaluator) Close() error {
 }
 
 // Inputs returns the model inputs for request validation
-func (t *TensorFlowEvaluator) Inputs() map[string]interface{} {
-	tfInputs := t.TfService.Inputs()
-	// Convert to generic interface{} map for platform compatibility
-	result := make(map[string]interface{})
-	for k, v := range tfInputs {
-		result[k] = v
-	}
-	return result
+func (t *TensorFlowEvaluator) Inputs() map[string]*domain.Input {
+	return t.TfService.Inputs()
 }
 
 // SetReloadOK sets the reload status flag for TensorFlow models

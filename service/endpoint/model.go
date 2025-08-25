@@ -124,7 +124,6 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 					// Default to TensorFlow for models without explicit platform
 					model.Platform = "tensorflow"
 				}
-				log.Printf("[%s] Using platform-specific service creation for platform: %s", model.ID, model.Platform)
 				modelSrv, err = service.NewWithPlatform(context.Background(), model, fs, metrics, datastores, sema, cfge.MaxEvaluatorWait, serviceOpts...)
 
 				if err != nil {
