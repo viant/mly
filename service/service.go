@@ -102,7 +102,6 @@ func (s *Service) Stats() map[string]interface{} {
 	st := make(map[string]interface{})
 
 	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		st["platform"] = string(s.evaluatorContext.Platform)
 		s.evaluatorContext.Evaluator.Stats(st)
 	}
 
@@ -187,7 +186,7 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
 		result, err = s.evaluatorContext.Evaluator.Predict(ctx, request.Feeds)
 	} else {
-		return nil, fmt.Errorf("no evaluator configured for model %s", s.config.ID)
+		panic("no evaluator configured for model " + s.config.ID)
 	}
 
 	if err != nil {
