@@ -156,16 +156,12 @@ func (m *Model) Validate() error {
 // TritonConfig represents Triton Inference Server specific configuration
 type TritonConfig struct {
 	ModelName string `json:",omitempty" yaml:",omitempty"` // Model name in Triton
-	Version   string `json:",omitempty" yaml:",omitempty"` // Model version (defaults to "1")
 	Timeout   int    `json:",omitempty" yaml:",omitempty"` // HTTP timeout in milliseconds
 }
 
 func (t *TritonConfig) Validate() error {
 	if t.ModelName == "" {
 		return fmt.Errorf("Triton ModelName is required")
-	}
-	if t.Version == "" {
-		t.Version = "1" // Default version
 	}
 	if t.Timeout <= 0 {
 		t.Timeout = 100

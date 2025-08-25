@@ -106,7 +106,6 @@ type TritonEvaluator struct {
 	httpClient *http.Client
 	serverURL  string
 	modelName  string
-	version    string
 
 	signature *domain.Signature
 	inputs    map[string]*domain.Input
@@ -116,16 +115,12 @@ type TritonEvaluator struct {
 func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 	serverURL := config.URL           // Use model's URL field for Triton server endpoint
 	modelName := config.ID            // Default to model ID
-	version := "1"                    // Default version
 	timeout := 100 * time.Millisecond // Default timeout
 
 	// Use Triton-specific configuration if provided
 	if config.Triton != nil {
 		if config.Triton.ModelName != "" {
 			modelName = config.Triton.ModelName
-		}
-		if config.Triton.Version != "" {
-			version = config.Triton.Version
 		}
 		if config.Triton.Timeout > 0 {
 			timeout = time.Duration(config.Triton.Timeout) * time.Millisecond
@@ -136,7 +131,6 @@ func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 		config:    config,
 		serverURL: serverURL,
 		modelName: modelName,
-		version:   version,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -398,7 +392,6 @@ func (t *TritonEvaluator) Dictionary() *common.Dictionary {
 func (t *TritonEvaluator) Stats(stats map[string]interface{}) {
 	stats["triton_server_url"] = t.serverURL
 	stats["triton_model_name"] = t.modelName
-	stats["triton_version"] = t.version
 	stats["model_id"] = t.config.ID
 }
 
