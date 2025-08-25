@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/viant/mly/service/config"
+	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/common"
 )
 
@@ -21,7 +22,7 @@ type PlatformEvaluator interface {
 	Predict(ctx context.Context, params []interface{}) ([]interface{}, error)
 
 	// Signature returns model signature information
-	Signature() interface{}
+	Signature() *domain.Signature
 
 	// Dictionary returns vocabulary dictionary if available
 	Dictionary() *common.Dictionary

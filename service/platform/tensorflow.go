@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 
+	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/shared/common"
 )
@@ -25,7 +26,7 @@ func (t *TensorFlowEvaluator) Predict(ctx context.Context, params []interface{})
 }
 
 // Signature delegates to the TensorFlow service
-func (t *TensorFlowEvaluator) Signature() interface{} {
+func (t *TensorFlowEvaluator) Signature() *domain.Signature {
 	return t.TfService.Signature()
 }
 

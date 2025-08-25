@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/viant/mly/service/config"
-	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/transfer"
 )
@@ -23,6 +22,11 @@ func TestTritonEvaluator_Creation(t *testing.T) {
 			ModelName: "test_model",
 			Version:   "1",
 			Timeout:   30,
+		},
+		MetaInput: shared.MetaInput{
+			Inputs: []*shared.Field{
+				{Name: "test_input", Index: 0, DataType: "string"},
+			},
 		},
 	}
 
@@ -52,18 +56,61 @@ func TestTritonEvaluator_Signature(t *testing.T) {
 
 	assert.NotNil(t, signature)
 
-	// Verify signature structure
-	if sig, ok := signature.(*domain.Signature); ok {
-		assert.Len(t, sig.Inputs, 2)
-		assert.Equal(t, "input1", sig.Inputs[0].Name)
-		assert.Equal(t, "input2", sig.Inputs[1].Name)
-		assert.Len(t, sig.Outputs, 1)
-		assert.Equal(t, "output_0", sig.Outputs[0].Name)
+	// Verify signature structure (signature is now directly *domain.Signature)
+	assert.Len(t, signature.Inputs, 2)
+	assert.Equal(t, "input1", signature.Inputs[0].Name)
+	assert.Equal(t, "input2", signature.Inputs[1].Name)
+	assert.Len(t, signature.Outputs, 1)
+	assert.Equal(t, "output_0", signature.Outputs[0].Name)
+	assert.Equal(t, "float32", signature.Outputs[0].DataType)
+}
+
+func TestTritonEvaluator_SignatureWithConfiguredOutputs(t *testing.T) {
+	cfg := &config.Model{
+		ID: "test_triton_custom_outputs",
+		MetaInput: shared.MetaInput{
+			Inputs: []*shared.Field{
+				{Name: "input1", Index: 0, DataType: "string"},
+			},
+			Outputs: []*shared.Field{
+				{Name: "prediction", DataType: "float64"},
+				{Name: "confidence", DataType: "float32"},
+			},
+		},
 	}
+
+	evaluator := NewTritonEvaluator(cfg)
+	signature := evaluator.Signature()
+
+	assert.NotNil(t, signature)
+
+	// Verify inputs
+	assert.Len(t, signature.Inputs, 1)
+	assert.Equal(t, "input1", signature.Inputs[0].Name)
+
+	// Verify configured outputs (following TensorFlow pattern)
+	assert.Len(t, signature.Outputs, 2)
+	assert.Equal(t, "prediction", signature.Outputs[0].Name)
+	assert.Equal(t, "float64", signature.Outputs[0].DataType)
+	assert.Equal(t, 0, signature.Outputs[0].Index)
+
+	assert.Equal(t, "confidence", signature.Outputs[1].Name)
+	assert.Equal(t, "float32", signature.Outputs[1].DataType)
+	assert.Equal(t, 1, signature.Outputs[1].Index)
+
+	// Verify Output field is set to first output
+	assert.Equal(t, signature.Outputs[0], signature.Output)
 }
 
 func TestTritonEvaluator_Dictionary(t *testing.T) {
-	cfg := &config.Model{ID: "test_triton"}
+	cfg := &config.Model{
+		ID: "test_triton",
+		MetaInput: shared.MetaInput{
+			Inputs: []*shared.Field{
+				{Name: "test_input", Index: 0, DataType: "string"},
+			},
+		},
+	}
 	evaluator := NewTritonEvaluator(cfg)
 
 	dict := evaluator.Dictionary()
@@ -94,17 +141,22 @@ func TestTritonEvaluator_InputsWithConfig(t *testing.T) {
 
 func TestTritonEvaluator_InputsDefault(t *testing.T) {
 	cfg := &config.Model{ID: "test_triton"}
-	evaluator := NewTritonEvaluator(cfg)
 
-	// Should panic when no input configuration is provided
-	// This forces explicit configuration and prevents runtime errors
+	// This should panic because no inputs are configured
 	assert.Panics(t, func() {
-		evaluator.Inputs()
-	}, "Expected panic when calling Inputs() without explicit configuration")
+		NewTritonEvaluator(cfg)
+	})
 }
 
 func TestTritonEvaluator_Stats(t *testing.T) {
-	evaluator := NewTritonEvaluator(&config.Model{ID: "test"})
+	evaluator := NewTritonEvaluator(&config.Model{
+		ID: "test",
+		MetaInput: shared.MetaInput{
+			Inputs: []*shared.Field{
+				{Name: "test_input", Index: 0, DataType: "string"},
+			},
+		},
+	})
 	stats := make(map[string]interface{})
 
 	// Should not panic and should be able to add stats
@@ -113,7 +165,14 @@ func TestTritonEvaluator_Stats(t *testing.T) {
 }
 
 func TestTritonEvaluator_Close(t *testing.T) {
-	evaluator := NewTritonEvaluator(&config.Model{ID: "test"})
+	evaluator := NewTritonEvaluator(&config.Model{
+		ID: "test",
+		MetaInput: shared.MetaInput{
+			Inputs: []*shared.Field{
+				{Name: "test_input", Index: 0, DataType: "string"},
+			},
+		},
+	})
 
 	err := evaluator.Close()
 	assert.NoError(t, err)

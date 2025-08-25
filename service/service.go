@@ -86,11 +86,7 @@ func (s *Service) Config() *config.Model {
 
 func (s *Service) Signature() *domain.Signature {
 	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		if sig := s.evaluatorContext.Evaluator.Signature(); sig != nil {
-			if domainSig, ok := sig.(*domain.Signature); ok {
-				return domainSig
-			}
-		}
+		return s.evaluatorContext.Evaluator.Signature()
 	}
 	return nil
 }
@@ -98,14 +94,6 @@ func (s *Service) Signature() *domain.Signature {
 func (s *Service) Dictionary() *common.Dictionary {
 	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
 		return s.evaluatorContext.Evaluator.Dictionary()
-	}
-	return nil
-}
-
-// Inputs returns the model input definitions for request validation
-func (s *Service) Inputs() map[string]interface{} {
-	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		return s.evaluatorContext.Evaluator.Inputs()
 	}
 	return nil
 }

@@ -107,6 +107,9 @@ type TritonEvaluator struct {
 	serverURL  string
 	modelName  string
 	version    string
+
+	signature *domain.Signature
+	inputs    map[string]interface{}
 }
 
 // NewTritonEvaluator creates a new Triton evaluator
@@ -129,7 +132,7 @@ func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 		}
 	}
 
-	return &TritonEvaluator{
+	evaluator := &TritonEvaluator{
 		config:    config,
 		serverURL: serverURL,
 		modelName: modelName,
@@ -138,6 +141,11 @@ func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 			Timeout: timeout,
 		},
 	}
+
+	evaluator.signature = evaluator.computeSignature()
+	evaluator.inputs = evaluator.computeInputs()
+
+	return evaluator
 }
 
 // Predict performs inference via Triton Inference Server
@@ -336,8 +344,8 @@ func (t *TritonEvaluator) convertFromTritonResponse(response *TritonResponse) []
 	return result
 }
 
-// Signature returns model signature information
-func (t *TritonEvaluator) Signature() interface{} {
+// computeSignature calculates the signature once at instantiation time
+func (t *TritonEvaluator) computeSignature() *domain.Signature {
 	var inputs []domain.Input
 	var outputs []domain.Output
 
@@ -351,12 +359,24 @@ func (t *TritonEvaluator) Signature() interface{} {
 			})
 		}
 	} else {
-		panic("Triton model" + t.config.ID + " requires explicit input configuration. " +
+		panic("Triton model " + t.config.ID + " requires explicit input configuration. " +
 			"Add 'inputs' section to your model configuration YAML with field definitions")
 	}
 
-	outputs = []domain.Output{
-		{Name: "output_0", Index: 0, DataType: "float64"},
+	if len(t.config.Outputs) > 0 {
+		// Use configured outputs
+		for i, output := range t.config.Outputs {
+			outputs = append(outputs, domain.Output{
+				Name:     output.Name,
+				Index:    i,
+				DataType: output.DataType,
+			})
+		}
+	} else {
+		// Default output when no configuration provided
+		outputs = []domain.Output{
+			{Name: "output_0", Index: 0, DataType: "float32"},
+		}
 	}
 
 	return &domain.Signature{
@@ -364,6 +384,11 @@ func (t *TritonEvaluator) Signature() interface{} {
 		Outputs: outputs,
 		Output:  outputs[0],
 	}
+}
+
+// Signature returns the cached model signature information
+func (t *TritonEvaluator) Signature() *domain.Signature {
+	return t.signature
 }
 
 // Dictionary returns vocabulary dictionary (Triton models typically don't use MLY dictionaries)
@@ -380,8 +405,8 @@ func (t *TritonEvaluator) Stats(stats map[string]interface{}) {
 	stats["model_id"] = t.config.ID
 }
 
-// Inputs returns the model inputs for request validation
-func (t *TritonEvaluator) Inputs() map[string]interface{} {
+// computeInputs calculates the inputs map once at instantiation time
+func (t *TritonEvaluator) computeInputs() map[string]interface{} {
 	inputs := make(map[string]interface{})
 
 	// If the model config specifies inputs, use those (like mlfdv3 model)
@@ -394,7 +419,7 @@ func (t *TritonEvaluator) Inputs() map[string]interface{} {
 				case "string":
 					inputType = reflect.TypeOf("")
 				case "int":
-					inputType = reflect.TypeOf(int(0))
+					inputType = reflect.TypeOf(0)
 				case "float32":
 					inputType = reflect.TypeOf(float32(0))
 				case "float64":
@@ -411,11 +436,16 @@ func (t *TritonEvaluator) Inputs() map[string]interface{} {
 			}
 		}
 	} else {
-		panic("Triton model" + t.config.ID + " requires explicit input configuration. " +
+		panic("Triton model " + t.config.ID + " requires explicit input configuration. " +
 			"Add 'inputs' section to your model configuration YAML with field definitions")
 	}
 
 	return inputs
+}
+
+// Inputs returns the cached model inputs for request validation
+func (t *TritonEvaluator) Inputs() map[string]interface{} {
+	return t.inputs
 }
 
 // Close releases Triton client resources
