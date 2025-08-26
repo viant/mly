@@ -1,0 +1,12 @@
+{
+  "model_name":"sli",
+  "model_version":"1",
+  "outputs":[
+    {
+      "name":"expand",
+      "datatype":"INT64",
+      "shape":[1,1],
+      "data": [25]
+    }
+  ]
+}

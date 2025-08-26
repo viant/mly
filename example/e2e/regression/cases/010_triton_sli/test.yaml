@@ -1,0 +1,13 @@
+init:
+  parentPath: $parent.path
+
+pipeline:
+  test:
+    action: http/runner:send
+    requests:
+      - Method: POST
+        URL: http://127.0.0.1:8000/v2/models/sli/infer
+        JSONBody: { "inputs": [ { "name": "sa", "shape": [1,1], "datatype": "BYTES", "data": ["a"] }, { "name": "sl", "shape": [1,1], "datatype": "BYTES", "data": ["a"] } ] }
+        Expect:
+          Code: 200
+          Body: $LoadJSON('${parent.path}/expect.json')
