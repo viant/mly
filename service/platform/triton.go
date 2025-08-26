@@ -345,12 +345,13 @@ func (t *TritonEvaluator) computeSignature() *domain.Signature {
 
 	if len(t.config.Inputs) > 0 {
 		for _, input := range t.config.Inputs {
-			inputs = append(inputs, domain.Input{
-				Name:      input.Name,
-				Index:     input.Index,
-				Vocab:     !input.Wildcard,
-				Auxiliary: input.Auxiliary,
-			})
+			// Only include non-auxiliary inputs in signature
+			if !input.Auxiliary {
+				inputs = append(inputs, domain.Input{
+					Name:  input.Name,
+					Index: input.Index,
+				})
+			}
 		}
 	} else {
 		panic("Triton model " + t.config.ID + " requires explicit input configuration. " +
@@ -421,7 +422,7 @@ func (t *TritonEvaluator) computeInputs() map[string]*domain.Input {
 				Name:      input.Name,
 				Index:     input.Index,
 				Type:      inputType,
-				Vocab:     !input.Wildcard,
+				Vocab:     false, // Triton models don't use MLY dictionaries
 				Auxiliary: input.Auxiliary,
 			}
 		}

@@ -170,6 +170,49 @@ func TestTritonEvaluator_OutputsDefault(t *testing.T) {
 	})
 }
 
+func TestTritonEvaluator_AuxiliaryInputsHandling(t *testing.T) {
+	cfg := &config.Model{
+		ID: "test_triton",
+		MetaInput: shared.MetaInput{
+			Inputs: []*shared.Field{
+				{Name: "key_input", Index: 0, DataType: "string", Auxiliary: false},
+				{Name: "aux_input", Index: 1, DataType: "string", Auxiliary: true},
+				{Name: "another_key", Index: 2, DataType: "int", Auxiliary: false},
+			},
+			Outputs: []*shared.Field{
+				{Name: "output", Index: 0, DataType: "float32"},
+			},
+		},
+	}
+
+	evaluator := NewTritonEvaluator(cfg)
+
+	// Test signature - should only include NON-auxiliary inputs (following TensorFlow pattern)
+	signature := evaluator.Signature()
+	assert.Len(t, signature.Inputs, 2, "Signature should only include non-auxiliary inputs (following TensorFlow pattern)")
+
+	// Check that only non-auxiliary inputs are in signature
+	inputNames := make(map[string]bool)
+	for _, input := range signature.Inputs {
+		inputNames[input.Name] = true
+	}
+	assert.True(t, inputNames["key_input"], "key_input should be in signature")
+	assert.False(t, inputNames["aux_input"], "aux_input should NOT be in signature (following TensorFlow)")
+	assert.True(t, inputNames["another_key"], "another_key should be in signature")
+
+	// Test inputs map - should include ALL inputs (including auxiliary)
+	inputs := evaluator.Inputs()
+	assert.Len(t, inputs, 3, "Inputs map should include all inputs")
+	assert.Contains(t, inputs, "key_input")
+	assert.Contains(t, inputs, "aux_input")
+	assert.Contains(t, inputs, "another_key")
+
+	// Verify auxiliary flag is preserved in inputs map
+	assert.False(t, inputs["key_input"].Auxiliary, "key_input should not be auxiliary")
+	assert.True(t, inputs["aux_input"].Auxiliary, "aux_input should be auxiliary")
+	assert.False(t, inputs["another_key"].Auxiliary, "another_key should not be auxiliary")
+}
+
 func TestTritonEvaluator_Stats(t *testing.T) {
 	evaluator := NewTritonEvaluator(&config.Model{
 		ID: "test",
