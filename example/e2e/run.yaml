@@ -23,6 +23,7 @@ pipeline:
       action: run
       request: '@build'
       tasks: '*'
+
   stop:
     stop:
       action: run

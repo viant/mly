@@ -3,3 +3,4 @@
 .DS_Cache
 .DS_Store
 /vendor
+/example/e2e/logs

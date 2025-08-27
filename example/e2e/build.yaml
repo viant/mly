@@ -13,8 +13,7 @@ pipeline:
       target: $target
       checkError: true
       commands:
-        - cd ${appPath}
-        - go test $(find ${appPath} -name "*.go" -not -path "${appPath}/vendor/*" -exec dirname {} \; | sort -u)
+        - (cd ${appPath}; ./example/e2e/build-tensorflow-go/with-cgo.sh go test ./...)
       env:
         DYLD_LIBRARY_PATH: /usr/local/lib
         LD_LIBRARY_PATH: /usr/local/lib

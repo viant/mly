@@ -23,6 +23,7 @@ pipeline:
       name: mly_triton
       image: 'nvcr.io/nvidia/tritonserver:25.02-py3'
       platform: linux/arm64
+      port: "8000/tcp"
       ports:
         8000: 8000
         8001: 8001
