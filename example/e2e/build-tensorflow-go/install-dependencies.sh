@@ -22,7 +22,7 @@ if [ -n "$IS_MACOS" ]; then
     )
 else
     # download and install libtensorflow
-    curl https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-${os.system}-x86_64-2.4.2.tar.gz | sudo tar -xmzv -C /usr/local
+    curl https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-x86_64-2.4.2.tar.gz | sudo tar -xmzv -C /usr/local
 
     # build tensorflow-go modulein docker
     docker build -t mly-docker-build-tensorflow-go:1.0 \
