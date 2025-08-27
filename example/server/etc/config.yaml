@@ -2,6 +2,29 @@ Endpoint:
   Port: 8086
 
 models:
+  - id: sli_triton
+    url: http://localhost:8000
+    platform: triton
+    triton:
+      modelName: sli
+      timeout: 5
+    useDict: true
+    debug: false
+    datastore: sli_triton
+    keyfields:
+      - sa
+      - sl
+      - aux
+    inputs:
+      - name: sa
+        index: 0
+      - name: sl
+        index: 1
+    outputs:
+      - name: expand
+        index: 0
+        dataType: int
+
   - id: sli
     url: ${appPath}/example/model/string_lookups_int_model
     useDict: true
@@ -87,6 +110,12 @@ connections:
     timeout: 300
 
 datastores:
+  - id: sli_triton
+    connection: localL1
+    namespace: test
+    dataset: sli_triton
+    timeToLiveMs: 30000
+
   - id: sli
     connection: localL1
     namespace: test

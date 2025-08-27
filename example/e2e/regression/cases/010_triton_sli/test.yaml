@@ -6,8 +6,8 @@ pipeline:
     action: http/runner:send
     requests:
       - Method: POST
-        URL: http://127.0.0.1:8000/v2/models/sli/infer
-        JSONBody: { "inputs": [ { "name": "sa", "shape": [1,1], "datatype": "BYTES", "data": ["a"] }, { "name": "sl", "shape": [1,1], "datatype": "BYTES", "data": ["a"] } ] }
+        URL: http://127.0.0.1:8086/v1/api/model/sli_triton/eval
+        JSONBody: {"batch_size": 0,  "cache_key": "test-a-a-10",  "sa": "a",  "sl":"a",  "aux": "test"}
         Expect:
           Code: 200
           Body: $LoadJSON('${parent.path}/expect.json')
