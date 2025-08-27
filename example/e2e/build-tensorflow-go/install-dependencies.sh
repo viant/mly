@@ -24,7 +24,7 @@ else
     # download and install libtensorflow
     curl https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-x86_64-2.4.2.tar.gz | sudo tar -xmzv -C /usr/local
 
-    # build tensorflow-go modulein docker
+    # build tensorflow-go module in docker
     docker build -t mly-docker-build-tensorflow-go:1.0 \
       --build-arg GO_VERSION=${goVersion} \
       -f ${appPath}/example/e2e/build-tensorflow-go/Dockerfile \
