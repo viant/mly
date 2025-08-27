@@ -20,6 +20,9 @@ models:
         index: 0
       - name: sl
         index: 1
+      - name: aux
+        index: 2
+        auxiliary: true
     outputs:
       - name: expand
         index: 0
