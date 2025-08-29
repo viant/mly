@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/tfmodel"
@@ -10,54 +11,66 @@ import (
 
 // TensorFlowEvaluator wraps the existing TensorFlow service to implement PlatformEvaluator
 type TensorFlowEvaluator struct {
-	TfService *tfmodel.Service // Exported for access from service package
+	tfService *tfmodel.Service
 }
 
 // NewTensorFlowEvaluator creates a new TensorFlow evaluator wrapper
 func NewTensorFlowEvaluator(tfService *tfmodel.Service) *TensorFlowEvaluator {
 	return &TensorFlowEvaluator{
-		TfService: tfService,
+		tfService: tfService,
 	}
 }
 
 // Predict delegates to the TensorFlow service
 func (t *TensorFlowEvaluator) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
-	return t.TfService.Predict(ctx, params)
+	return t.tfService.Predict(ctx, params)
 }
 
 // Signature delegates to the TensorFlow service
 func (t *TensorFlowEvaluator) Signature() *domain.Signature {
-	return t.TfService.Signature()
+	return t.tfService.Signature()
 }
 
 // Dictionary delegates to the TensorFlow service
 func (t *TensorFlowEvaluator) Dictionary() *common.Dictionary {
-	return t.TfService.Dictionary()
+	return t.tfService.Dictionary()
 }
 
 // Stats delegates to the TensorFlow service
 func (t *TensorFlowEvaluator) Stats(stats map[string]interface{}) {
-	t.TfService.Stats(stats)
+	t.tfService.Stats(stats)
 }
 
 // Close delegates to the TensorFlow service
 func (t *TensorFlowEvaluator) Close() error {
-	return t.TfService.Close()
+	return t.tfService.Close()
 }
 
 // Inputs returns the model inputs for request validation
 func (t *TensorFlowEvaluator) Inputs() map[string]*domain.Input {
-	return t.TfService.Inputs()
+	return t.tfService.Inputs()
 }
 
-// SetReloadOK sets the reload status flag for TensorFlow models
-func (t *TensorFlowEvaluator) SetReloadOK(reloadOK *int32) {
-	t.TfService.ReloadOK = reloadOK
+// IsHealthy returns true if the TensorFlow model is healthy (reload successful)
+func (t *TensorFlowEvaluator) IsHealthy() bool {
+	if t.tfService.ReloadOK == nil {
+		return false
+	}
+	return atomic.LoadInt32(t.tfService.ReloadOK) == 1
+}
+
+// SetHealthStatus sets the health status pointer for centralized health reporting
+func (t *TensorFlowEvaluator) SetHealthStatus(healthPtr *int32) {
+	t.tfService.ReloadOK = healthPtr
+}
+
+func (t *TensorFlowEvaluator) SupportsHealthReporting() bool {
+	return true
 }
 
 // ReloadIfNeeded performs model reload if needed for TensorFlow models
 func (t *TensorFlowEvaluator) ReloadIfNeeded(ctx context.Context) error {
-	return t.TfService.ReloadIfNeeded(ctx)
+	return t.tfService.ReloadIfNeeded(ctx)
 }
 
 // SupportsReload returns true since TensorFlow models support reloading

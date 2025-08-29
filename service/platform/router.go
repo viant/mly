@@ -36,10 +36,16 @@ type PlatformEvaluator interface {
 	// Close releases resources
 	Close() error
 
-	// SetReloadOK sets the reload status flag (for platforms that support reloading)
-	SetReloadOK(reloadOK *int32)
+	// IsHealthy performs health check for the platform/model
+	IsHealthy() bool
 
-	// ReloadIfNeeded performs model reload if needed (no-op for platforms that don't support reload)
+	// SetHealthStatus sets the health status pointer for centralized health reporting
+	SetHealthStatus(healthPtr *int32)
+
+	// SupportsHealthReporting returns true if this platform supports centralized health reporting
+	SupportsHealthReporting() bool
+
+	// ReloadIfNeeded performs model reload if needed (for platforms that support reload)
 	ReloadIfNeeded(ctx context.Context) error
 
 	// SupportsReload returns true if this platform supports model reloading

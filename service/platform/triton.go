@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/francoispqt/gojay"
@@ -109,6 +111,11 @@ type TritonEvaluator struct {
 
 	signature *domain.Signature
 	inputs    map[string]*domain.Input
+
+	// Health reporting support
+	healthPtr       *int32
+	stopHealthCheck chan struct{}
+	initMonitorOnce sync.Once
 }
 
 // NewTritonEvaluator creates a new Triton evaluator
@@ -134,6 +141,7 @@ func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
+		stopHealthCheck: make(chan struct{}),
 	}
 
 	evaluator.signature = evaluator.computeSignature()
@@ -439,15 +447,78 @@ func (t *TritonEvaluator) Inputs() map[string]*domain.Input {
 	return t.inputs
 }
 
-// Close releases Triton client resources
-func (t *TritonEvaluator) Close() error {
-	// HTTP client doesn't need explicit cleanup
-	return nil
+// IsHealthy returns cached health status
+func (t *TritonEvaluator) IsHealthy() bool {
+	if t.healthPtr == nil {
+		return false
+	}
+	return atomic.LoadInt32(t.healthPtr) == 1
 }
 
-// SetReloadOK is a no-op for Triton models (they don't support reloading)
-func (t *TritonEvaluator) SetReloadOK(reloadOK *int32) {
-	// No-op: Triton models are managed externally
+// SetHealthStatus sets up centralized health reporting with background monitoring
+func (t *TritonEvaluator) SetHealthStatus(healthPtr *int32) {
+	t.healthPtr = healthPtr
+	if healthPtr != nil {
+		atomic.StoreInt32(healthPtr, 0)
+		t.initMonitorOnce.Do(func() {
+			go t.backgroundHealthMonitor()
+		})
+	}
+}
+
+func (t *TritonEvaluator) SupportsHealthReporting() bool {
+	return true
+}
+
+func (t *TritonEvaluator) checkTritonModelHealth() bool {
+	url := t.serverURL + "/v2/models/" + t.modelName + "/ready"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return false
+	}
+
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
+}
+
+func (t *TritonEvaluator) backgroundHealthMonitor() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if t.healthPtr == nil {
+				return
+			}
+
+			if t.checkTritonModelHealth() {
+				atomic.StoreInt32(t.healthPtr, 1)
+			} else {
+				atomic.StoreInt32(t.healthPtr, 0)
+			}
+
+		case <-t.stopHealthCheck:
+			return
+		}
+	}
+}
+
+// Close releases Triton client resources and stops health monitoring
+func (t *TritonEvaluator) Close() error {
+	select {
+	case t.stopHealthCheck <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 // ReloadIfNeeded is a no-op for Triton models (they don't support reloading)

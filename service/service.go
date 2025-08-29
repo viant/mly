@@ -46,8 +46,8 @@ type Service struct {
 	// TODO how does this interact with Service.inputs
 	inputProvider *gtly.Provider
 
-	// reload TODO finish refactor
-	ReloadOK int32
+	// health status for centralized health reporting
+	HealthStatus int32
 
 	// Platform evaluator context for multi-platform support
 	evaluatorContext *platform.PlatformEvaluatorContext
@@ -354,9 +354,14 @@ func NewWithPlatform(ctx context.Context,
 		serviceMetric:    metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
 	}
 
+	// Set up health reporting for platforms that support it
+	if evaluatorContext.Evaluator.SupportsHealthReporting() {
+		evaluatorContext.Evaluator.SetHealthStatus(&srv.HealthStatus)
+	}
+
+	// Set up reload metrics for platforms that support reloading
 	if evaluatorContext.Evaluator.SupportsReload() {
 		srv.reloadMetric = metrics.MultiOperationCounter(location, cfg.ID+"Reload", cfg.ID+" reloading", time.Microsecond, time.Minute, 1, sstat.NewCtxErrOnly())
-		evaluatorContext.Evaluator.SetReloadOK(&srv.ReloadOK)
 	}
 
 	for _, opt := range options {
@@ -455,7 +460,8 @@ func (s *Service) scheduleModelReload() {
 		if err != nil {
 			stats.AppendError(err)
 			log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
-			atomic.StoreInt32(&s.ReloadOK, 0)
+			// Update health status for reload failure (TensorFlow models)
+			atomic.StoreInt32(&s.HealthStatus, 0)
 		}
 
 		if atomic.LoadInt32(&s.closed) != 0 {

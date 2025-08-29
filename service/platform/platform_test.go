@@ -1,10 +1,14 @@
 package platform
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/viant/mly/service/config"
+	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/shared"
 )
 
@@ -449,4 +453,85 @@ func TestTritonConfigValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTensorFlowEvaluator_Health(t *testing.T) {
+	tfService := &tfmodel.Service{}
+	evaluator := NewTensorFlowEvaluator(tfService)
+
+	// Test basic health functionality
+	assert.True(t, evaluator.SupportsHealthReporting())
+	assert.True(t, evaluator.SupportsReload())
+	assert.False(t, evaluator.IsHealthy()) // Uninitialized
+
+	// Test health status with pointer
+	var healthStatus int32
+	evaluator.SetHealthStatus(&healthStatus)
+
+	atomic.StoreInt32(&healthStatus, 1)
+	assert.True(t, evaluator.IsHealthy())
+
+	atomic.StoreInt32(&healthStatus, 0)
+	assert.False(t, evaluator.IsHealthy())
+}
+
+func TestTritonEvaluator_Health(t *testing.T) {
+	// Basic capability tests
+	evaluator := createTestTritonEvaluator("http://localhost:8000")
+	defer evaluator.Close()
+
+	assert.True(t, evaluator.SupportsHealthReporting())
+	assert.False(t, evaluator.SupportsReload())
+
+	// Test cached health status with mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/models/test_model/ready" {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	defer server.Close()
+
+	healthyEvaluator := createTestTritonEvaluator(server.URL)
+	defer healthyEvaluator.Close()
+
+	// Set up health status pointer (starts as unhealthy, will be updated by monitor)
+	var healthStatus int32
+	healthyEvaluator.SetHealthStatus(&healthStatus)
+
+	assert.False(t, healthyEvaluator.IsHealthy()) // Starts pessimistic
+}
+
+// Test that the interface is properly implemented
+func TestPlatformEvaluator_Interface_Compliance(t *testing.T) {
+	// Verify both implementations satisfy the interface
+	tfService := &tfmodel.Service{}
+	var _ PlatformEvaluator = NewTensorFlowEvaluator(tfService)
+
+	evaluator := createTestTritonEvaluator("http://localhost:8000")
+	defer evaluator.Close()
+	var _ PlatformEvaluator = evaluator
+}
+
+// Helper function to create test Triton evaluator
+func createTestTritonEvaluator(serverURL string) *TritonEvaluator {
+	cfg := &config.Model{
+		ID:  "test_triton",
+		URL: serverURL,
+		Triton: &config.TritonConfig{
+			ModelName: "test_model",
+			Timeout:   5000, // 5 second timeout for tests
+		},
+		MetaInput: shared.MetaInput{
+			Inputs: []*shared.Field{
+				{Name: "input", Index: 0, DataType: "string"},
+			},
+			Outputs: []*shared.Field{
+				{Name: "output", Index: 0, DataType: "float32"},
+			},
+		},
+	}
+
+	return NewTritonEvaluator(cfg)
 }
