@@ -29,7 +29,7 @@ func (h *HealthHandler) RegisterHealthPoint(name string, isOkPtr *int32) {
 
 // implements Hook
 func (h *HealthHandler) Hook(model *config.Model, modelSrv *service.Service) {
-	h.RegisterHealthPoint(model.ID, &modelSrv.ReloadOK)
+	h.RegisterHealthPoint(model.ID, &modelSrv.HealthStatus)
 }
 
 // implements http.Handler

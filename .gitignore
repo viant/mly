@@ -3,3 +3,10 @@
 .DS_Cache
 .DS_Store
 /vendor
+/example/e2e/logs
+# binaries
+/example/client/mlyc/mlyc
+/example/server/mly/mly
+/toolsv2/aerospike/aerospike
+/toolsv2/smasher/cmd/cmd
+/toolsv2/toolsv2

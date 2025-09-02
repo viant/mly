@@ -16,7 +16,6 @@ import (
 	"github.com/viant/mly/service/config"
 	serviceConfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/endpoint/meta"
-	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
 	"golang.org/x/sync/semaphore"
@@ -106,9 +105,26 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 			mstart := time.Now()
 
 			log.Printf("[%s] model loading", model.ID)
+
+			// Validate model configuration first
+			if validateErr := model.Validate(); validateErr != nil {
+				log.Printf("[%s] ERROR: Model validation failed: %v", model.ID, validateErr)
+				lock.Lock()
+				err = fmt.Errorf("model %s validation failed: %w", model.ID, validateErr)
+				lock.Unlock()
+				return
+			}
+			log.Printf("[%s] Model configuration validated successfully", model.ID)
+
 			e := func() error {
-				tfService := tfmodel.NewService(model, fs, metrics, sema, cfge.MaxEvaluatorWait)
-				modelSrv, err := service.New(context.Background(), model, tfService, fs, metrics, datastores, serviceOpts...)
+				var modelSrv *service.Service
+				var err error
+
+				if model.Platform == "" {
+					// Default to TensorFlow for models without explicit platform
+					model.Platform = "tensorflow"
+				}
+				modelSrv, err = service.NewWithPlatform(context.Background(), model, fs, metrics, datastores, sema, cfge.MaxEvaluatorWait, serviceOpts...)
 
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)
@@ -139,7 +155,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 				lock.Unlock()
 			}
 
-			log.Printf("[%s] model loaded (%s)", model.ID, time.Now().Sub(mstart))
+			log.Printf("[%s] model loaded (%s)", model.ID, time.Since(mstart))
 		}(m)
 	}
 
