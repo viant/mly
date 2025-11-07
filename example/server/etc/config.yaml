@@ -3,7 +3,7 @@ Endpoint:
 
 models:
   - id: sli_triton
-    url: http://localhost:8000
+    url: http://localhost:8001
     platform: triton
     triton:
       modelName: sli

@@ -1,113 +1,42 @@
 package platform
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/binary"
 	"fmt"
-	"io"
-	"net/http"
+	"math"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/francoispqt/gojay"
+	triton "github.com/viant/mly/proto/triton"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/common"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-// TritonInput represents a single input tensor for Triton
-type TritonInput struct {
-	Name     string      `json:"name"`
-	Shape    []int       `json:"shape"`
-	DataType string      `json:"datatype"`
-	Data     interface{} `json:"data"`
+// preparedInput represents processed input data ready for gRPC transport
+type preparedInput struct {
+	name     string
+	datatype string      // Triton datatype: "BYTES", "INT32", "INT64", "FP32", "FP64"
+	shape    []int64     // Shape in int64 for gRPC compatibility
+	data     interface{} // Flattened data: []string, []int32, []int64, []float32, []float64
 }
 
-// TritonOutput represents a single output tensor from Triton
-type TritonOutput struct {
-	Name string      `json:"name"`
-	Data interface{} `json:"data"`
-}
-
-// TritonRequest represents the HTTP request format to Triton
-type TritonRequest struct {
-	Inputs []TritonInput `json:"inputs"`
-}
-
-// TritonResponse represents the HTTP response format from Triton
-type TritonResponse struct {
-	Outputs []TritonOutput `json:"outputs"`
-}
-
-func (t *TritonInput) MarshalJSONObject(enc *gojay.Encoder) {
-	enc.StringKey("name", t.Name)
-	enc.ArrayKey("shape", gojay.EncodeArrayFunc(func(enc *gojay.Encoder) {
-		for _, v := range t.Shape {
-			enc.AddInt(v)
-		}
-	}))
-	enc.StringKey("datatype", t.DataType)
-
-	enc.ArrayKey("data", gojay.EncodeArrayFunc(func(enc *gojay.Encoder) {
-		switch data := t.Data.(type) {
-		case []string:
-			for _, v := range data {
-				enc.AddString(v)
-			}
-		case []int:
-			for _, v := range data {
-				enc.AddInt(v)
-			}
-		case []float32:
-			for _, v := range data {
-				enc.AddFloat32(v)
-			}
-		case []float64:
-			for _, v := range data {
-				enc.AddFloat64(v)
-			}
-		default:
-			for i := 0; i < reflect.ValueOf(data).Len(); i++ {
-				val := reflect.ValueOf(data).Index(i).Interface()
-				enc.AddInterface(val)
-			}
-		}
-	}))
-}
-
-func (t *TritonInput) IsNil() bool {
-	return t == nil
-}
-
-func (t *TritonRequest) MarshalJSONObject(enc *gojay.Encoder) {
-	enc.ArrayKey("inputs", (*TritonInputs)(&t.Inputs))
-}
-
-func (t *TritonRequest) IsNil() bool {
-	return t == nil
-}
-
-type TritonInputs []TritonInput
-
-func (t *TritonInputs) MarshalJSONArray(enc *gojay.Encoder) {
-	for i := range *t {
-		enc.AddObject(&(*t)[i])
-	}
-}
-
-func (t *TritonInputs) IsNil() bool {
-	return t == nil || len(*t) == 0
-}
-
-// TritonEvaluator implements PlatformEvaluator for Triton Inference Server
+// TritonEvaluator implements PlatformEvaluator for Triton Inference Server via gRPC
 type TritonEvaluator struct {
-	config     *config.Model
-	httpClient *http.Client
-	serverURL  string
-	modelName  string
+	config    *config.Model
+	serverURL string
+	modelName string
+
+	// gRPC-specific fields
+	grpcConn   *grpc.ClientConn
+	grpcClient triton.GRPCInferenceServiceClient
+	timeout    time.Duration
 
 	signature *domain.Signature
 	inputs    map[string]*domain.Input
@@ -120,11 +49,10 @@ type TritonEvaluator struct {
 
 // NewTritonEvaluator creates a new Triton evaluator
 func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
-	serverURL := config.URL           // Use model's URL field for Triton server endpoint
-	modelName := config.ID            // Default to model ID
-	timeout := 100 * time.Millisecond // Default timeout
+	serverURL := config.URL
+	modelName := config.ID
+	timeout := 100 * time.Millisecond
 
-	// Use Triton-specific configuration if provided
 	if config.Triton != nil {
 		if config.Triton.ModelName != "" {
 			modelName = config.Triton.ModelName
@@ -134,13 +62,22 @@ func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 		}
 	}
 
+	grpcAddr := parseGRPCAddress(serverURL)
+
+	conn, err := grpc.NewClient(grpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create Triton gRPC client at %s: %v", grpcAddr, err))
+	}
+
 	evaluator := &TritonEvaluator{
-		config:    config,
-		serverURL: serverURL,
-		modelName: modelName,
-		httpClient: &http.Client{
-			Timeout: timeout,
-		},
+		config:          config,
+		serverURL:       grpcAddr,
+		modelName:       modelName,
+		grpcConn:        conn,
+		grpcClient:      triton.NewGRPCInferenceServiceClient(conn),
+		timeout:         timeout,
 		stopHealthCheck: make(chan struct{}),
 	}
 
@@ -150,34 +87,58 @@ func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 	return evaluator
 }
 
+func parseGRPCAddress(url string) string {
+	addr := strings.TrimPrefix(url, "http://")
+	addr = strings.TrimPrefix(addr, "https://")
+
+	if !strings.Contains(addr, ":") {
+		addr += ":8001"
+	}
+
+	return addr
+}
+
 // Predict performs inference via Triton Inference Server
 func (t *TritonEvaluator) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
-	tritonRequest, err := t.convertToTritonRequest(params)
+	preparedInputs, err := t.prepareBatchInputs(params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to convert params to Triton format: %w", err)
+		return nil, fmt.Errorf("failed to prepare inputs: %w", err)
 	}
 
-	tritonResponse, err := t.sendTritonRequest(ctx, tritonRequest)
+	grpcRequest, err := t.buildGRPCRequest(preparedInputs)
 	if err != nil {
-		return nil, fmt.Errorf("triton inference failed for model %s: %w", t.config.ID, err)
+		return nil, fmt.Errorf("failed to build gRPC request: %w", err)
 	}
 
-	result := t.convertFromTritonResponse(tritonResponse)
+	requestCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(ctx, t.timeout)
+		defer cancel()
+	}
+
+	grpcResponse, err := t.grpcClient.ModelInfer(requestCtx, grpcRequest)
+	if err != nil {
+		return nil, fmt.Errorf("triton gRPC inference failed for model %s: %w", t.config.ID, err)
+	}
+
+	result, err := t.convertGRPCResponse(grpcResponse)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert gRPC response: %w", err)
+	}
+
 	return result, nil
 }
 
-// convertToTritonRequest converts MLY params ([]interface{}) to Triton request format
-func (t *TritonEvaluator) convertToTritonRequest(params []interface{}) (*TritonRequest, error) {
+func (t *TritonEvaluator) prepareBatchInputs(params []interface{}) ([]preparedInput, error) {
 	if len(params) == 0 {
 		return nil, fmt.Errorf("no input parameters provided")
 	}
 
-	var inputs []TritonInput
+	var inputs []preparedInput
 
-	// Get the input definitions to map indices to names
-	inputDefs := t.getInputDefinitions()
+	inputDefs := t.Inputs()
 
-	// Build index-to-name map
 	indexToName := make(map[int]string)
 	for name, input := range inputDefs {
 		if !input.Auxiliary {
@@ -185,47 +146,75 @@ func (t *TritonEvaluator) convertToTritonRequest(params []interface{}) (*TritonR
 		}
 	}
 
-	// Convert each parameter to Triton input format
 	for i, param := range params {
 		inputName, exists := indexToName[i]
 		if !exists {
 			return nil, fmt.Errorf("no input name found for index %d", i)
 		}
 
-		// Handle the MLY format: [][]T
 		switch v := param.(type) {
 		case [][]string:
 			if len(v) > 0 {
-				// MLY batch format: [][]T where len(v) = batch_size
-				// Each v[i] contains one element: the value for batch item i
 				batchSize := len(v)
 				data := make([]string, batchSize)
-				for j := 0; j < batchSize; j++ {
-					if len(v[j]) > 0 {
-						data[j] = v[j][0] // Extract the value for batch item j
-					}
-				}
-				inputs = append(inputs, TritonInput{
-					Name:     inputName,
-					Shape:    []int{batchSize, 1},
-					DataType: "BYTES",
-					Data:     data,
-				})
-			}
-		case [][]int:
-			if len(v) > 0 {
-				batchSize := len(v)
-				data := make([]int, batchSize)
 				for j := 0; j < batchSize; j++ {
 					if len(v[j]) > 0 {
 						data[j] = v[j][0]
 					}
 				}
-				inputs = append(inputs, TritonInput{
-					Name:     inputName,
-					Shape:    []int{batchSize, 1},
-					DataType: "INT32",
-					Data:     data,
+				inputs = append(inputs, preparedInput{
+					name:     inputName,
+					shape:    []int64{int64(batchSize), 1},
+					datatype: "BYTES",
+					data:     data,
+				})
+			}
+		case [][]int:
+			if len(v) > 0 {
+				batchSize := len(v)
+				data := make([]int32, batchSize)
+				for j := 0; j < batchSize; j++ {
+					if len(v[j]) > 0 {
+						data[j] = int32(v[j][0])
+					}
+				}
+				inputs = append(inputs, preparedInput{
+					name:     inputName,
+					shape:    []int64{int64(batchSize), 1},
+					datatype: "INT32",
+					data:     data,
+				})
+			}
+		case [][]int32:
+			if len(v) > 0 {
+				batchSize := len(v)
+				data := make([]int32, batchSize)
+				for j := 0; j < batchSize; j++ {
+					if len(v[j]) > 0 {
+						data[j] = v[j][0]
+					}
+				}
+				inputs = append(inputs, preparedInput{
+					name:     inputName,
+					shape:    []int64{int64(batchSize), 1},
+					datatype: "INT32",
+					data:     data,
+				})
+			}
+		case [][]int64:
+			if len(v) > 0 {
+				batchSize := len(v)
+				data := make([]int64, batchSize)
+				for j := 0; j < batchSize; j++ {
+					if len(v[j]) > 0 {
+						data[j] = v[j][0]
+					}
+				}
+				inputs = append(inputs, preparedInput{
+					name:     inputName,
+					shape:    []int64{int64(batchSize), 1},
+					datatype: "INT64",
+					data:     data,
 				})
 			}
 		case [][]float32:
@@ -237,11 +226,11 @@ func (t *TritonEvaluator) convertToTritonRequest(params []interface{}) (*TritonR
 						data[j] = v[j][0]
 					}
 				}
-				inputs = append(inputs, TritonInput{
-					Name:     inputName,
-					Shape:    []int{batchSize, 1},
-					DataType: "FP32",
-					Data:     data,
+				inputs = append(inputs, preparedInput{
+					name:     inputName,
+					shape:    []int64{int64(batchSize), 1},
+					datatype: "FP32",
+					data:     data,
 				})
 			}
 		case [][]float64:
@@ -253,11 +242,11 @@ func (t *TritonEvaluator) convertToTritonRequest(params []interface{}) (*TritonR
 						data[j] = v[j][0]
 					}
 				}
-				inputs = append(inputs, TritonInput{
-					Name:     inputName,
-					Shape:    []int{batchSize, 1},
-					DataType: "FP64",
-					Data:     data,
+				inputs = append(inputs, preparedInput{
+					name:     inputName,
+					shape:    []int64{int64(batchSize), 1},
+					datatype: "FP64",
+					data:     data,
 				})
 			}
 		default:
@@ -265,95 +254,247 @@ func (t *TritonEvaluator) convertToTritonRequest(params []interface{}) (*TritonR
 		}
 	}
 
-	return &TritonRequest{Inputs: inputs}, nil
+	return inputs, nil
 }
 
-// getInputDefinitions returns the input definitions for mapping indices to names
-func (t *TritonEvaluator) getInputDefinitions() map[string]*domain.Input {
-	return t.Inputs()
-}
-
-// sendTritonRequest sends HTTP request to Triton server
-func (t *TritonEvaluator) sendTritonRequest(ctx context.Context, request *TritonRequest) (*TritonResponse, error) {
-	url := t.serverURL + "/v2/models/" + t.modelName + "/infer"
-
-	buf := bytes.NewBuffer(make([]byte, 0, 1024))
-	enc := gojay.NewEncoder(buf)
-	if err := enc.EncodeObject(request); err != nil {
-		return nil, fmt.Errorf("failed to marshal Triton request: %w", err)
+func (t *TritonEvaluator) buildGRPCRequest(preparedInputs []preparedInput) (*triton.ModelInferRequest, error) {
+	req := &triton.ModelInferRequest{
+		ModelName: t.modelName,
+		Inputs:    make([]*triton.ModelInferRequest_InferInputTensor, len(preparedInputs)),
 	}
-	jsonData := buf.Bytes()
 
-	// Create HTTP request
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	// Send request with retry logic
-	var resp *http.Response
-	maxRetries := 3
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		resp, err = t.httpClient.Do(httpReq)
-		if err == nil {
-			break
+	for i, input := range preparedInputs {
+		tensor := &triton.ModelInferRequest_InferInputTensor{
+			Name:     input.name,
+			Datatype: input.datatype,
+			Shape:    input.shape,
+			Contents: &triton.InferTensorContents{},
 		}
-		if attempt == maxRetries {
-			return nil, fmt.Errorf("http request failed after %d attempts: %w", maxRetries+1, err)
-		}
-		time.Sleep(time.Duration(5*(1<<attempt)) * time.Millisecond)
 
-		if attempt < maxRetries {
-			httpReq.Body = io.NopCloser(bytes.NewBuffer(jsonData))
-		}
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("triton server returned status %d", resp.StatusCode)
-	}
-
-	var tritonResponse TritonResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tritonResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse Triton response: %w", err)
-	}
-
-	return &tritonResponse, nil
-}
-
-// convertFromTritonResponse converts Triton response to MLY format ([]interface{})
-func (t *TritonEvaluator) convertFromTritonResponse(response *TritonResponse) []interface{} {
-	var result []interface{}
-
-	for _, output := range response.Outputs {
-		if data, ok := output.Data.([]interface{}); ok && len(data) > 0 {
-			batchSize := len(data)
-			converted := make([][]float32, batchSize)
-			for i, v := range data {
-				if f, ok := v.(float64); ok {
-					converted[i] = []float32{float32(f)}
-				} else {
-					converted[i] = []float32{0.0}
-				}
+		switch data := input.data.(type) {
+		case []string:
+			tensor.Contents.BytesContents = make([][]byte, len(data))
+			for j, s := range data {
+				tensor.Contents.BytesContents[j] = []byte(s)
 			}
-			result = append(result, converted)
-		} else {
-			result = append(result, [][]float32{{0.0}})
+		case []int32:
+			tensor.Contents.IntContents = data
+		case []int64:
+			tensor.Contents.Int64Contents = data
+		case []float32:
+			tensor.Contents.Fp32Contents = data
+		case []float64:
+			tensor.Contents.Fp64Contents = data
+		default:
+			return nil, fmt.Errorf("unsupported input data type %T for %s", data, input.name)
+		}
+
+		req.Inputs[i] = tensor
+	}
+
+	return req, nil
+}
+
+func (t *TritonEvaluator) convertGRPCResponse(response *triton.ModelInferResponse) ([]interface{}, error) {
+	if len(response.Outputs) == 0 {
+		return nil, fmt.Errorf("no outputs in response")
+	}
+
+	result := make([]interface{}, len(response.Outputs))
+	useRawContents := len(response.RawOutputContents) > 0
+
+	for i, output := range response.Outputs {
+		batchSize := 1
+		if len(output.Shape) > 0 {
+			batchSize = int(output.Shape[0])
+		}
+
+		if useRawContents {
+			if i >= len(response.RawOutputContents) {
+				return nil, fmt.Errorf("raw output contents missing for output %d", i)
+			}
+			rawData := response.RawOutputContents[i]
+			parsedData, err := t.parseRawOutput(rawData, output.Datatype, batchSize)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse raw output %s: %w", output.Name, err)
+			}
+			result[i] = parsedData
+			continue
+		}
+
+		if output.Contents == nil {
+			return nil, fmt.Errorf("output %s missing contents", output.Name)
+		}
+
+		switch output.Datatype {
+		case "FP32":
+			if len(output.Contents.Fp32Contents) == 0 {
+				converted := make([][]float32, batchSize)
+				for j := 0; j < batchSize; j++ {
+					converted[j] = []float32{0.0}
+				}
+				result[i] = converted
+			} else {
+				converted := make([][]float32, batchSize)
+				for j := 0; j < batchSize && j < len(output.Contents.Fp32Contents); j++ {
+					converted[j] = []float32{output.Contents.Fp32Contents[j]}
+				}
+				result[i] = converted
+			}
+
+		case "FP64":
+			if len(output.Contents.Fp64Contents) == 0 {
+				converted := make([][]float64, batchSize)
+				for j := 0; j < batchSize; j++ {
+					converted[j] = []float64{0.0}
+				}
+				result[i] = converted
+			} else {
+				converted := make([][]float64, batchSize)
+				for j := 0; j < batchSize && j < len(output.Contents.Fp64Contents); j++ {
+					converted[j] = []float64{output.Contents.Fp64Contents[j]}
+				}
+				result[i] = converted
+			}
+
+		case "INT32":
+			if len(output.Contents.IntContents) == 0 {
+				converted := make([][]int32, batchSize)
+				for j := 0; j < batchSize; j++ {
+					converted[j] = []int32{0}
+				}
+				result[i] = converted
+			} else {
+				converted := make([][]int32, batchSize)
+				for j := 0; j < batchSize && j < len(output.Contents.IntContents); j++ {
+					converted[j] = []int32{output.Contents.IntContents[j]}
+				}
+				result[i] = converted
+			}
+
+		case "INT64":
+			if len(output.Contents.Int64Contents) == 0 {
+				converted := make([][]int64, batchSize)
+				for j := 0; j < batchSize; j++ {
+					converted[j] = []int64{0}
+				}
+				result[i] = converted
+			} else {
+				converted := make([][]int64, batchSize)
+				for j := 0; j < batchSize && j < len(output.Contents.Int64Contents); j++ {
+					converted[j] = []int64{output.Contents.Int64Contents[j]}
+				}
+				result[i] = converted
+			}
+
+		case "BYTES":
+			if len(output.Contents.BytesContents) == 0 {
+				converted := make([][]string, batchSize)
+				for j := 0; j < batchSize; j++ {
+					converted[j] = []string{""}
+				}
+				result[i] = converted
+			} else {
+				converted := make([][]string, batchSize)
+				for j := 0; j < batchSize && j < len(output.Contents.BytesContents); j++ {
+					converted[j] = []string{string(output.Contents.BytesContents[j])}
+				}
+				result[i] = converted
+			}
+
+		default:
+			if len(output.Contents.Fp32Contents) > 0 {
+				converted := make([][]float32, batchSize)
+				for j := 0; j < batchSize && j < len(output.Contents.Fp32Contents); j++ {
+					converted[j] = []float32{output.Contents.Fp32Contents[j]}
+				}
+				result[i] = converted
+			} else {
+				return nil, fmt.Errorf("unsupported output datatype %s for %s", output.Datatype, output.Name)
+			}
 		}
 	}
 
-	return result
+	return result, nil
 }
 
-// computeSignature calculates the signature once at instantiation time
+func (t *TritonEvaluator) parseRawOutput(rawData []byte, datatype string, batchSize int) (interface{}, error) {
+	switch datatype {
+	case "INT64":
+		if len(rawData) != batchSize*8 {
+			return nil, fmt.Errorf("INT64 raw data size mismatch: got %d bytes, expected %d", len(rawData), batchSize*8)
+		}
+		converted := make([][]int64, batchSize)
+		for j := 0; j < batchSize; j++ {
+			value := int64(binary.LittleEndian.Uint64(rawData[j*8 : (j+1)*8]))
+			converted[j] = []int64{value}
+		}
+		return converted, nil
+
+	case "INT32":
+		if len(rawData) != batchSize*4 {
+			return nil, fmt.Errorf("INT32 raw data size mismatch: got %d bytes, expected %d", len(rawData), batchSize*4)
+		}
+		converted := make([][]int32, batchSize)
+		for j := 0; j < batchSize; j++ {
+			value := int32(binary.LittleEndian.Uint32(rawData[j*4 : (j+1)*4]))
+			converted[j] = []int32{value}
+		}
+		return converted, nil
+
+	case "FP32":
+		if len(rawData) != batchSize*4 {
+			return nil, fmt.Errorf("FP32 raw data size mismatch: got %d bytes, expected %d", len(rawData), batchSize*4)
+		}
+		converted := make([][]float32, batchSize)
+		for j := 0; j < batchSize; j++ {
+			bits := binary.LittleEndian.Uint32(rawData[j*4 : (j+1)*4])
+			value := math.Float32frombits(bits)
+			converted[j] = []float32{value}
+		}
+		return converted, nil
+
+	case "FP64":
+		if len(rawData) != batchSize*8 {
+			return nil, fmt.Errorf("FP64 raw data size mismatch: got %d bytes, expected %d", len(rawData), batchSize*8)
+		}
+		converted := make([][]float64, batchSize)
+		for j := 0; j < batchSize; j++ {
+			bits := binary.LittleEndian.Uint64(rawData[j*8 : (j+1)*8])
+			value := math.Float64frombits(bits)
+			converted[j] = []float64{value}
+		}
+		return converted, nil
+
+	case "BYTES":
+		converted := make([][]string, batchSize)
+		offset := 0
+		for j := 0; j < batchSize; j++ {
+			if offset+4 > len(rawData) {
+				return nil, fmt.Errorf("BYTES raw data truncated at element %d", j)
+			}
+			length := int(binary.LittleEndian.Uint32(rawData[offset : offset+4]))
+			offset += 4
+			if offset+length > len(rawData) {
+				return nil, fmt.Errorf("BYTES raw data truncated at element %d: expected %d bytes", j, length)
+			}
+			value := string(rawData[offset : offset+length])
+			offset += length
+			converted[j] = []string{value}
+		}
+		return converted, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported datatype for raw output: %s", datatype)
+	}
+}
+
 func (t *TritonEvaluator) computeSignature() *domain.Signature {
 	var inputs []domain.Input
 	var outputs []domain.Output
 
 	if len(t.config.Inputs) > 0 {
 		for _, input := range t.config.Inputs {
-			// Only include non-auxiliary inputs in signature
 			if !input.Auxiliary {
 				inputs = append(inputs, domain.Input{
 					Name:  input.Name,
@@ -386,39 +527,36 @@ func (t *TritonEvaluator) computeSignature() *domain.Signature {
 	}
 }
 
-// Signature returns the cached model signature information
 func (t *TritonEvaluator) Signature() *domain.Signature {
 	return t.signature
 }
 
-// Dictionary returns vocabulary dictionary (Triton models typically don't use MLY dictionaries)
 func (t *TritonEvaluator) Dictionary() *common.Dictionary {
-	// Triton models handle their own preprocessing, so no dictionary needed
 	return nil
 }
 
-// Stats returns Triton-specific statistics
 func (t *TritonEvaluator) Stats(stats map[string]interface{}) {
 	stats["triton_server_url"] = t.serverURL
 	stats["triton_model_name"] = t.modelName
 	stats["model_id"] = t.config.ID
 }
 
-// computeInputs calculates the inputs map once at instantiation time
 func (t *TritonEvaluator) computeInputs() map[string]*domain.Input {
 	inputs := make(map[string]*domain.Input)
 
-	// If the model config specifies inputs, use those (like mlfdv3 model)
 	if len(t.config.Inputs) > 0 {
 		for _, input := range t.config.Inputs {
-			// Create domain.Input with proper type mapping
-			inputType := reflect.TypeOf("") // Default to string
+			inputType := reflect.TypeOf("")
 			if input.DataType != "" {
 				switch input.DataType {
 				case "string":
 					inputType = reflect.TypeOf("")
 				case "int":
 					inputType = reflect.TypeOf(0)
+				case "int32":
+					inputType = reflect.TypeOf(int32(0))
+				case "int64":
+					inputType = reflect.TypeOf(int64(0))
 				case "float32":
 					inputType = reflect.TypeOf(float32(0))
 				case "float64":
@@ -430,7 +568,7 @@ func (t *TritonEvaluator) computeInputs() map[string]*domain.Input {
 				Name:      input.Name,
 				Index:     input.Index,
 				Type:      inputType,
-				Vocab:     false, // Triton models don't use MLY dictionaries
+				Vocab:     false,
 				Auxiliary: input.Auxiliary,
 			}
 		}
@@ -442,12 +580,10 @@ func (t *TritonEvaluator) computeInputs() map[string]*domain.Input {
 	return inputs
 }
 
-// Inputs returns the cached model inputs for request validation
 func (t *TritonEvaluator) Inputs() map[string]*domain.Input {
 	return t.inputs
 }
 
-// IsHealthy returns cached health status
 func (t *TritonEvaluator) IsHealthy() bool {
 	if t.healthPtr == nil {
 		return false
@@ -455,7 +591,6 @@ func (t *TritonEvaluator) IsHealthy() bool {
 	return atomic.LoadInt32(t.healthPtr) == 1
 }
 
-// SetHealthStatus sets up centralized health reporting with background monitoring
 func (t *TritonEvaluator) SetHealthStatus(healthPtr *int32) {
 	t.healthPtr = healthPtr
 	if healthPtr != nil {
@@ -471,22 +606,20 @@ func (t *TritonEvaluator) SupportsHealthReporting() bool {
 }
 
 func (t *TritonEvaluator) checkTritonModelHealth() bool {
-	url := t.serverURL + "/v2/models/" + t.modelName + "/ready"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req := &triton.ModelReadyRequest{
+		Name:    t.modelName,
+		Version: "",
+	}
+
+	resp, err := t.grpcClient.ModelReady(ctx, req)
 	if err != nil {
 		return false
 	}
 
-	resp, err := t.httpClient.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-
-	return resp.StatusCode == http.StatusOK
+	return resp.GetReady()
 }
 
 func (t *TritonEvaluator) backgroundHealthMonitor() {
@@ -517,6 +650,10 @@ func (t *TritonEvaluator) Close() error {
 	select {
 	case t.stopHealthCheck <- struct{}{}:
 	default:
+	}
+
+	if t.grpcConn != nil {
+		return t.grpcConn.Close()
 	}
 	return nil
 }

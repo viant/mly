@@ -34,6 +34,8 @@ require (
 	github.com/migotom/heavykeeper v0.0.0-20230118182531-d6958b4bb326
 	github.com/prometheus/client_golang v1.16.0
 	golang.org/x/sync v0.8.0
+	google.golang.org/grpc v1.68.1
+	google.golang.org/protobuf v1.34.2
 )
 
 require (
@@ -68,6 +70,4 @@ require (
 	google.golang.org/api v0.103.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20221202195650-67e5cbc046fd // indirect
-	google.golang.org/grpc v1.68.1 // indirect
-	google.golang.org/protobuf v1.34.2 // indirect
 )
