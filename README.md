@@ -8,7 +8,10 @@ This library is compatible with Go 1.22+
 # Introduction
 
 The goal of this library to provide a deep-learning model prediction HTTP service which can speed up end to end execution by leveraging a caching system. 
-Currently the only deep-learning library supported is TensorFlow.
+
+**Supported Backends:**
+- **TensorFlow** (native integration)
+- **Triton Inference Server** (via gRPC)
 
 The client cares of any dictionary-based key generation and model changes automatically. 
 
@@ -171,6 +174,141 @@ func main() {
 ```
 
 As noted before, see [WORKFLOW.md](WORKFLOW.md) for Mermaid diagrams explaining the Client and more complex caching workflows.
+
+# Triton Inference Server Integration
+
+`mly` supports Triton Inference Server via gRPC for high-performance model serving.
+
+## Configuration
+
+To use a Triton-hosted model, set the platform to `triton` in your config:
+
+```yaml
+Models:
+  - ID: my_triton_model
+    Platform: triton
+    URL: http://localhost:8001  # or https://triton-server:8001
+    ModelName: my_model
+    Timeout: 30s
+    Inputs:
+      - Name: input_1
+        Index: 0
+        DataType: string
+      - Name: input_2
+        Index: 1
+        DataType: string
+    Outputs:
+      - Name: output
+        Index: 0
+        DataType: int64
+```
+
+**Configuration Fields:**
+- `Platform`: Set to `"triton"` to enable Triton backend
+- `URL`: Triton server HTTP endpoint (will be converted to gRPC port 8001)
+- `ModelName`: Name of the model in Triton's model repository
+- `Timeout`: Request timeout (default: 30s)
+- `Inputs`/`Outputs`: Model signature (must match Triton model config)
+
+**URL Format:** 
+- HTTP URL is automatically converted to gRPC endpoint
+- `http://localhost:8000` → `localhost:8001` (gRPC)
+- `https://triton.example.com:8000` → `triton.example.com:8001` (gRPC)
+
+## Triton gRPC Proto Files
+
+The Triton integration uses protocol buffers for gRPC communication. Generated proto files are **committed to the repository** for build reliability.
+
+### When to Regenerate Proto Files
+
+Regenerate only when:
+- Modifying `proto/triton/grpc_service.proto`
+- Upgrading to a new Triton API version
+- Upgrading protobuf/gRPC to a new major version
+
+### Prerequisites
+
+Install `protoc` (Protocol Buffer Compiler):
+
+```bash
+# macOS
+brew install protobuf
+
+# Linux (Debian/Ubuntu)
+apt-get install -y protobuf-compiler
+
+# Verify installation
+protoc --version  # Should be 3.x or higher
+```
+
+Install Go protoc plugins:
+
+```bash
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+# Ensure GOPATH/bin is in PATH
+export PATH="$PATH:$(go env GOPATH)/bin"
+
+# Verify installation
+which protoc-gen-go
+which protoc-gen-go-grpc
+```
+
+### Regeneration Steps
+
+```bash
+# 1. Navigate to repo root
+cd /path/to/viant/mly
+
+# 2. Delete old generated files (ensures clean regeneration)
+rm -f proto/triton/grpc_service.pb.go
+rm -f proto/triton/grpc_service_grpc.pb.go
+
+# 3. Regenerate
+protoc \
+  --go_out=. \
+  --go_opt=paths=source_relative \
+  --go-grpc_out=. \
+  --go-grpc_opt=paths=source_relative \
+  proto/triton/grpc_service.proto
+
+# 4. Verify generation succeeded
+ls -lh proto/triton/*.pb.go
+```
+
+### Verification
+
+After regeneration:
+
+```bash
+# Ensure code compiles
+go build ./...
+
+# Run tests
+go test ./service/platform/...
+
+# Review changes
+git diff proto/triton/
+```
+
+### Troubleshooting
+
+**Error: `protoc: command not found`**
+- Install protoc using package manager (see Prerequisites)
+
+**Error: `protoc-gen-go: program not found`**
+- Ensure `$GOPATH/bin` is in your `$PATH`
+- Run: `export PATH="$PATH:$(go env GOPATH)/bin"`
+
+**Error: `Import "..." was not found`**
+- Run protoc from the repository root directory
+- Verify proto file imports are correct
+
+**Notes:**
+- Generated files are ~30KB and should be committed
+- Proto definitions are based on [Triton's official protocol](https://github.com/triton-inference-server/common/blob/main/protobuf/grpc_service.proto)
+- Triton uses `raw_output_contents` for performance (binary format vs. structured)
 
 # Transformer 
 
