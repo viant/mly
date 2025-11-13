@@ -13,6 +13,7 @@ type EvaluatorMeta struct {
 	// prevents potentially explosive thread generation due to concurrent requests
 	// this should be shared across all Evaluators.
 	semaphore *semaphore.Weighted
+
 	// prevents excessive waiting if semaphore is full and no other safeguards in place
 	maxEvaluatorWait time.Duration
 

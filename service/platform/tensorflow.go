@@ -2,7 +2,6 @@ package platform
 
 import (
 	"context"
-	"sync/atomic"
 
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/tfmodel"
@@ -49,23 +48,6 @@ func (t *TensorFlowEvaluator) Close() error {
 // Inputs returns the model inputs for request validation
 func (t *TensorFlowEvaluator) Inputs() map[string]*domain.Input {
 	return t.tfService.Inputs()
-}
-
-// IsHealthy returns true if the TensorFlow model is healthy (reload successful)
-func (t *TensorFlowEvaluator) IsHealthy() bool {
-	if t.tfService.ReloadOK == nil {
-		return false
-	}
-	return atomic.LoadInt32(t.tfService.ReloadOK) == 1
-}
-
-// SetHealthStatus sets the health status pointer for centralized health reporting
-func (t *TensorFlowEvaluator) SetHealthStatus(healthPtr *int32) {
-	t.tfService.ReloadOK = healthPtr
-}
-
-func (t *TensorFlowEvaluator) SupportsHealthReporting() bool {
-	return true
 }
 
 // ReloadIfNeeded performs model reload if needed for TensorFlow models

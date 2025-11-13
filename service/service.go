@@ -18,6 +18,7 @@ import (
 	serrs "github.com/viant/mly/service/errors"
 	"github.com/viant/mly/service/gtlyop"
 	"github.com/viant/mly/service/platform"
+	"github.com/viant/mly/service/platform/factory"
 	"github.com/viant/mly/service/request"
 	"github.com/viant/mly/service/stat"
 	"github.com/viant/mly/service/stream"
@@ -47,10 +48,11 @@ type Service struct {
 	inputProvider *gtly.Provider
 
 	// health status for centralized health reporting
-	HealthStatus int32
+	// Deprecated: use GetHealth() instead
+	ReloadOK int32
 
 	// Platform evaluator context for multi-platform support
-	evaluatorContext *platform.PlatformEvaluatorContext
+	evaluator platform.PlatformEvaluator
 
 	// caching
 	useDatastore bool
@@ -62,19 +64,22 @@ type Service struct {
 
 	// serviceMetric measures validate + model + transformer
 	serviceMetric *gmetric.Operation
-	reloadMetric  *gmetric.Operation
+
+	// reloadMetric measures model reloading and health
+	reloadMetric *gmetric.Operation
 
 	// logging
 	stream *stream.Service
 }
 
+// TODO find usages
 func (s *Service) Close() error {
 	if !atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
 		return fmt.Errorf("already closed")
 	}
 
-	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		return s.evaluatorContext.Evaluator.Close()
+	if s.evaluator != nil {
+		return s.evaluator.Close()
 	}
 
 	return nil
@@ -85,15 +90,15 @@ func (s *Service) Config() *config.Model {
 }
 
 func (s *Service) Signature() *domain.Signature {
-	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		return s.evaluatorContext.Evaluator.Signature()
+	if s.evaluator != nil {
+		return s.evaluator.Signature()
 	}
 	return nil
 }
 
 func (s *Service) Dictionary() *common.Dictionary {
-	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		return s.evaluatorContext.Evaluator.Dictionary()
+	if s.evaluator != nil {
+		return s.evaluator.Dictionary()
 	}
 	return nil
 }
@@ -101,8 +106,8 @@ func (s *Service) Dictionary() *common.Dictionary {
 func (s *Service) Stats() map[string]interface{} {
 	st := make(map[string]interface{})
 
-	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		s.evaluatorContext.Evaluator.Stats(st)
+	if s.evaluator != nil {
+		s.evaluator.Stats(st)
 	}
 
 	return st
@@ -183,8 +188,8 @@ func (s *Service) evaluate(ctx context.Context, request *request.Request) ([]int
 	var result []interface{}
 	var err error
 
-	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		result, err = s.evaluatorContext.Evaluator.Predict(ctx, request.Feeds)
+	if s.evaluator != nil {
+		result, err = s.evaluator.Predict(ctx, request.Feeds)
 	} else {
 		panic("no evaluator configured for model " + s.config.ID)
 	}
@@ -294,7 +299,7 @@ func (s *Service) transformOutput(ctx context.Context, request *request.Request,
 }
 
 func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs afs.Service, metrics *gmetric.Service, datastores map[string]*datastore.Service) error {
-	err := s.reloadIfNeeded(ctx)
+	err := s.evaluator.ReloadIfNeeded(ctx)
 	if err != nil {
 		return err
 	}
@@ -329,9 +334,16 @@ func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs a
 }
 
 // NewWithPlatform creates a service with platform router support
-func NewWithPlatform(ctx context.Context,
-	cfg *config.Model, fs afs.Service, metrics *gmetric.Service, datastores map[string]*datastore.Service,
-	sema *semaphore.Weighted, maxEvaluatorWait time.Duration, options ...Option) (*Service, error) {
+func NewWithPlatform(
+	ctx context.Context,
+	cfg *config.Model,
+	fs afs.Service,
+	metrics *gmetric.Service,
+	datastores map[string]*datastore.Service,
+	sema *semaphore.Weighted,
+	maxEvaluatorWait time.Duration,
+	options ...Option,
+) (*Service, error) {
 
 	if metrics == nil {
 		metrics = gmetric.New()
@@ -342,27 +354,20 @@ func NewWithPlatform(ctx context.Context,
 	cfg.Init(nil)
 
 	// Create platform evaluator context
-	evaluatorContext, err := platform.CreateEvaluatorContext(cfg, fs, metrics, sema, maxEvaluatorWait)
+	evaluatorContext, err := factory.CreateEvaluator(cfg, fs, metrics, sema, maxEvaluatorWait)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create platform evaluator for model %s: %w", cfg.ID, err)
 	}
 
 	srv := &Service{
-		config:           cfg,
-		evaluatorContext: evaluatorContext,
-		useDatastore:     cfg.UseDictionary() && cfg.DataStore != "",
-		serviceMetric:    metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
-	}
-
-	// Set up health reporting for platforms that support it
-	if evaluatorContext.Evaluator.SupportsHealthReporting() {
-		evaluatorContext.Evaluator.SetHealthStatus(&srv.HealthStatus)
+		config:        cfg,
+		evaluator:     evaluatorContext,
+		useDatastore:  cfg.UseDictionary() && cfg.DataStore != "",
+		serviceMetric: metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
 	}
 
 	// Set up reload metrics for platforms that support reloading
-	if evaluatorContext.Evaluator.SupportsReload() {
-		srv.reloadMetric = metrics.MultiOperationCounter(location, cfg.ID+"Reload", cfg.ID+" reloading", time.Microsecond, time.Minute, 1, sstat.NewCtxErrOnly())
-	}
+	srv.reloadMetric = metrics.MultiOperationCounter(location, cfg.ID+"Reload", cfg.ID+" reloading", time.Microsecond, time.Minute, 1, sstat.NewCtxErrOnly())
 
 	for _, opt := range options {
 		opt.Apply(srv)
@@ -373,19 +378,9 @@ func NewWithPlatform(ctx context.Context,
 		return nil, err
 	}
 
-	if evaluatorContext.Evaluator.SupportsReload() {
-		go srv.scheduleModelReload()
-	}
+	go srv.pollModelReload()
 
 	return srv, err
-}
-
-func (s *Service) reloadIfNeeded(ctx context.Context) error {
-
-	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		return s.evaluatorContext.Evaluator.ReloadIfNeeded(ctx)
-	}
-	return nil
 }
 
 // NewRequest should be used for Do()
@@ -396,8 +391,8 @@ func (s *Service) NewRequest() *request.Request {
 
 	var inputs map[string]*domain.Input
 
-	if s.evaluatorContext != nil && s.evaluatorContext.Evaluator != nil {
-		inputs = s.evaluatorContext.Evaluator.Inputs()
+	if s.evaluator != nil {
+		inputs = s.evaluator.Inputs()
 	}
 
 	return request.NewRequest(numKeyInputs, inputs)
@@ -443,7 +438,13 @@ func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datast
 	return nil
 }
 
-func (s *Service) scheduleModelReload() {
+// GetHealth returns the health status of the service
+// Implements service/endpoint/health.GetHealth
+func (s *Service) GetHealth() int32 {
+	return s.ReloadOK
+}
+
+func (s *Service) pollModelReload() {
 	for range time.Tick(time.Minute) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -456,12 +457,12 @@ func (s *Service) scheduleModelReload() {
 			}()
 		}
 
-		err := s.reloadIfNeeded(ctx)
+		err := s.evaluator.ReloadIfNeeded(ctx)
 		if err != nil {
 			stats.AppendError(err)
 			log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
 			// Update health status for reload failure (TensorFlow models)
-			atomic.StoreInt32(&s.HealthStatus, 0)
+			atomic.StoreInt32(&s.ReloadOK, 0)
 		}
 
 		if atomic.LoadInt32(&s.closed) != 0 {

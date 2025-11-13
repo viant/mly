@@ -1,4 +1,4 @@
-package platform
+package triton
 
 import (
 	"context"
@@ -12,9 +12,11 @@ import (
 	"time"
 
 	triton "github.com/viant/mly/proto/triton"
+
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/shared/common"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -29,7 +31,8 @@ type preparedInput struct {
 
 // TritonEvaluator implements PlatformEvaluator for Triton Inference Server via gRPC
 type TritonEvaluator struct {
-	config    *config.Model
+	config *config.Model
+
 	serverURL string
 	modelName string
 
@@ -48,7 +51,7 @@ type TritonEvaluator struct {
 }
 
 // NewTritonEvaluator creates a new Triton evaluator
-func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
+func NewTritonEvaluator(config *config.Model) (*TritonEvaluator, error) {
 	serverURL := config.URL
 	modelName := config.ID
 	timeout := 100 * time.Millisecond
@@ -67,8 +70,9 @@ func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 	conn, err := grpc.NewClient(grpcAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
+
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create Triton gRPC client at %s: %v", grpcAddr, err))
+		return nil, fmt.Errorf("failed to create Triton gRPC client at %s: %w", grpcAddr, err)
 	}
 
 	evaluator := &TritonEvaluator{
@@ -84,7 +88,7 @@ func NewTritonEvaluator(config *config.Model) *TritonEvaluator {
 	evaluator.signature = evaluator.computeSignature()
 	evaluator.inputs = evaluator.computeInputs()
 
-	return evaluator
+	return evaluator, nil
 }
 
 func parseGRPCAddress(url string) string {
@@ -662,9 +666,4 @@ func (t *TritonEvaluator) Close() error {
 func (t *TritonEvaluator) ReloadIfNeeded(ctx context.Context) error {
 	// No-op: Triton models are managed externally
 	return nil
-}
-
-// SupportsReload returns false since Triton models don't support reloading through MLY
-func (t *TritonEvaluator) SupportsReload() bool {
-	return false
 }

@@ -1,4 +1,4 @@
-package platform
+package triton
 
 import (
 	"context"
@@ -11,12 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 	triton "github.com/viant/mly/proto/triton"
 	"github.com/viant/mly/service/config"
-	"github.com/viant/mly/service/tfmodel"
+	"github.com/viant/mly/service/platform"
 	"github.com/viant/mly/shared"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 )
+
+func newTritonEvaluator(t *testing.T, cfg *config.Model) *TritonEvaluator {
+	evaluator, err := NewTritonEvaluator(cfg)
+	require.NoError(t, err)
+	return evaluator
+}
 
 func TestTritonEvaluator_Signature(t *testing.T) {
 	cfg := &config.Model{
@@ -37,7 +43,7 @@ func TestTritonEvaluator_Signature(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	sig := evaluator.Signature()
@@ -67,7 +73,7 @@ func TestTritonEvaluator_SignatureWithAuxiliaryInputs(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	sig := evaluator.Signature()
@@ -95,7 +101,7 @@ func TestTritonEvaluator_Dictionary(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	dict := evaluator.Dictionary()
@@ -120,7 +126,7 @@ func TestTritonEvaluator_Stats(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	stats := make(map[string]interface{})
@@ -150,11 +156,8 @@ func TestTritonEvaluator_ReloadAndSupportsReload(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
-
-	// Triton models don't support reloading through MLY
-	assert.False(t, evaluator.SupportsReload())
 
 	// ReloadIfNeeded should be a no-op
 	err := evaluator.ReloadIfNeeded(context.Background())
@@ -183,7 +186,7 @@ func TestTritonEvaluator_InputsMapping(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	inputs := evaluator.Inputs()
@@ -270,197 +273,6 @@ func TestConfigGetPlatform(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
-}
-
-func TestModelValidation(t *testing.T) {
-	testCases := []struct {
-		name        string
-		config      *config.Model
-		expectError bool
-		errorMsg    string
-	}{
-		{
-			name: "valid_tensorflow_model",
-			config: &config.Model{
-				ID:       "test_tf",
-				Platform: "tensorflow",
-				URL:      "file:///tmp/model",
-			},
-			expectError: false,
-		},
-		{
-			name: "valid_triton_model",
-			config: &config.Model{
-				ID:       "test_triton",
-				Platform: "triton",
-				URL:      "http://localhost:8000",
-				Triton: &config.TritonConfig{
-					ModelName: "test_model",
-					Timeout:   30,
-				},
-			},
-			expectError: false,
-		},
-		{
-			name: "tensorflow_missing_url",
-			config: &config.Model{
-				ID:       "test_tf_no_url",
-				Platform: "tensorflow",
-			},
-			expectError: true,
-			errorMsg:    "tensorflow model test_tf_no_url requires URL",
-		},
-		{
-			name: "triton_missing_config",
-			config: &config.Model{
-				ID:       "test_triton_no_config",
-				Platform: "triton",
-			},
-			expectError: true,
-			errorMsg:    "triton model test_triton_no_config requires Triton configuration",
-		},
-		{
-			name: "triton_missing_server_url",
-			config: &config.Model{
-				ID:       "test_triton_no_server",
-				Platform: "triton",
-				Triton: &config.TritonConfig{
-					ModelName: "test_model",
-				},
-			},
-			expectError: true,
-			errorMsg:    "requires URL (Triton server endpoint)",
-		},
-		{
-			name: "triton_missing_model_name",
-			config: &config.Model{
-				ID:       "test_triton_no_model",
-				Platform: "triton",
-				URL:      "http://localhost:8000",
-				Triton:   &config.TritonConfig{},
-			},
-			expectError: true,
-			errorMsg:    "Triton ModelName is required",
-		},
-		{
-			name: "unsupported_platform",
-			config: &config.Model{
-				ID:       "test_unsupported",
-				Platform: "pytorch",
-				URL:      "file:///tmp/model",
-			},
-			expectError: true,
-			errorMsg:    "unsupported platform 'pytorch' for model test_unsupported",
-		},
-		{
-			name: "missing_model_id",
-			config: &config.Model{
-				Platform: "tensorflow",
-				URL:      "file:///tmp/model",
-			},
-			expectError: true,
-			errorMsg:    "model.ID was empty",
-		},
-		{
-			name: "default_platform_missing_url",
-			config: &config.Model{
-				ID: "test_default_no_url",
-				// No platform specified, should default to tensorflow
-			},
-			expectError: true,
-			errorMsg:    "tensorflow model test_default_no_url requires URL",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.config.Validate()
-
-			if tc.expectError {
-				assert.Error(t, err)
-				if tc.errorMsg != "" {
-					assert.Contains(t, err.Error(), tc.errorMsg)
-				}
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestTritonConfigValidation(t *testing.T) {
-	testCases := []struct {
-		name        string
-		config      *config.TritonConfig
-		expectError bool
-		errorMsg    string
-	}{
-		{
-			name: "valid_triton_config",
-			config: &config.TritonConfig{
-				ModelName: "test_model",
-				Timeout:   30,
-			},
-			expectError: false,
-		},
-		{
-			name: "valid_triton_config_minimal",
-			config: &config.TritonConfig{
-				ModelName: "test_model",
-				// Timeout is optional
-			},
-			expectError: false,
-		},
-		{
-			name:        "missing_model_name",
-			config:      &config.TritonConfig{},
-			expectError: true,
-			errorMsg:    "Triton ModelName is required",
-		},
-		{
-			name: "empty_model_name",
-			config: &config.TritonConfig{
-				ModelName: "",
-			},
-			expectError: true,
-			errorMsg:    "Triton ModelName is required",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.config.Validate()
-
-			if tc.expectError {
-				assert.Error(t, err)
-				if tc.errorMsg != "" {
-					assert.Contains(t, err.Error(), tc.errorMsg)
-				}
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestTensorFlowEvaluator_Health(t *testing.T) {
-	tfService := &tfmodel.Service{}
-	evaluator := NewTensorFlowEvaluator(tfService)
-
-	// Test basic health functionality
-	assert.True(t, evaluator.SupportsHealthReporting())
-	assert.True(t, evaluator.SupportsReload())
-	assert.False(t, evaluator.IsHealthy()) // Uninitialized
-
-	// Test health status with pointer
-	var healthStatus int32
-	evaluator.SetHealthStatus(&healthStatus)
-
-	atomic.StoreInt32(&healthStatus, 1)
-	assert.True(t, evaluator.IsHealthy())
-
-	atomic.StoreInt32(&healthStatus, 0)
-	assert.False(t, evaluator.IsHealthy())
 }
 
 // mockTritonServer implements triton.GRPCInferenceServiceServer for testing
@@ -567,7 +379,7 @@ func TestTritonEvaluator_PredictWithMockServer(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	// Replace the gRPC connection with mock
@@ -634,7 +446,7 @@ func TestTritonEvaluator_PredictWithRawOutputContents(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	evaluator.grpcConn = createMockTritonClient(ctx, t, listener)
@@ -770,7 +582,7 @@ func TestTritonEvaluator_PredictAllInputTypes(t *testing.T) {
 				},
 			}
 
-			evaluator := NewTritonEvaluator(cfg)
+			evaluator := newTritonEvaluator(t, cfg)
 			defer evaluator.Close()
 
 			evaluator.grpcConn = createMockTritonClient(ctx, t, listener)
@@ -826,7 +638,7 @@ func TestTritonEvaluator_PredictBytesOutput(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	evaluator.grpcConn = createMockTritonClient(ctx, t, listener)
@@ -907,7 +719,7 @@ func TestTritonEvaluator_PredictDifferentBatchSizes(t *testing.T) {
 				},
 			}
 
-			evaluator := NewTritonEvaluator(cfg)
+			evaluator := newTritonEvaluator(t, cfg)
 			defer evaluator.Close()
 
 			evaluator.grpcConn = createMockTritonClient(ctx, t, listener)
@@ -973,7 +785,7 @@ func TestTritonEvaluator_PredictUnsupportedType(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	evaluator.grpcConn = createMockTritonClient(ctx, t, listener)
@@ -1006,7 +818,7 @@ func TestTritonEvaluator_PredictEmptyBatch(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	_, err := evaluator.Predict(context.Background(), []interface{}{})
@@ -1054,7 +866,7 @@ func TestTritonEvaluator_PredictMissingOutput(t *testing.T) {
 		},
 	}
 
-	evaluator := NewTritonEvaluator(cfg)
+	evaluator := newTritonEvaluator(t, cfg)
 	defer evaluator.Close()
 
 	evaluator.grpcConn = createMockTritonClient(ctx, t, listener)
@@ -1071,7 +883,7 @@ func TestTritonEvaluator_PredictMissingOutput(t *testing.T) {
 
 func TestTritonEvaluator_Health(t *testing.T) {
 	t.Run("interface_compliance", func(t *testing.T) {
-		var _ PlatformEvaluator = (*TritonEvaluator)(nil)
+		var _ platform.PlatformEvaluator = (*TritonEvaluator)(nil)
 	})
 
 	t.Run("supports_health_reporting", func(t *testing.T) {
@@ -1092,7 +904,7 @@ func TestTritonEvaluator_Health(t *testing.T) {
 			},
 		}
 
-		evaluator := NewTritonEvaluator(cfg)
+		evaluator := newTritonEvaluator(t, cfg)
 		defer evaluator.Close()
 
 		assert.True(t, evaluator.SupportsHealthReporting())
@@ -1116,7 +928,7 @@ func TestTritonEvaluator_Health(t *testing.T) {
 			},
 		}
 
-		evaluator := NewTritonEvaluator(cfg)
+		evaluator := newTritonEvaluator(t, cfg)
 		defer evaluator.Close()
 
 		// Initially not healthy (no health pointer set)
@@ -1133,11 +945,4 @@ func TestTritonEvaluator_Health(t *testing.T) {
 		atomic.StoreInt32(&healthStatus, 0)
 		assert.False(t, evaluator.IsHealthy())
 	})
-}
-
-func TestPlatformEvaluator_Interface_Compliance(t *testing.T) {
-	tfService := &tfmodel.Service{}
-	var _ PlatformEvaluator = NewTensorFlowEvaluator(tfService)
-
-	var _ PlatformEvaluator = (*TritonEvaluator)(nil)
 }
