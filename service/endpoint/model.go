@@ -114,16 +114,12 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 				lock.Unlock()
 				return
 			}
+
 			log.Printf("[%s] Model configuration validated successfully", model.ID)
 
 			e := func() error {
 				var modelSrv *service.Service
 				var err error
-
-				if model.Platform == "" {
-					// Default to TensorFlow for models without explicit platform
-					model.Platform = "tensorflow"
-				}
 
 				modelSrv, err = service.NewWithPlatform(context.Background(), model, fs, metrics, datastores, sema, cfge.MaxEvaluatorWait, serviceOpts...)
 

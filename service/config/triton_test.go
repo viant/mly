@@ -89,7 +89,6 @@ func TestTritonModelConfigValidation(t *testing.T) {
 			name: "default_platform_missing_url",
 			config: &Model{
 				ID: "test_default_no_url",
-				// No platform specified, should default to tensorflow
 			},
 			expectError: true,
 			errorMsg:    "URL",
@@ -153,7 +152,7 @@ func TestTritonConfigValidation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.config.Validate(true)
+			err := tc.config.Validate(false, true)
 
 			if tc.expectError {
 				assert.Error(t, err)

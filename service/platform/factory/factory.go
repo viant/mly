@@ -16,6 +16,7 @@ import (
 // CreateEvaluator creates the appropriate platform evaluator based on the model configuration
 func CreateEvaluator(
 	cfg *config.Model,
+
 	fs afs.Service,
 	metrics *gmetric.Service,
 	sema *semaphore.Weighted,
@@ -30,8 +31,7 @@ func CreateEvaluator(
 		return tfService, nil
 
 	case "triton":
-		return triton.NewTritonEvaluator(cfg)
-
+		return triton.NewTritonEvaluator(cfg, map[string]triton.TritonClient{})
 	default:
 		return nil, fmt.Errorf("unsupported platform: %s for model %s", p, cfg.ID)
 	}

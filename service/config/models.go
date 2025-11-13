@@ -17,8 +17,8 @@ func (l *ModelList) Init(bc *config.BatcherConfig) {
 		return
 	}
 
-	for i := range l.Models {
-		l.Models[i].Init(bc)
+	for _, model := range l.Models {
+		model.Init(bc)
 	}
 }
 

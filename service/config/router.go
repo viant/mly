@@ -3,7 +3,7 @@ package config
 import "fmt"
 
 type RouterConfig struct {
-	// Required
+	// Required if Model.Mode is "router".
 	ConfigURL string
 
 	// Required

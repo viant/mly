@@ -426,8 +426,13 @@ func (s *Service) Close() error {
 
 // NewService creates an unprepared Service.
 // This service isn't ready until ReloadIfNeeded() is called.
-func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sema *semaphore.Weighted,
-	maxEvaluatorWait time.Duration) *Service {
+func NewService(
+	cfg *config.Model,
+	fs afs.Service,
+	metrics *gmetric.Service,
+	sema *semaphore.Weighted,
+	maxEvaluatorWait time.Duration,
+) *Service {
 
 	location := reflect.TypeOf(evaluator.Service{}).PkgPath()
 	id := cfg.ID

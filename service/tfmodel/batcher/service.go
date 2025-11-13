@@ -186,7 +186,7 @@ func (s *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interfa
 		return nil, err
 	}
 
-	return nil, fmt.Errorf("unhandled select")
+	panic("unhandled select")
 }
 
 func (s *Service) setShedding(shedding bool) {
