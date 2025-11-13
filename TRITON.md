@@ -4,6 +4,8 @@
 The Triton integration uses protocol buffers for gRPC communication.
 Generated proto files are **committed to the repository** for build reliability.
 
+Triton uses `raw_output_contents` for performance (binary format vs. structured).
+
 # When to Regenerate Proto Files
 
 Regenerate only when:
@@ -42,21 +44,20 @@ which protoc-gen-go-grpc
 
 # Regeneration Steps
 
-```bash
-# 1. Navigate to repo root
-cd /path/to/viant/mly
+Initialize submodule in `third_party/triton-common`.
 
-# 2. Delete old generated files (ensures clean regeneration)
+```bash
+# 1. Delete old generated files (ensures clean regeneration)
 rm -f proto/triton/grpc_service.pb.go
 rm -f proto/triton/grpc_service_grpc.pb.go
 
-# 3. Regenerate
+# 2. Regenerate
 protoc \
-  --go_out=. \
-  --go_opt=paths=source_relative \
-  --go-grpc_out=. \
-  --go-grpc_opt=paths=source_relative \
-  proto/triton/grpc_service.proto
+  -I "$PWD/third_party/triton-common/protobuf" \
+  --go_out=paths=source_relative,Mgrpc_service.proto=github.com/viant/mly/proto/triton,Mmodel_config.proto=github.com/viant/mly/proto/triton:"$PWD/proto/triton" \
+  --go-grpc_out=paths=source_relative,Mgrpc_service.proto=github.com/viant/mly/proto/triton,Mmodel_config.proto=github.com/viant/mly/proto/triton:"$PWD/proto/triton" \
+  "$PWD/third_party/triton-common/protobuf/model_config.proto" \
+  "$PWD/third_party/triton-common/protobuf/grpc_service.proto"
 
 # 4. Verify generation succeeded
 ls -lh proto/triton/*.pb.go
@@ -92,5 +93,3 @@ git diff proto/triton/
 
 **Notes:**
 - Generated files are ~30KB and should be committed
-- Proto definitions are based on [Triton's official protocol](https://github.com/triton-inference-server/common/blob/main/protobuf/grpc_service.proto)
-- Triton uses `raw_output_contents` for performance (binary format vs. structured)

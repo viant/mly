@@ -1,0 +1,3 @@
+[submodule "third_party/triton-common"]
+	path = third_party/triton-common
+	url = git@github.com:triton-inference-server/common.git
