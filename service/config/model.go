@@ -17,17 +17,24 @@ type Model struct {
 	ID    string
 	Debug bool
 
-	// Platform specifies the model platform (tensorflow, triton)
-	// Defaults to "tensorflow" for backward compatibility
+	// Mode overrides the endpoint behavior from inference to routing.
+	// Can be one of "inference" or "router".
+	// Defaults to "inference".
+	Mode string `json:",omitempty" yaml:",omitempty"`
+
+	// Platform specifies where inference occurs.
+	// Can be one of "tensorflow" or "triton".
+	// Defaults to "tensorflow".
 	Platform string `json:",omitempty" yaml:",omitempty"`
 
 	// Location is the path the model will be copied to.
 	Location string `json:",omitempty" yaml:",omitempty"`
 
 	// Dir is used to build a Location if Location is not provided.
-	// The build Location will use Dir directory after os.TempDir() and ID.
+	// The built Location will use Dir directory after os.TempDir() and ID.
 	Dir string
 
+	// URL is the location of the model.
 	URL string
 
 	Batch *BatcherConfigFile `json:",omitempty" yaml:",omitempty"`
@@ -40,17 +47,21 @@ type Model struct {
 	// If UseDict is nil, defaults to true.
 	UseDict *bool `json:",omitempty" yaml:",omitempty"`
 
-	DictURL string // Deprecated: we usually extract the dictionary/vocabulary from TF graph
+	// Deprecated: we usually extract the dictionary/vocabulary from TF graph
+	DictURL string
 
 	shared.MetaInput `json:",omitempty" yaml:",inline"`
 
 	// Deprecated: we can infer output types from TF graph, and there may be more than one output
 	OutputType string `json:",omitempty" yaml:",omitempty"`
 
+	// Transformer is the name of the model output transformer.
 	Transformer string `json:",omitempty" yaml:",omitempty"`
 
-	// caching
+	// DataStore is the name of the datastore to use for caching.
 	DataStore string `json:",omitempty" yaml:",omitempty"`
+
+	Router *RouterConfig `json:",omitempty" yaml:",omitempty"`
 
 	// Stream is a github.com/viant/tapper configuration.
 	// All requests are eligible to be logged.
@@ -64,6 +75,7 @@ type Model struct {
 
 	DictMeta DictionaryMeta
 
+	// Test is used to test the model on startup.
 	Test TestPayload `json:",omitempty" yaml:",omitempty"`
 }
 
@@ -135,19 +147,30 @@ func (m *Model) Validate() error {
 		if m.URL == "" {
 			return fmt.Errorf("tensorflow model %s requires URL", m.ID)
 		}
+
+		if m.Mode == "router" {
+			return fmt.Errorf("tensorflow model %s is not supported in router mode", m.ID)
+		}
 	case "triton":
-		// Triton models require Triton configuration
 		if m.Triton == nil {
 			return fmt.Errorf("triton model %s requires Triton configuration", m.ID)
 		}
-		if m.URL == "" {
-			return fmt.Errorf("triton model %s requires URL (Triton server endpoint)", m.ID)
-		}
-		if err := m.Triton.Validate(); err != nil {
+
+		if err := m.Triton.Validate(m.URL != ""); err != nil {
 			return fmt.Errorf("triton model %s config invalid: %w", m.ID, err)
 		}
 	default:
 		return fmt.Errorf("unsupported platform '%s' for model %s (supported: tensorflow, triton)", platform, m.ID)
+	}
+
+	if m.Mode == "router" {
+		if m.Router == nil {
+			return fmt.Errorf("router model %s requires Router configuration", m.ID)
+		}
+
+		if err := m.Router.Validate(); err != nil {
+			return fmt.Errorf("router model %s config invalid: %w", m.ID, err)
+		}
 	}
 
 	return nil
@@ -155,17 +178,25 @@ func (m *Model) Validate() error {
 
 // TritonConfig represents Triton Inference Server specific configuration
 type TritonConfig struct {
-	ModelName string `json:",omitempty" yaml:",omitempty"` // Model name in Triton
-	Timeout   int    `json:",omitempty" yaml:",omitempty"` // HTTP timeout in milliseconds
+	// Model name in Triton
+	ModelName string `json:",omitempty" yaml:",omitempty"`
+
+	// ServerID is the ID of the Triton server.
+	ServerID string `json:",omitempty" yaml:",omitempty"`
+
+	// HTTP timeout in milliseconds
+	Timeout int `json:",omitempty" yaml:",omitempty"`
 }
 
-func (t *TritonConfig) Validate() error {
+func (t *TritonConfig) Validate(urlPresent bool) error {
 	if t.ModelName == "" {
-		return fmt.Errorf("Triton ModelName is required")
+		return fmt.Errorf("triton ModelName is required")
 	}
-	if t.Timeout <= 0 {
-		t.Timeout = 100
+
+	if t.ServerID == "" && !urlPresent {
+		return fmt.Errorf("triton ServerID or Model.URL is required")
 	}
+
 	return nil
 }
 

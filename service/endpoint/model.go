@@ -104,7 +104,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 
 			mstart := time.Now()
 
-			log.Printf("[%s] model loading", model.ID)
+			log.Printf("[%s] Model loading", model.ID)
 
 			// Validate model configuration first
 			if validateErr := model.Validate(); validateErr != nil {
@@ -124,6 +124,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 					// Default to TensorFlow for models without explicit platform
 					model.Platform = "tensorflow"
 				}
+
 				modelSrv, err = service.NewWithPlatform(context.Background(), model, fs, metrics, datastores, sema, cfge.MaxEvaluatorWait, serviceOpts...)
 
 				if err != nil {

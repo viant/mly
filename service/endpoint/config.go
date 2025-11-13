@@ -25,6 +25,8 @@ type Config struct {
 	config.ModelList      `json:",omitempty" yaml:",inline"`
 	sconfig.DatastoreList `json:",omitempty" yaml:",inline"`
 
+	TritonServers []config.TritonServer `json:",omitempty" yaml:",omitempty"`
+
 	// GlobalBatching provides a default batching configuration if
 	// models do not provide their own.
 	// If GlobalBatching is provided but a model should not be batching,
@@ -63,9 +65,11 @@ func (c *Config) Validate() error {
 	if err := c.ModelList.Validate(); err != nil {
 		return err
 	}
+
 	if err := c.DatastoreList.Validate(); err != nil {
 		return err
 	}
+
 	return nil
 }
 

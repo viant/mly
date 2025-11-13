@@ -137,11 +137,14 @@ func (m *MetaInput) FieldByName() map[string]*Field {
 func (m *MetaInput) Init() {
 	// TODO assess why this approach was taken - this condition could be improved by having a map to see if the field by name already exists
 	if len(m.Inputs) == 0 {
+		// Add KeyFields to Inputs
 		if len(m.KeyFields) > 0 {
 			for _, field := range m.KeyFields {
 				m.Inputs = append(m.Inputs, &Field{Name: field})
 			}
 		}
+
+		// Add Auxiliary fields to Inputs
 		if len(m.Auxiliary) > 0 {
 			for _, field := range m.Auxiliary {
 				m.Inputs = append(m.Inputs, &Field{Name: field, Auxiliary: true})
