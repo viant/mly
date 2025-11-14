@@ -91,10 +91,7 @@ func (s *Service) Config() *config.Model {
 }
 
 func (s *Service) Signature() *domain.Signature {
-	if s.evaluator != nil {
-		return s.evaluator.Signature()
-	}
-	return nil
+	return s.evaluator.Signature()
 }
 
 func (s *Service) Dictionary() *common.Dictionary {

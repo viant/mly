@@ -464,7 +464,7 @@ func debatch(untypedBatch interface{}, i int) (interface{}, error) {
 }
 
 func (r *Router) Signature() *domain.Signature {
-	return nil
+	return r.signature
 }
 
 func (r *Router) Dictionary() *common.Dictionary {
