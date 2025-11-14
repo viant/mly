@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"strings"
 
 	triton "github.com/viant/mly/proto/triton"
 	"google.golang.org/grpc"
@@ -66,17 +65,6 @@ func (c *GRPCClient) ModelLoad(ctx context.Context, modelName string) error {
 
 func (c *GRPCClient) Close() error {
 	return c.grpcConn.Close()
-}
-
-func parseGRPCAddress(url string) string {
-	addr := strings.TrimPrefix(url, "http://")
-	addr = strings.TrimPrefix(addr, "https://")
-
-	if !strings.Contains(addr, ":") {
-		addr += ":8001"
-	}
-
-	return addr
 }
 
 func buildGRPCRequest(modelName string, preparedInputs []preparedInput) (*triton.ModelInferRequest, error) {

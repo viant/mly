@@ -16,52 +16,6 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-func TestParseGRPCAddress(t *testing.T) {
-	testCases := []struct {
-		name     string
-		url      string
-		expected string
-	}{
-		{
-			name:     "http_with_port",
-			url:      "http://localhost:8000",
-			expected: "localhost:8000", // Preserves existing port
-		},
-		{
-			name:     "https_with_port",
-			url:      "https://triton.example.com:8000",
-			expected: "triton.example.com:8000", // Preserves existing port
-		},
-		{
-			name:     "http_without_port",
-			url:      "http://localhost",
-			expected: "localhost:8001", // Adds default gRPC port
-		},
-		{
-			name:     "https_without_port",
-			url:      "https://triton.example.com",
-			expected: "triton.example.com:8001", // Adds default gRPC port
-		},
-		{
-			name:     "no_scheme",
-			url:      "localhost:9001",
-			expected: "localhost:9001", // Preserves as-is
-		},
-		{
-			name:     "ip_address",
-			url:      "http://192.168.1.100:8000",
-			expected: "192.168.1.100:8000", // Preserves existing port
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := parseGRPCAddress(tc.url)
-			assert.Equal(t, tc.expected, result)
-		})
-	}
-}
-
 // createMockTritonConn creates a gRPC client connected to the mock server
 func createMockTritonConn(ctx context.Context, t *testing.T, listener *bufconn.Listener) *grpc.ClientConn {
 	conn, err := grpc.DialContext(ctx, "bufnet",
