@@ -9,12 +9,11 @@ import (
 	"time"
 
 	"github.com/viant/mly/service/config"
-	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/toolbox"
 )
 
-func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTransformer bool, inputs_ []*shared.Field, tp config.TestPayload, outputs []*shared.Field, debug bool) error {
+func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTransformer bool, tp config.TestPayload, debug bool) error {
 	cli, err := client.New(modelID, host, client.WithDebug(true))
 	if err != nil {
 		return fmt.Errorf("%s:%w", modelID, err)
@@ -239,9 +238,10 @@ func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 	}
 
 	resp := new(client.Response)
+
 	// see if there is a transform
 	// if there is, trigger the transform with mock data?
-	resp.Data = Generated(outputs, batchSize, usesTransformer)()
+	resp.Data = Generated(cli.Datastore.MetaInput.Outputs, batchSize, usesTransformer)()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

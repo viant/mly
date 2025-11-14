@@ -296,7 +296,6 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			}
 		}
 
-		
 		results, err := evaluator.Predict(ctx, request)
 		if err != nil {
 			return nil, fmt.Errorf("failed to predict for row %d: %w", batchOffset, err)

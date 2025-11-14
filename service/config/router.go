@@ -39,6 +39,7 @@ type PredictionReplacement struct {
 type OutputConfig struct {
 	// The name of the output field that contains the model ID.
 	// If this is blank, then the model ID will not be part of the outputs.
+	// The Output must exist in Model.MetaInput.Outputs.
 	FieldName string `json:",omitempty" yaml:",omitempty"`
 
 	// If the global model is used, this will be used as the global model name

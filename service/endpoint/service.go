@@ -14,7 +14,6 @@ import (
 	"github.com/viant/mly/service/endpoint/health"
 	promh "github.com/viant/mly/service/endpoint/prometheus"
 	"github.com/viant/mly/service/triton"
-	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
@@ -112,7 +111,7 @@ func (s *Service) SelfTest() error {
 	}()
 
 	for _, m := range s.config.ModelList.Models {
-		go func(modelID string, transformer string, inputs []*shared.Field, tp srvConfig.TestPayload, outputs []*shared.Field, debug bool) {
+		go func(modelID string, transformer string, tp srvConfig.TestPayload, debug bool) {
 			defer waitGroup.Done()
 			// for backwards compatibility, skip tests if not specified
 			if !tp.Test && !tp.SingleBatch && len(tp.Single) == 0 && len(tp.Batch) == 0 {
@@ -121,14 +120,14 @@ func (s *Service) SelfTest() error {
 			}
 
 			start := time.Now()
-			err := checker.SelfTest(hosts, timeout, modelID, transformer != "", inputs, tp, outputs, debug)
+			err := checker.SelfTest(hosts, timeout, modelID, transformer != "", tp, debug)
 			if err != nil {
 				errHandler <- err
 				return
 			}
 
 			log.Printf("tested %s %s", modelID, time.Now().Sub(start))
-		}(m.ID, m.Transformer, m.Inputs, m.Test, m.Outputs, m.Debug)
+		}(m.ID, m.Transformer, m.Test, m.Debug)
 	}
 
 	waitGroup.Wait()
