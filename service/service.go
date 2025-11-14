@@ -23,6 +23,7 @@ import (
 	"github.com/viant/mly/service/stat"
 	"github.com/viant/mly/service/stream"
 	"github.com/viant/mly/service/transform"
+	"github.com/viant/mly/service/triton"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
@@ -333,13 +334,14 @@ func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs a
 	return nil
 }
 
-// NewWithPlatform creates a service with platform router support
-func NewWithPlatform(
+// New creates a service with platform router support
+func New(
 	ctx context.Context,
 	cfg *config.Model,
 	fs afs.Service,
 	metrics *gmetric.Service,
 	datastores map[string]*datastore.Service,
+	tritonClients map[string]triton.TritonClient,
 	sema *semaphore.Weighted,
 	maxEvaluatorWait time.Duration,
 	options ...Option,
@@ -354,7 +356,7 @@ func NewWithPlatform(
 	cfg.Init(nil)
 
 	// Create platform evaluator context
-	evaluatorContext, err := factory.CreateEvaluator(cfg, fs, metrics, sema, maxEvaluatorWait)
+	evaluatorContext, err := factory.CreateEvaluator(cfg, fs, metrics, sema, maxEvaluatorWait, tritonClients)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create platform evaluator for model %s: %w", cfg.ID, err)
 	}

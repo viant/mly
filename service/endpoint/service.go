@@ -13,6 +13,7 @@ import (
 	"github.com/viant/mly/service/endpoint/checker"
 	"github.com/viant/mly/service/endpoint/health"
 	promh "github.com/viant/mly/service/endpoint/prometheus"
+	"github.com/viant/mly/service/triton"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/mly/shared/common"
@@ -204,11 +205,30 @@ func New(cfg *Config) (*Service, error) {
 		return nil, fmt.Errorf("failed to create datastores: %w", err)
 	}
 
+	tritonClients := make(map[string]triton.TritonClient)
+	for _, server := range cfg.TritonServers {
+		tritonClient, err := triton.NewClient(server)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create triton client for server %s: %w", server.ID, err)
+		}
+
+		log.Printf("checking triton server %s health\n", server.ID)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(server.StartupTimeoutSeconds)*time.Second)
+
+		err = tritonClient.ServerReady(ctx)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("failed to check triton server %s health: %w", server.ID, err)
+		}
+
+		tritonClients[server.ID] = tritonClient
+	}
+
 	hooks := []Hook{
 		healthHandler,
 	}
 
-	err = Build(mux, cfg, datastores, hooks, metrics, promReg)
+	err = Build(mux, cfg, datastores, tritonClients, hooks, metrics, promReg)
 	if err != nil {
 		return nil, err
 	}

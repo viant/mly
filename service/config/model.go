@@ -198,7 +198,8 @@ type TritonConfig struct {
 	// See https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/user_guide/model_management.html
 	RepositoryExplicit bool `json:",omitempty" yaml:",omitempty"`
 
-	// HTTP total timeout in milliseconds, defaults to 100 milliseconds.
+	// Maximum request timeout in milliseconds.
+	// Defaults to 100 milliseconds.
 	Timeout int `json:",omitempty" yaml:",omitempty"`
 }
 

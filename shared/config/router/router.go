@@ -1,4 +1,4 @@
-package config
+package router
 
 type RouterConfig struct {
 	EntityMapping []EntityKV `json:"entityMapping" yaml:"entityMapping"`

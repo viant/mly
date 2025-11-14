@@ -18,6 +18,8 @@ const (
 // PlatformEvaluator defines the interface that all platform-specific evaluators must implement
 type PlatformEvaluator interface {
 	// Predict performs model inference with the given parameters
+	// params is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds)
+	// The return value should be [numOutputs]([batchSize][1]T), but may vary depending on the model.
 	Predict(ctx context.Context, params []interface{}) ([]interface{}, error)
 
 	// Signature returns underlying model's signature

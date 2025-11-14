@@ -43,6 +43,7 @@ type OutputConfig struct {
 
 	// If no model is used, this will be used as the model ID
 	// If RouterConfig.Global.Exists is true, this will be ignored.
+	// Defaults to "none".
 	NoModelID string `json:",omitempty" yaml:",omitempty"`
 }
 
@@ -57,6 +58,10 @@ func (o *RouterConfig) Validate() error {
 
 	if !o.Global.Exists && len(o.Global.PredictionReplacements) == 0 {
 		return fmt.Errorf("global model does not exist but no rediction replacements were provided")
+	}
+
+	if o.Output.NoModelID == "" {
+		o.Output.NoModelID = "none"
 	}
 
 	return nil

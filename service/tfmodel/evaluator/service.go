@@ -64,7 +64,7 @@ func (e *Service) acquire(ctx context.Context) (func(), error) {
 }
 
 // Evaluate runs the primary model prediction via Cgo Tensorflow.
-// params is expected to be [inputs][1][batch]T - see service/request.Request.Feeds and related methods.
+// params is expected to be [inputs]([batch][1]T) - see service/request.Request.Feeds and related methods.
 func (s *Service) Evaluate(ctx context.Context, params []interface{}) ([]interface{}, error) {
 	s.wg.Add(1)
 	defer s.wg.Done()

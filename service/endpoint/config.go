@@ -58,6 +58,9 @@ func (c *Config) Init() {
 	c.ModelList.Init(c.GlobalBatching)
 	c.DatastoreList.Init()
 	c.Endpoint.Init()
+	for i := range c.TritonServers {
+		c.TritonServers[i].Init()
+	}
 }
 
 // Validate validates config
@@ -68,6 +71,12 @@ func (c *Config) Validate() error {
 
 	if err := c.DatastoreList.Validate(); err != nil {
 		return err
+	}
+
+	for i, tritonServer := range c.TritonServers {
+		if err := tritonServer.Validate(); err != nil {
+			return errors.Wrapf(err, "triton server number %d validation failed", i)
+		}
 	}
 
 	return nil

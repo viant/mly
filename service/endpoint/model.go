@@ -16,6 +16,7 @@ import (
 	"github.com/viant/mly/service/config"
 	serviceConfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/endpoint/meta"
+	"github.com/viant/mly/service/triton"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
 	"golang.org/x/sync/semaphore"
@@ -47,8 +48,15 @@ type Hook interface {
 	Hook(*config.Model, *service.Service)
 }
 
-func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.Service,
-	hooks []Hook, metrics *gmetric.Service, promReg *prometheus.Registry) error {
+func Build(
+	mux *http.ServeMux,
+	config *Config,
+	datastores map[string]*datastore.Service,
+	tritonClients map[string]triton.TritonClient,
+	hooks []Hook,
+	metrics *gmetric.Service,
+	promReg *prometheus.Registry,
+) error {
 
 	cfge := config.Endpoint
 	pool := buffer.New(cfge.PoolMaxSize, cfge.BufferSize)
@@ -121,7 +129,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 				var modelSrv *service.Service
 				var err error
 
-				modelSrv, err = service.NewWithPlatform(context.Background(), model, fs, metrics, datastores, sema, cfge.MaxEvaluatorWait, serviceOpts...)
+				modelSrv, err = service.New(context.Background(), model, fs, metrics, datastores, tritonClients, sema, cfge.MaxEvaluatorWait, serviceOpts...)
 
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)

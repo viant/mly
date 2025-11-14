@@ -8,6 +8,7 @@ import (
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/platform"
+	"github.com/viant/mly/service/platform/router"
 	"github.com/viant/mly/service/tfmodel"
 	"github.com/viant/mly/service/triton"
 	"golang.org/x/sync/semaphore"
@@ -21,8 +22,10 @@ func CreateEvaluator(
 	metrics *gmetric.Service,
 	sema *semaphore.Weighted,
 	maxEvaluatorWait time.Duration,
+	tritonClients map[string]triton.TritonClient,
 ) (platform.PlatformEvaluator, error) {
 	p := cfg.GetPlatform()
+	isRouter := cfg.Mode == "router"
 
 	switch p {
 	case "tensorflow":
@@ -31,7 +34,11 @@ func CreateEvaluator(
 		return tfService, nil
 
 	case "triton":
-		return triton.NewTritonEvaluator(cfg, map[string]triton.TritonClient{})
+		if isRouter {
+			return router.NewRouter(cfg, fs, tritonClients)
+		}
+
+		return triton.NewTritonEvaluator(cfg, tritonClients)
 	default:
 		return nil, fmt.Errorf("unsupported platform: %s for model %s", p, cfg.ID)
 	}

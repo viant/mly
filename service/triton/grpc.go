@@ -11,8 +11,18 @@ import (
 )
 
 type GRPCClient struct {
-	grpcConn   *grpc.ClientConn
+	// Note that this is dangerous to Close if the connection is shared.
+	// See how TritonEvaluator handles Close().
+	grpcConn *grpc.ClientConn
+
 	grpcClient triton.GRPCInferenceServiceClient
+}
+
+func NewGRPCClient(grpcConn *grpc.ClientConn) *GRPCClient {
+	return &GRPCClient{
+		grpcConn:   grpcConn,
+		grpcClient: triton.NewGRPCInferenceServiceClient(grpcConn),
+	}
 }
 
 // preparedInput represents processed input data ready for gRPC transport
@@ -21,6 +31,11 @@ type preparedInput struct {
 	datatype string      // Triton datatype: "BYTES", "INT32", "INT64", "FP32", "FP64"
 	shape    []int64     // Shape in int64 for gRPC compatibility
 	data     interface{} // Flattened data: []string, []int32, []int64, []float32, []float64
+}
+
+func (c *GRPCClient) ServerReady(ctx context.Context) error {
+	_, err := c.grpcClient.ServerReady(ctx, &triton.ServerReadyRequest{})
+	return err
 }
 
 func (c *GRPCClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error) {
@@ -60,6 +75,18 @@ func (c *GRPCClient) ModelLoad(ctx context.Context, modelName string) error {
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func (c *GRPCClient) ModelUnload(ctx context.Context, modelName string) error {
+	_, err := c.grpcClient.RepositoryModelUnload(ctx, &triton.RepositoryModelUnloadRequest{
+		ModelName: modelName,
+	})
+
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
