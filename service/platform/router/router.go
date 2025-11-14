@@ -188,7 +188,7 @@ func (t *Router) handleIO(cfg *config.Model) error {
 		t.fixedEvaluator = fixedEvaluator
 	}
 
-	var modelOutputInOutputs bool
+	var modelOutputInOutputs bool = !hasModelOutputName
 	if hasModelOutputName {
 		_, modelOutputInOutputs = outputByName[modelOutputName]
 	}
@@ -197,6 +197,7 @@ func (t *Router) handleIO(cfg *config.Model) error {
 		outputs = append(outputs, domain.Output{
 			Name:     modelOutputName,
 			DataType: "string",
+			Index:    len(outputs),
 		})
 	}
 
@@ -303,7 +304,7 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		if r.modelOutputName != "" {
 			// TODO ensure ordering
 
-			results = append(results, []interface{}{[][]string{{routingValueString}}})
+			results = append(results, [][]string{{routingValueString}})
 		}
 
 		// TODO dynamic output batch shape detection
