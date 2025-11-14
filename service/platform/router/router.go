@@ -128,7 +128,7 @@ func (t *Router) handleIO(cfg *config.Model) error {
 				inputType = reflect.TypeOf(int32(0))
 			case "int64":
 				inputType = reflect.TypeOf(int64(0))
-			case "float32":
+			case "float32", "float":
 				inputType = reflect.TypeOf(float32(0))
 			case "float64":
 				inputType = reflect.TypeOf(float64(0))
@@ -242,7 +242,7 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		var routingValueBatched interface{}
 
 		for inputOffset := range numInputs {
-			debatched, err := debatch(params[inputOffset], batchOffset)
+			debatched, err := shape.Debatch(params[inputOffset], batchOffset)
 			if err != nil {
 				return nil, fmt.Errorf("failed to debatch for row %d and input %d: %w", batchOffset, inputOffset, err)
 			}
@@ -256,7 +256,7 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			}
 		}
 
-		routingValue, err := squeezeBatch(routingValueBatched)
+		routingValue, err := shape.SqueezeBatch(routingValueBatched)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract from batch for row %d: %w", batchOffset, err)
 		}
@@ -296,6 +296,7 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			}
 		}
 
+		
 		results, err := evaluator.Predict(ctx, request)
 		if err != nil {
 			return nil, fmt.Errorf("failed to predict for row %d: %w", batchOffset, err)
@@ -308,103 +309,13 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		}
 
 		// TODO dynamic output batch shape detection
-		allResults, err = concatAxis0(allResults, results)
+		allResults, err = shape.ConcatAxis0(allResults, results)
 		if err != nil {
 			return nil, fmt.Errorf("failed to concatenate results for row %d: %w", batchOffset, err)
 		}
 	}
 
 	return allResults, nil
-}
-
-// concatAxis0 concatenates two tensors along axis 0 (batch dimension).
-func concatAxis0(x []interface{}, y []interface{}) ([]interface{}, error) {
-	if len(x) != len(y) {
-		return nil, fmt.Errorf("x and y must have the same length: %d vs %d", len(x), len(y))
-	}
-
-	result := make([]interface{}, len(x))
-	for i := range x {
-		xt := x[i]
-		yt := y[i]
-
-		if xt == nil {
-			result[i] = yt
-			continue
-		}
-
-		switch xv := xt.(type) {
-		case [][]int32:
-			yv, ok := yt.([][]int32)
-			if !ok {
-				return nil, fmt.Errorf("type mismatch at index %d: %T vs %T", i, xt, yt)
-			}
-
-			result[i] = append(xv, yv...)
-		case [][]int64:
-			yv, ok := yt.([][]int64)
-			if !ok {
-				return nil, fmt.Errorf("type mismatch at index %d: %T vs %T", i, xt, yt)
-			}
-			result[i] = append(xv, yv...)
-		case [][]float32:
-			yv, ok := yt.([][]float32)
-			if !ok {
-				return nil, fmt.Errorf("type mismatch at index %d: %T vs %T", i, xt, yt)
-			}
-			result[i] = append(xv, yv...)
-		case [][]float64:
-			yv, ok := yt.([][]float64)
-			if !ok {
-				return nil, fmt.Errorf("type mismatch at index %d: %T vs %T", i, xt, yt)
-			}
-			result[i] = append(xv, yv...)
-		case [][]string:
-			yv, ok := yt.([][]string)
-			if !ok {
-				return nil, fmt.Errorf("type mismatch at index %d: %T vs %T", i, xt, yt)
-			}
-			result[i] = append(xv, yv...)
-		default:
-			return nil, fmt.Errorf("unexpected output tensor type at index %d: %T", i, xt)
-		}
-	}
-
-	return result, nil
-}
-
-func squeezeBatch(untypedBatch interface{}) (interface{}, error) {
-	switch typedBatch := untypedBatch.(type) {
-	case [][]int32:
-		return typedBatch[0][0], nil
-	case [][]int64:
-		return typedBatch[0][0], nil
-	case [][]float32:
-		return typedBatch[0][0], nil
-	case [][]float64:
-		return typedBatch[0][0], nil
-	case [][]string:
-		return typedBatch[0][0], nil
-	}
-
-	return nil, fmt.Errorf("unexpected batch type: %T", untypedBatch)
-}
-
-func debatch(untypedBatch interface{}, i int) (interface{}, error) {
-	switch typedBatch := untypedBatch.(type) {
-	case [][]int32:
-		return [][]int32{{typedBatch[i][0]}}, nil
-	case [][]int64:
-		return [][]int64{{typedBatch[i][0]}}, nil
-	case [][]float32:
-		return [][]float32{{typedBatch[i][0]}}, nil
-	case [][]float64:
-		return [][]float64{{typedBatch[i][0]}}, nil
-	case [][]string:
-		return [][]string{{typedBatch[i][0]}}, nil
-	}
-
-	return nil, fmt.Errorf("unexpected batch type: %T", untypedBatch)
 }
 
 func (r *Router) Signature() *domain.Signature {
