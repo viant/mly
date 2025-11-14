@@ -385,15 +385,11 @@ func New(
 // NewRequest should be used for Do()
 func (s *Service) NewRequest() *request.Request {
 	numKeyInputs := s.config.KeysLen()
+
 	// This may change mid-request, but that only matters
 	// under exceptional circumstances.
 
-	var inputs map[string]*domain.Input
-
-	if s.evaluator != nil {
-		inputs = s.evaluator.Inputs()
-	}
-
+	inputs := s.evaluator.Inputs()
 	return request.NewRequest(numKeyInputs, inputs)
 }
 

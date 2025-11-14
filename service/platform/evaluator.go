@@ -17,10 +17,7 @@ const (
 
 // PlatformEvaluator defines the interface that all platform-specific evaluators must implement
 type PlatformEvaluator interface {
-	// Predict performs model inference with the given parameters
-	// params is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds)
-	// The return value should be [numOutputs]([batchSize][1]T), but may vary depending on the model.
-	Predict(ctx context.Context, params []interface{}) ([]interface{}, error)
+	Predictor
 
 	// Signature returns underlying model's signature
 	Signature() *domain.Signature
@@ -41,4 +38,11 @@ type PlatformEvaluator interface {
 	// For in-process models (TensorFlow), this will check if the underlying models need to be updated.
 	// For external models (Triton), this will check Triton models' health.
 	ReloadIfNeeded(ctx context.Context) error
+}
+
+type Predictor interface {
+	// Predict performs model inference with the given parameters
+	// params is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds)
+	// The return value should be [numOutputs]([batchSize][1]T), but may vary depending on the model.
+	Predict(ctx context.Context, params []interface{}) ([]interface{}, error)
 }

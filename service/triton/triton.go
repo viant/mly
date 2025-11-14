@@ -71,6 +71,16 @@ func NewTritonEvaluator(config *config.Model, tritonClients map[string]TritonCli
 	return evaluator, nil
 }
 
+func NewRoutedTritonEvaluator(modelName string, client TritonClient, timeoutMs int, indexToName map[int]string) (*TritonEvaluator, error) {
+	return &TritonEvaluator{
+		client:             client,
+		modelName:          modelName,
+		timeout:            time.Duration(timeoutMs) * time.Millisecond,
+		repositoryExplicit: true,
+		indexToName:        indexToName,
+	}, nil
+}
+
 // Predict performs inference via Triton Inference Server
 func (t *TritonEvaluator) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
 	requestCtx := ctx

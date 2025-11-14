@@ -18,7 +18,6 @@ import (
 	"github.com/viant/mly/service/platform"
 	"github.com/viant/mly/service/request/shape"
 	tricli "github.com/viant/mly/service/triton"
-	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/config/router"
 	"gopkg.in/yaml.v2"
@@ -35,17 +34,21 @@ type Router struct {
 	routingTableLock sync.RWMutex
 	routingMap       map[int]string
 	routingTable     map[string]platform.PlatformEvaluator
-	globalModel      *platform.PlatformEvaluator
-	fixedEvaluator   Predictor
+
+	maxConcurrency int
+
+	globalModel     platform.PlatformEvaluator
+	fixedEvaluator  platform.Predictor
+	modelOutputName string
 
 	modelConfig  *config.Model
 	tritonClient tricli.TritonClient
 
 	signature   *domain.Signature
 	indexToName map[int]string
+	inputs      map[string]*domain.Input
 
-	inputs map[string]*domain.Input
-
+	// router input offset is the index of the router input in the inputs array
 	routerInputOffset int
 }
 
@@ -67,21 +70,15 @@ func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricl
 		tritonClient: tritonClient,
 	}
 
-	if !cfg.Router.Global.Exists {
-		r.fixedEvaluator = newFixedEvaluator(cfg.Router.Global.PredictionReplacements)
+	if err := r.handleIO(cfg); err != nil {
+		return nil, fmt.Errorf("failed to handle IO: %w", err)
 	}
 
-	r.handleIO(&cfg.MetaInput)
+	if cfg.Router.MaxConcurrency != 0 {
+		r.maxConcurrency = cfg.Router.MaxConcurrency
+	}
 
 	return r, nil
-}
-
-type Predictor interface {
-	Predict(ctx context.Context, params []interface{}) ([]interface{}, error)
-}
-
-type fixedEvaluator struct {
-	prepared []preparedReplacement
 }
 
 type preparedReplacement struct {
@@ -89,239 +86,121 @@ type preparedReplacement struct {
 	value interface{}
 }
 
-func newFixedEvaluator(repls []config.PredictionReplacement) *fixedEvaluator {
-	prepared := make([]preparedReplacement, 0, len(repls))
-	for _, r := range repls {
-		switch r.Type {
-		case "string":
-			v, ok := r.Value.(string)
-			if !ok {
-				v = fmt.Sprintf("%v", r.Value)
-			}
-			prepared = append(prepared, preparedReplacement{typ: "string", value: v})
-		case "int":
-			switch n := r.Value.(type) {
-			case int:
-				prepared = append(prepared, preparedReplacement{typ: "int", value: n})
-			case int32:
-				prepared = append(prepared, preparedReplacement{typ: "int", value: int(n)})
-			case int64:
-				prepared = append(prepared, preparedReplacement{typ: "int", value: int(n)})
-			case float32:
-				prepared = append(prepared, preparedReplacement{typ: "int", value: int(n)})
-			case float64:
-				prepared = append(prepared, preparedReplacement{typ: "int", value: int(n)})
-			default:
-				panic(fmt.Errorf("router replacement %q: value %T not coercible to int", r.Name, r.Value))
-			}
-		case "int32":
-			switch n := r.Value.(type) {
-			case int:
-				prepared = append(prepared, preparedReplacement{typ: "int32", value: int32(n)})
-			case int32:
-				prepared = append(prepared, preparedReplacement{typ: "int32", value: n})
-			case int64:
-				prepared = append(prepared, preparedReplacement{typ: "int32", value: int32(n)})
-			case float32:
-				prepared = append(prepared, preparedReplacement{typ: "int32", value: int32(n)})
-			case float64:
-				prepared = append(prepared, preparedReplacement{typ: "int32", value: int32(n)})
-			default:
-				panic(fmt.Errorf("router replacement %q: value %T not coercible to int32", r.Name, r.Value))
-			}
-		case "int64":
-			switch n := r.Value.(type) {
-			case int:
-				prepared = append(prepared, preparedReplacement{typ: "int64", value: int64(n)})
-			case int32:
-				prepared = append(prepared, preparedReplacement{typ: "int64", value: int64(n)})
-			case int64:
-				prepared = append(prepared, preparedReplacement{typ: "int64", value: n})
-			case float32:
-				prepared = append(prepared, preparedReplacement{typ: "int64", value: int64(n)})
-			case float64:
-				prepared = append(prepared, preparedReplacement{typ: "int64", value: int64(n)})
-			default:
-				panic(fmt.Errorf("router replacement %q: value %T not coercible to int64", r.Name, r.Value))
-			}
-		case "float", "float32":
-			switch n := r.Value.(type) {
-			case int:
-				prepared = append(prepared, preparedReplacement{typ: "float32", value: float32(n)})
-			case int32:
-				prepared = append(prepared, preparedReplacement{typ: "float32", value: float32(n)})
-			case int64:
-				prepared = append(prepared, preparedReplacement{typ: "float32", value: float32(n)})
-			case float32:
-				prepared = append(prepared, preparedReplacement{typ: "float32", value: n})
-			case float64:
-				prepared = append(prepared, preparedReplacement{typ: "float32", value: float32(n)})
-			default:
-				panic(fmt.Errorf("router replacement %q: value %T not coercible to float32", r.Name, r.Value))
-			}
-		case "float64":
-			switch n := r.Value.(type) {
-			case int:
-				prepared = append(prepared, preparedReplacement{typ: "float64", value: float64(n)})
-			case int32:
-				prepared = append(prepared, preparedReplacement{typ: "float64", value: float64(n)})
-			case int64:
-				prepared = append(prepared, preparedReplacement{typ: "float64", value: float64(n)})
-			case float32:
-				prepared = append(prepared, preparedReplacement{typ: "float64", value: float64(n)})
-			case float64:
-				prepared = append(prepared, preparedReplacement{typ: "float64", value: n})
-			default:
-				panic(fmt.Errorf("router replacement %q: value %T not coercible to float64", r.Name, r.Value))
-			}
-		default:
-			panic(fmt.Errorf("unsupported router replacement type %q for %q", r.Type, r.Name))
-		}
-	}
-	return &fixedEvaluator{prepared: prepared}
-}
+func (t *Router) handleIO(cfg *config.Model) error {
+	io := &cfg.MetaInput
 
-func (f *fixedEvaluator) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
-	batchSize, err := shape.DetermineBatchSize(params)
-	if err != nil {
-		return nil, err
+	if len(io.Inputs) == 0 {
+		return fmt.Errorf("input configuration is required for a router")
 	}
 
-	makeString := func(v string) [][]string {
-		out := make([][]string, batchSize)
-		for i := 0; i < batchSize; i++ {
-			out[i] = []string{v}
-		}
-		return out
+	if len(io.Outputs) == 0 {
+		return fmt.Errorf("output configuration is required for a router")
 	}
 
-	makeInt32 := func(v int32) [][]int32 {
-		out := make([][]int32, batchSize)
-		for i := 0; i < batchSize; i++ {
-			out[i] = []int32{v}
-		}
-		return out
-	}
-
-	makeInt64 := func(v int64) [][]int64 {
-		out := make([][]int64, batchSize)
-		for i := 0; i < batchSize; i++ {
-			out[i] = []int64{v}
-		}
-		return out
-	}
-
-	makeInt := func(v int) [][]int {
-		out := make([][]int, batchSize)
-		for i := 0; i < batchSize; i++ {
-			out[i] = []int{v}
-		}
-		return out
-	}
-
-	makeFloat32 := func(v float32) [][]float32 {
-		out := make([][]float32, batchSize)
-		for i := 0; i < batchSize; i++ {
-			out[i] = []float32{v}
-		}
-		return out
-	}
-
-	makeFloat64 := func(v float64) [][]float64 {
-		out := make([][]float64, batchSize)
-		for i := 0; i < batchSize; i++ {
-			out[i] = []float64{v}
-		}
-		return out
-	}
-
-	results := make([]interface{}, len(f.prepared))
-	for i, repl := range f.prepared {
-		switch repl.typ {
-		case "string":
-			results[i] = makeString(repl.value.(string))
-		case "int":
-			results[i] = makeInt(repl.value.(int))
-		case "int32":
-			results[i] = makeInt32(repl.value.(int32))
-		case "int64":
-			results[i] = makeInt64(repl.value.(int64))
-		case "float":
-			results[i] = makeFloat32(repl.value.(float32))
-		case "float32":
-			results[i] = makeFloat32(repl.value.(float32))
-		case "float64":
-			results[i] = makeFloat64(repl.value.(float64))
-		default:
-			return nil, fmt.Errorf("unsupported replacement type %q", repl.typ)
-		}
-	}
-
-	return results, nil
-}
-
-func (t *Router) handleIO(io *shared.MetaInput) error {
 	var inputs []domain.Input
-	var outputs []domain.Output
 
-	indexToName := make(map[int]string)
-
+	// for declaring the router's inputs
 	mappedInputs := make(map[string]*domain.Input)
 
-	if len(io.Inputs) > 0 {
-		for _, input := range io.Inputs {
-			if !input.Auxiliary {
-				inputs = append(inputs, domain.Input{
-					Name:  input.Name,
-					Index: input.Index,
-				})
+	// generate backend input
+	indexToName := make(map[int]string)
 
-				indexToName[input.Index] = input.Name
-			}
-
-			inputType := reflect.TypeOf("")
-			if input.DataType != "" {
-				switch input.DataType {
-				case "string":
-					inputType = reflect.TypeOf("")
-				case "int":
-					inputType = reflect.TypeOf(0)
-				case "int32":
-					inputType = reflect.TypeOf(int32(0))
-				case "int64":
-					inputType = reflect.TypeOf(int64(0))
-				case "float32":
-					inputType = reflect.TypeOf(float32(0))
-				case "float64":
-					inputType = reflect.TypeOf(float64(0))
-				}
-			}
-
-			mappedInputs[input.Name] = &domain.Input{
-				Name:      input.Name,
-				Index:     input.Index,
-				Type:      inputType,
-				Vocab:     false,
-				Auxiliary: input.Auxiliary,
-			}
-		}
-	} else {
-		return fmt.Errorf("missing input configuration for Triton evaluator. " +
-			"Add 'inputs' section to your model configuration YAML with field definitions")
-	}
-
-	if len(io.Outputs) > 0 {
-		for i, output := range io.Outputs {
-			outputs = append(outputs, domain.Output{
-				Name:     output.Name,
-				Index:    i,
-				DataType: output.DataType,
+	i := 0
+	for _, input := range io.Inputs {
+		if !input.Auxiliary && input.Name != cfg.Router.InputName {
+			inputs = append(inputs, domain.Input{
+				Name:  input.Name,
+				Index: input.Index,
 			})
+
+			indexToName[i] = input.Name
+			i++
 		}
-	} else {
-		return fmt.Errorf("missing output configuration for Triton evaluator. " +
-			"Add 'outputs' section to your model configuration YAML with field definitions")
+
+		inputType := reflect.TypeOf("")
+		if input.DataType != "" {
+			switch input.DataType {
+			case "string":
+				inputType = reflect.TypeOf("")
+			case "int":
+				inputType = reflect.TypeOf(0)
+			case "int32":
+				inputType = reflect.TypeOf(int32(0))
+			case "int64":
+				inputType = reflect.TypeOf(int64(0))
+			case "float32":
+				inputType = reflect.TypeOf(float32(0))
+			case "float64":
+				inputType = reflect.TypeOf(float64(0))
+			}
+		}
+
+		mappedInputs[input.Name] = &domain.Input{
+			Name:      input.Name,
+			Index:     input.Index,
+			Type:      inputType,
+			Vocab:     false,
+			Auxiliary: input.Auxiliary,
+		}
 	}
+
+	var outputs []domain.Output
+	outputByName := make(map[string]domain.Output)
+
+	for i, output := range io.Outputs {
+		outputs = append(outputs, domain.Output{
+			Name:     output.Name,
+			Index:    i,
+			DataType: output.DataType,
+		})
+
+		outputByName[output.Name] = outputs[i]
+	}
+
+	modelOutputName := cfg.Router.Output.FieldName
+	hasModelOutputName := modelOutputName != ""
+
+	if !cfg.Router.Global.Exists {
+		replacementsByName := make(map[string]config.PredictionReplacement)
+		for _, repl := range cfg.Router.Global.PredictionReplacements {
+			replacementsByName[repl.Name] = repl
+		}
+
+		replacementOutputs := make([]config.PredictionReplacement, 0, len(outputs))
+		for _, output := range outputs {
+			if hasModelOutputName && output.Name == modelOutputName {
+				// model-used output field name is handled in a different way
+				continue
+			}
+
+			if _, ok := replacementsByName[output.Name]; !ok {
+				return fmt.Errorf("replacement for output %s not found", output.Name)
+			}
+
+			replacementOutputs = append(replacementOutputs, replacementsByName[output.Name])
+		}
+
+		fixedEvaluator, err := newFixedEvaluator(replacementOutputs)
+		if err != nil {
+			return fmt.Errorf("failed to create fixed evaluator: %w", err)
+		}
+
+		t.fixedEvaluator = fixedEvaluator
+	}
+
+	var modelOutputInOutputs bool
+	if hasModelOutputName {
+		_, modelOutputInOutputs = outputByName[modelOutputName]
+	}
+
+	if !modelOutputInOutputs {
+		outputs = append(outputs, domain.Output{
+			Name:     modelOutputName,
+			DataType: "string",
+		})
+	}
+
+	t.modelOutputName = modelOutputName
 
 	t.indexToName = indexToName
 
@@ -350,7 +229,7 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 	numInputs := len(params)
 
-	allResults := make([]interface{}, 0, expectedBatchSize)
+	allResults := make([]interface{}, len(r.signature.Outputs))
 
 	r.routingTableLock.RLock()
 	defer r.routingTableLock.RUnlock()
@@ -400,11 +279,11 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 		routingValueString, ok := r.routingMap[routingValueInt]
 
-		var evaluator Predictor
+		var evaluator platform.Predictor
 		if !ok {
 			if r.modelConfig.Router.Global.Exists {
 				// fallback to global model
-				evaluator = *r.globalModel
+				evaluator = r.globalModel
 			} else {
 				evaluator = r.fixedEvaluator
 			}
@@ -421,12 +300,76 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			return nil, fmt.Errorf("failed to predict for row %d: %w", batchOffset, err)
 		}
 
+		if r.modelOutputName != "" {
+			// TODO ensure ordering
+
+			results = append(results, []interface{}{[][]string{{routingValueString}}})
+		}
+
 		// TODO dynamic output batch shape detection
-		allResults = append(allResults, results)
+		allResults, err = concatAxis0(allResults, results)
+		if err != nil {
+			return nil, fmt.Errorf("failed to concatenate results for row %d: %w", batchOffset, err)
+		}
 	}
 
-	// TODO this is going to crash
 	return allResults, nil
+}
+
+// concatAxis0 concatenates two tensors along axis 0 (batch dimension).
+func concatAxis0(x []interface{}, y []interface{}) ([]interface{}, error) {
+	if len(x) != len(y) {
+		return nil, fmt.Errorf("x and y must have the same length: %d vs %d", len(x), len(y))
+	}
+
+	result := make([]interface{}, len(x))
+	for i := range x {
+		xt := x[i]
+		yt := y[i]
+
+		if xt == nil {
+			result[i] = yt
+			continue
+		}
+
+		switch xv := xt.(type) {
+		case [][]int32:
+			yv, ok := yt.([][]int32)
+			if !ok {
+				return nil, fmt.Errorf("type mismatch at index %d: %T vs %T", i, xt, yt)
+			}
+
+			result[i] = append(xv, yv...)
+		case [][]int64:
+			yv, ok := yt.([][]int64)
+			if !ok {
+				return nil, fmt.Errorf("type mismatch at index %d: %T vs %T", i, xt, yt)
+			}
+			result[i] = append(xv, yv...)
+		case [][]float32:
+			yv, ok := yt.([][]float32)
+			if !ok {
+				return nil, fmt.Errorf("type mismatch at index %d: %T vs %T", i, xt, yt)
+			}
+			result[i] = append(xv, yv...)
+		case [][]float64:
+			yv, ok := yt.([][]float64)
+			if !ok {
+				return nil, fmt.Errorf("type mismatch at index %d: %T vs %T", i, xt, yt)
+			}
+			result[i] = append(xv, yv...)
+		case [][]string:
+			yv, ok := yt.([][]string)
+			if !ok {
+				return nil, fmt.Errorf("type mismatch at index %d: %T vs %T", i, xt, yt)
+			}
+			result[i] = append(xv, yv...)
+		default:
+			return nil, fmt.Errorf("unexpected output tensor type at index %d: %T", i, xt)
+		}
+	}
+
+	return result, nil
 }
 
 func squeezeBatch(untypedBatch interface{}) (interface{}, error) {
@@ -449,15 +392,15 @@ func squeezeBatch(untypedBatch interface{}) (interface{}, error) {
 func debatch(untypedBatch interface{}, i int) (interface{}, error) {
 	switch typedBatch := untypedBatch.(type) {
 	case [][]int32:
-		return [][]int32{{typedBatch[0][i]}}, nil
+		return [][]int32{{typedBatch[i][0]}}, nil
 	case [][]int64:
-		return [][]int64{{typedBatch[0][i]}}, nil
+		return [][]int64{{typedBatch[i][0]}}, nil
 	case [][]float32:
-		return [][]float32{{typedBatch[0][i]}}, nil
+		return [][]float32{{typedBatch[i][0]}}, nil
 	case [][]float64:
-		return [][]float64{{typedBatch[0][i]}}, nil
+		return [][]float64{{typedBatch[i][0]}}, nil
 	case [][]string:
-		return [][]string{{typedBatch[0][i]}}, nil
+		return [][]string{{typedBatch[i][0]}}, nil
 	}
 
 	return nil, fmt.Errorf("unexpected batch type: %T", untypedBatch)
@@ -508,8 +451,26 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 	}
 
 	if !r.isModified(snapshot) {
+		// check health of all underlying models
 		var wg sync.WaitGroup
-		errCh := make(chan error, len(r.routingTable))
+
+		errChannels := len(r.routingTable)
+		if r.globalModel != nil {
+			errChannels++
+		}
+
+		errCh := make(chan error, errChannels)
+
+		if r.globalModel != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := r.globalModel.ReloadIfNeeded(ctx)
+				if err != nil {
+					errCh <- fmt.Errorf("failed to reload global model: %w", err)
+				}
+			}()
+		}
 
 		for m, p := range r.routingTable {
 			wg.Add(1)
@@ -588,13 +549,11 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 		}
 	}
 
+	newModelMapping := make(map[int]string)
 	for _, entity := range newConfig.EntityMapping {
-		if _, ok := modelsToUnload[entity.ModelName]; ok {
-			// don't unload
-			delete(modelsToUnload, entity.ModelName)
-		} else {
-			modelsToLoad[entity.ModelName] = struct{}{}
-		}
+		newModelMapping[entity.EntityID] = entity.ModelName
+		delete(modelsToUnload, entity.ModelName)
+		modelsToLoad[entity.ModelName] = struct{}{}
 	}
 
 	if newConfig.GlobalModelName != "" {
@@ -634,20 +593,39 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 
 	newRoutingTable := make(map[string]platform.PlatformEvaluator)
 	for model := range modelsToLoad {
-		evaluator, err := tricli.NewTritonEvaluator(
-			r.modelConfig,
-			map[string]tricli.TritonClient{r.modelConfig.Triton.ServerID: r.tritonClient},
+		evaluator, err := tricli.NewRoutedTritonEvaluator(
+			model,
+			r.tritonClient,
+			r.modelConfig.Triton.Timeout,
+			r.indexToName,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create Triton evaluator for model %s: %w", model, err)
 		}
+
 		newRoutingTable[model] = evaluator
+	}
+
+	var globalEvaluator platform.PlatformEvaluator
+	if newConfig.GlobalModelName != "" {
+		globalEvaluator, err = tricli.NewRoutedTritonEvaluator(
+			newConfig.GlobalModelName,
+			r.tritonClient,
+			r.modelConfig.Triton.Timeout,
+			r.indexToName,
+		)
+
+		if err != nil {
+			return fmt.Errorf("failed to create Triton evaluator for global model %s: %w", newConfig.GlobalModelName, err)
+		}
 	}
 
 	// swap table
 	func() {
 		r.routingTableLock.Lock()
 		defer r.routingTableLock.Unlock()
+		r.globalModel = globalEvaluator
+		r.routingMap = newModelMapping
 		r.routerConfig = &newConfig
 		r.routingTable = newRoutingTable
 	}()

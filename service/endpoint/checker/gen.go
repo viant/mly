@@ -86,7 +86,7 @@ func (g *genType) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 		var i int64
 		err = dec.Int64(&i)
 		g.D[key] = i
-	case "float32":
+	case "float32", "float":
 		var f float32
 		err = dec.Float32(&f)
 		g.D[key] = f
@@ -192,7 +192,7 @@ func (g *genType) DecodeBinary(dec *bintly.Reader) error {
 			dec.String(&s)
 			g.D[key] = s
 		default:
-			return fmt.Errorf("unknown type")
+			return fmt.Errorf("unknown type %s", f.DataType)
 		}
 	}
 

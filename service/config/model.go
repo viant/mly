@@ -139,6 +139,10 @@ func (m *Model) Init(globalBatchConfig *batchconfig.BatcherConfig) {
 			BatcherConfig: *globalBatchConfig,
 		}
 	}
+
+	if m.Router != nil {
+		m.Router.Init()
+	}
 }
 
 func (m *Model) Validate() error {

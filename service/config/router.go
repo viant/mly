@@ -13,6 +13,10 @@ type RouterConfig struct {
 	// If true, the router will batch the requests to the backend.
 	BatchBackend bool `json:",omitempty" yaml:",omitempty"`
 
+	// The maximum number of concurrent requests to the backend.
+	// Defaults to 50.
+	MaxConcurrency int `json:",omitempty" yaml:",omitempty"`
+
 	Global GlobalModelConfig
 
 	Output OutputConfig
@@ -45,6 +49,12 @@ type OutputConfig struct {
 	// If RouterConfig.Global.Exists is true, this will be ignored.
 	// Defaults to "none".
 	NoModelID string `json:",omitempty" yaml:",omitempty"`
+}
+
+func (o *RouterConfig) Init() {
+	if o.MaxConcurrency == 0 {
+		o.MaxConcurrency = 50
+	}
 }
 
 func (o *RouterConfig) Validate() error {
