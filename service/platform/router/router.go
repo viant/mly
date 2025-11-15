@@ -216,6 +216,11 @@ func (t *Router) handleIO(cfg *config.Model) error {
 	return nil
 }
 
+type offsetResults struct {
+	offset  int
+	results []interface{}
+}
+
 // Predict performs model inference with the given parameters
 // params is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds)
 func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
@@ -230,10 +235,18 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 	numInputs := len(params)
 
-	allResults := make([]interface{}, len(r.signature.Outputs))
-
 	r.routingTableLock.RLock()
 	defer r.routingTableLock.RUnlock()
+
+	globalExists := r.modelConfig.Router.Global.Exists
+	reportedGlobalModelName := r.modelConfig.Router.Output.GlobalModelOverride
+	noModelName := r.modelConfig.Router.Output.NoModelID
+
+	predictWaitGroup := sync.WaitGroup{}
+	predictWaitGroup.Add(expectedBatchSize)
+
+	errCh := make(chan error, expectedBatchSize)
+	resultsCh := make(chan offsetResults, expectedBatchSize)
 
 	for batchOffset := range expectedBatchSize {
 		// 1 input is reserved for the router input
@@ -282,10 +295,16 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 		var evaluator platform.Predictor
 		if !ok {
-			if r.modelConfig.Router.Global.Exists {
+			if globalExists {
 				// fallback to global model
 				evaluator = r.globalModel
+
+				// override model name
+				if reportedGlobalModelName != "" {
+					routingValueString = reportedGlobalModelName
+				}
 			} else {
+				routingValueString = noModelName
 				evaluator = r.fixedEvaluator
 			}
 		} else {
@@ -296,25 +315,46 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			}
 		}
 
-		results, err := evaluator.Predict(ctx, request)
+		go func(batchOffset int, request []interface{}, routingValueString string, evaluator platform.Predictor) {
+			defer predictWaitGroup.Done()
+
+			results, err := evaluator.Predict(ctx, request)
+			if err != nil {
+				errCh <- fmt.Errorf("failed to predict for row %d: %w", batchOffset, err)
+			}
+
+			if r.modelOutputName != "" {
+				// TODO ensure ordering
+
+				results = append(results, [][]string{{routingValueString}})
+			}
+
+			resultsCh <- offsetResults{offset: batchOffset, results: results}
+		}(batchOffset, request, routingValueString, evaluator)
+	}
+
+	predictWaitGroup.Wait()
+	close(errCh)
+	close(resultsCh)
+
+	for err := range errCh {
+		return nil, err
+	}
+
+	allResults := make([][]interface{}, expectedBatchSize)
+	for results := range resultsCh {
+		allResults[results.offset] = results.results
+	}
+
+	endResults := make([]interface{}, len(r.signature.Outputs))
+	for i, results := range allResults {
+		endResults, err = shape.ConcatAxis0(endResults, results)
 		if err != nil {
-			return nil, fmt.Errorf("failed to predict for row %d: %w", batchOffset, err)
-		}
-
-		if r.modelOutputName != "" {
-			// TODO ensure ordering
-
-			results = append(results, [][]string{{routingValueString}})
-		}
-
-		// TODO dynamic output batch shape detection
-		allResults, err = shape.ConcatAxis0(allResults, results)
-		if err != nil {
-			return nil, fmt.Errorf("failed to concatenate results for row %d: %w", batchOffset, err)
+			return nil, fmt.Errorf("failed to concatenate results for row %d: %w", i, err)
 		}
 	}
 
-	return allResults, nil
+	return endResults, nil
 }
 
 func (r *Router) Signature() *domain.Signature {
