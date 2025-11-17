@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/viant/afs"
 	"github.com/viant/mly/service/config"
@@ -31,6 +32,9 @@ type Router struct {
 	configModified *config.Modified
 	routerConfig   *router.RouterConfig
 
+	modelUnloadCh     chan string
+	modelUnloadStopCh chan struct{}
+
 	routingTableLock sync.RWMutex
 	routingMap       map[int]string
 	routingTable     map[string]platform.PlatformEvaluator
@@ -42,6 +46,7 @@ type Router struct {
 	modelOutputName string
 
 	modelConfig  *config.Model
+	routerName   string
 	tritonClient tricli.TritonClient
 
 	signature   *domain.Signature
@@ -63,9 +68,9 @@ func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricl
 	}
 
 	r := &Router{
-		configURL: cfg.Router.ConfigURL,
-		fs:        fs,
-
+		configURL:    cfg.Router.ConfigURL,
+		fs:           fs,
+		routerName:   cfg.ID,
 		modelConfig:  cfg,
 		tritonClient: tritonClient,
 	}
@@ -77,6 +82,29 @@ func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricl
 	if cfg.Router.MaxConcurrency != 0 {
 		r.maxConcurrency = cfg.Router.MaxConcurrency
 	}
+
+	stopUnload := make(chan struct{})
+	modelUnloadCh := make(chan string)
+
+	r.modelUnloadCh = modelUnloadCh
+	r.modelUnloadStopCh = stopUnload
+
+	go func() {
+		for {
+			select {
+			case modelName := <-modelUnloadCh:
+				unloadCtx, unloadCtxCancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+				if err := r.unloadModel(unloadCtx, modelName); err != nil {
+					log.Printf("failed to unload model %s: %v\n", modelName, err)
+				}
+
+				unloadCtxCancel()
+			case <-stopUnload:
+				return
+			}
+		}
+	}()
 
 	return r, nil
 }
@@ -228,6 +256,19 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		return nil, fmt.Errorf("no input parameters provided")
 	}
 
+	metricFixedOnly := true
+	start := time.Now()
+	defer func() {
+		var fos string
+		if metricFixedOnly {
+			fos = "true"
+		} else {
+			fos = "false"
+		}
+
+		routerPredictDurationMicrosSummary.WithLabelValues(r.routerName, fos).Observe(float64(time.Since(start).Microseconds()))
+	}()
+
 	expectedBatchSize, err := shape.DetermineBatchSize(params)
 	if err != nil {
 		return nil, err
@@ -293,9 +334,13 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 		routingValueString, ok := r.routingMap[routingValueInt]
 
+		var metricModelName string
 		var evaluator platform.Predictor
 		if !ok {
+
+			metricModelName = "global"
 			if globalExists {
+				metricFixedOnly = false
 				// fallback to global model
 				evaluator = r.globalModel
 
@@ -308,12 +353,18 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 				evaluator = r.fixedEvaluator
 			}
 		} else {
+			metricFixedOnly = false
+
+			metricModelName = routingValueString
+
 			var ok bool
 			evaluator, ok = r.routingTable[routingValueString]
 			if !ok {
 				return nil, fmt.Errorf("no evaluator found for routing value: %v", routingValue)
 			}
 		}
+
+		routerRoutedModelsCounter.WithLabelValues(metricModelName, r.routerName).Inc()
 
 		go func(batchOffset int, request []interface{}, routingValueString string, evaluator platform.Predictor) {
 			defer predictWaitGroup.Done()
@@ -374,6 +425,9 @@ func (r *Router) Stats(stats map[string]interface{}) {
 }
 
 func (r *Router) Close() error {
+	r.modelUnloadStopCh <- struct{}{}
+	close(r.modelUnloadStopCh)
+	close(r.modelUnloadCh)
 	return nil
 }
 
@@ -395,6 +449,18 @@ func (r *Router) isModified(snapshot *config.Modified) bool {
 }
 
 func (r *Router) ReloadIfNeeded(ctx context.Context) error {
+	start := time.Now()
+	isFullReload := false
+	defer func() {
+		var mode string
+		if isFullReload {
+			mode = "full"
+		} else {
+			mode = "checks"
+		}
+		routerReloadDurationMicrosSummary.WithLabelValues(r.routerName, mode).Observe(float64(time.Since(start).Microseconds()))
+	}()
+
 	// fetch and check router configuration file
 	snapshot, err := files.ModifiedSnapshot(ctx, r.fs, r.configURL, nil)
 	if err != nil {
@@ -451,6 +517,8 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 		return err
 	}
 
+	isFullReload = true
+
 	// otherwise just abandon the routing table status checks
 
 	r.configLock.Lock()
@@ -496,17 +564,22 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 }
 
 func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.RouterConfig) error {
-	modelsToLoad := make(map[string]struct{})
 	modelsToUnload := make(map[string]struct{})
+	reuseEvaluators := make(map[string]platform.PlatformEvaluator)
+	var reuseGlobal platform.PlatformEvaluator
 
 	oldConfig := r.routerConfig
 	if oldConfig != nil {
 		for _, entity := range oldConfig.EntityMapping {
 			modelsToUnload[entity.ModelName] = struct{}{}
+			if evaluator, ok := r.routingTable[entity.ModelName]; ok {
+				reuseEvaluators[entity.ModelName] = evaluator
+			}
 		}
 
 		if oldConfig.GlobalModelName != "" {
 			modelsToUnload[oldConfig.GlobalModelName] = struct{}{}
+			reuseGlobal = r.globalModel
 		}
 	}
 
@@ -514,49 +587,32 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 	for _, entity := range newConfig.EntityMapping {
 		newModelMapping[entity.EntityID] = entity.ModelName
 		delete(modelsToUnload, entity.ModelName)
-		modelsToLoad[entity.ModelName] = struct{}{}
 	}
 
-	if newConfig.GlobalModelName != "" {
-		if _, ok := modelsToUnload[newConfig.GlobalModelName]; ok {
-			delete(modelsToUnload, newConfig.GlobalModelName)
-		} else {
-			modelsToLoad[newConfig.GlobalModelName] = struct{}{}
-		}
-	}
-
-	errCh := make(chan error, len(modelsToLoad))
-	var wg sync.WaitGroup
-
-	for model := range modelsToLoad {
-		wg.Add(1)
-		go func(model string) {
-			defer wg.Done()
-			if err := r.tritonClient.ModelLoad(ctx, model); err != nil {
-				errCh <- fmt.Errorf("failed to load model %s: %w", model, err)
-			}
-		}(model)
-	}
-
-	wg.Wait()
-	close(errCh)
-
-	if len(errCh) > 0 {
-		var errStrings []string
-		for err := range errCh {
-			errStrings = append(errStrings, err.Error())
-		}
-		return fmt.Errorf("one or more model loading errors: %s", strings.Join(errStrings, "; "))
+	globalModelName := newConfig.GlobalModelName
+	if globalModelName != "" {
+		delete(modelsToUnload, globalModelName)
 	}
 
 	newRoutingTable := make(map[string]platform.PlatformEvaluator)
-	for model := range modelsToLoad {
+	for _, entity := range newConfig.EntityMapping {
+		model := entity.ModelName
+		if _, ok := newRoutingTable[model]; ok {
+			continue
+		}
+
+		if evaluator, ok := reuseEvaluators[model]; ok {
+			newRoutingTable[model] = evaluator
+			continue
+		}
+
 		evaluator, err := tricli.NewRoutedTritonEvaluator(
 			model,
 			r.tritonClient,
 			r.modelConfig.Triton.Timeout,
 			r.indexToName,
 		)
+
 		if err != nil {
 			return fmt.Errorf("failed to create Triton evaluator for model %s: %w", model, err)
 		}
@@ -565,23 +621,68 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 	}
 
 	var globalEvaluator platform.PlatformEvaluator
-	if newConfig.GlobalModelName != "" {
-		var err error
-		globalEvaluator, err = tricli.NewRoutedTritonEvaluator(
-			newConfig.GlobalModelName,
-			r.tritonClient,
-			r.modelConfig.Triton.Timeout,
-			r.indexToName,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create Triton evaluator for global model %s: %w", newConfig.GlobalModelName, err)
+	if globalModelName != "" {
+		if oldConfig != nil && globalModelName == oldConfig.GlobalModelName && reuseGlobal != nil {
+			globalEvaluator = reuseGlobal
+		} else if evaluator, ok := newRoutingTable[globalModelName]; ok {
+			globalEvaluator = evaluator
+		} else if evaluator, ok := reuseEvaluators[globalModelName]; ok {
+			globalEvaluator = evaluator
+		} else {
+			var err error
+			globalEvaluator, err = tricli.NewRoutedTritonEvaluator(
+				globalModelName,
+				r.tritonClient,
+				r.modelConfig.Triton.Timeout,
+				r.indexToName,
+			)
+
+			if err != nil {
+				return fmt.Errorf("failed to create Triton evaluator for global model %s: %w", globalModelName, err)
+			}
 		}
 	}
 
-	// swap table
+	wg := sync.WaitGroup{}
+	errCh := make(chan error, 1)
+	if globalEvaluator != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := globalEvaluator.ReloadIfNeeded(ctx); err != nil {
+				errCh <- fmt.Errorf("failed to reload global model %s: %w", globalModelName, err)
+			}
+		}()
+	}
+
+	for model := range newRoutingTable {
+		wg.Add(1)
+		go func(model string) {
+			defer wg.Done()
+			if err := newRoutingTable[model].ReloadIfNeeded(ctx); err != nil {
+				errCh <- fmt.Errorf("failed to reload model %s: %w", model, err)
+			}
+		}(model)
+	}
+	wg.Wait()
+	close(errCh)
+
+	if len(errCh) > 0 {
+		var errStrings []string
+		for err := range errCh {
+			errStrings = append(errStrings, err.Error())
+		}
+		return fmt.Errorf("one or more model reloading errors: %s", strings.Join(errStrings, "; "))
+	}
+
 	func() {
 		r.routingTableLock.Lock()
 		defer r.routingTableLock.Unlock()
+		if globalEvaluator != nil {
+			if _, exists := newRoutingTable[globalModelName]; !exists {
+				newRoutingTable[globalModelName] = globalEvaluator
+			}
+		}
 		r.globalModel = globalEvaluator
 		r.routingMap = newModelMapping
 		r.routerConfig = newConfig
@@ -589,14 +690,17 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 	}()
 
 	for model := range modelsToUnload {
-		wg.Add(1)
-		go func(model string) {
-			defer wg.Done()
-			if err := r.tritonClient.ModelUnload(ctx, model); err != nil {
-				log.Printf("failed to unload model %s: %v\n", model, err)
-			}
-		}(model)
+		routerModelUnloadGauge.Inc()
+		r.modelUnloadCh <- model
 	}
 
+	return nil
+}
+
+func (r *Router) unloadModel(ctx context.Context, modelName string) error {
+	defer routerModelUnloadGauge.Dec()
+	if err := r.tritonClient.ModelUnload(ctx, modelName); err != nil {
+		return fmt.Errorf("failed to unload model %s: %w", modelName, err)
+	}
 	return nil
 }

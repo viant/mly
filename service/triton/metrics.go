@@ -16,7 +16,7 @@ var (
 			Subsystem: "triton",
 			Name:      "infer_duration_histogram_us",
 			Help:      "Duration of Triton ModelInfer RPCs, labeled by model name, successful only.",
-			Buckets:   buckets.MicrosecondBuckets,
+			Buckets:   []float64{100, 1000, 10000},
 		},
 		[]string{"model"},
 	)
@@ -75,6 +75,7 @@ var (
 		},
 		[]string{"model"},
 	)
+
 )
 
 func init() {

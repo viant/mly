@@ -50,6 +50,8 @@ type mockTritonClient struct {
 	mu           sync.Mutex
 	loadCalls    []string
 	unloadCalls  []string
+	readyCalls   []string
+	readyState   map[string]bool
 	unloadCh     chan string
 	modelLoadErr map[string]error
 }
@@ -59,6 +61,12 @@ func (m *mockTritonClient) ModelInfer(ctx context.Context, modelName string, inp
 	return nil, nil
 }
 func (m *mockTritonClient) ModelReady(ctx context.Context, modelName string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.readyCalls = append(m.readyCalls, modelName)
+	if ready, ok := m.readyState[modelName]; ok {
+		return ready, nil
+	}
 	return true, nil
 }
 func (m *mockTritonClient) ModelLoad(ctx context.Context, modelName string) error {
@@ -68,6 +76,10 @@ func (m *mockTritonClient) ModelLoad(ctx context.Context, modelName string) erro
 	if err := m.modelLoadErr[modelName]; err != nil {
 		return err
 	}
+	if m.readyState == nil {
+		m.readyState = make(map[string]bool)
+	}
+	m.readyState[modelName] = true
 	return nil
 }
 func (m *mockTritonClient) ModelUnload(ctx context.Context, modelName string) error {
@@ -92,6 +104,12 @@ func (m *mockTritonClient) snapshotUnloadCalls() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.unloadCalls...)
+}
+
+func (m *mockTritonClient) snapshotReadyCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.readyCalls...)
 }
 
 func waitForCalls(t *testing.T, ch <-chan string, count int) []string {
@@ -272,6 +290,10 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 	ctx := context.Background()
 	mockClient := &mockTritonClient{
 		unloadCh: make(chan string, 2),
+		readyState: map[string]bool{
+			"modelC":     false,
+			"global-new": false,
+		},
 	}
 
 	oldConfig := &sharedrouter.RouterConfig{
@@ -304,6 +326,8 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 		globalModel: &mockPredictOnly{},
 	}
 
+	reusedModelB := router.routingTable["modelB"]
+
 	newConfig := &sharedrouter.RouterConfig{
 		EntityMapping: []sharedrouter.EntityKV{
 			{EntityID: 1, ModelName: "modelB"},
@@ -316,13 +340,13 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 		t.Fatalf("applyRouterConfig returned error: %v", err)
 	}
 
-	loadCalls := router.tritonClient.(*mockTritonClient).snapshotLoadCalls()
-	if len(loadCalls) != 3 {
-		t.Fatalf("expected 3 model loads, got %d (%v)", len(loadCalls), loadCalls)
+	loadCalls := mockClient.snapshotLoadCalls()
+	if len(loadCalls) != 2 {
+		// global-new and modelC
+		t.Fatalf("expected 2 model loads, got %d (%v), ready=%v", len(loadCalls), loadCalls, mockClient.snapshotReadyCalls())
 	}
 
 	expectedLoads := map[string]bool{
-		"modelB":     false,
 		"modelC":     false,
 		"global-new": false,
 	}
@@ -334,6 +358,22 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 	for model, seen := range expectedLoads {
 		if !seen {
 			t.Fatalf("expected load for %s was not observed; calls=%v", model, loadCalls)
+		}
+	}
+
+	readyCalls := mockClient.snapshotReadyCalls()
+	expectedReady := map[string]bool{
+		"modelC":     false,
+		"global-new": false,
+	}
+	for _, call := range readyCalls {
+		if _, ok := expectedReady[call]; ok {
+			expectedReady[call] = true
+		}
+	}
+	for model, seen := range expectedReady {
+		if !seen {
+			t.Fatalf("expected readiness check for %s was not observed; calls=%v", model, readyCalls)
 		}
 	}
 
@@ -373,6 +413,9 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 	if _, ok := router.routingTable["modelB"]; !ok {
 		t.Fatalf("routingTable missing modelB")
 	}
+	if router.routingTable["modelB"] != reusedModelB {
+		t.Fatalf("modelB evaluator was not reused")
+	}
 	if _, ok := router.routingTable["modelC"]; !ok {
 		t.Fatalf("routingTable missing modelC")
 	}
@@ -385,6 +428,9 @@ func TestRouter_applyRouterConfig_LoadError(t *testing.T) {
 	ctx := context.Background()
 	loadErr := errors.New("load failure")
 	mockClient := &mockTritonClient{
+		readyState: map[string]bool{
+			"modelX": false,
+		},
 		modelLoadErr: map[string]error{
 			"modelX": loadErr,
 		},
@@ -439,5 +485,63 @@ func TestRouter_applyRouterConfig_LoadError(t *testing.T) {
 	loadCalls := mockClient.snapshotLoadCalls()
 	if len(loadCalls) != 1 || loadCalls[0] != "modelX" {
 		t.Fatalf("expected single load attempt for modelX, got %v", loadCalls)
+	}
+}
+
+func TestRouter_applyRouterConfig_SkipsLoadWhenReady(t *testing.T) {
+	ctx := context.Background()
+	mockClient := &mockTritonClient{
+		readyState: map[string]bool{
+			"modelC": true,
+		},
+	}
+
+	oldConfig := &sharedrouter.RouterConfig{
+		EntityMapping: []sharedrouter.EntityKV{
+			{EntityID: 1, ModelName: "modelA"},
+		},
+	}
+
+	router := &Router{
+		tritonClient: mockClient,
+		modelConfig: &config.Model{
+			Triton: &config.TritonConfig{
+				Timeout: 10,
+			},
+		},
+		indexToName: map[int]string{
+			0: "text",
+		},
+		routerConfig: oldConfig,
+		routingMap: map[int]string{
+			1: "modelA",
+		},
+		routingTable: map[string]platform.PlatformEvaluator{
+			"modelA": &mockPredictOnly{},
+		},
+	}
+
+	newConfig := &sharedrouter.RouterConfig{
+		EntityMapping: []sharedrouter.EntityKV{
+			{EntityID: 1, ModelName: "modelA"},
+			{EntityID: 2, ModelName: "modelC"},
+		},
+	}
+
+	if err := router.applyRouterConfig(ctx, newConfig); err != nil {
+		t.Fatalf("applyRouterConfig returned error: %v", err)
+	}
+
+	if loads := mockClient.snapshotLoadCalls(); len(loads) != 0 {
+		t.Fatalf("expected no loads when model is ready, got %v", loads)
+	}
+
+	readyCalls := mockClient.snapshotReadyCalls()
+	if len(readyCalls) != 1 || readyCalls[0] != "modelC" {
+		t.Fatalf("expected readiness check for modelC, got %v", readyCalls)
+	}
+
+	if _, ok := router.routingTable["modelC"]; !ok {
+		t.Fatalf("routingTable missing modelC after reload")
 	}
 }
