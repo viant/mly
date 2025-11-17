@@ -41,8 +41,13 @@ type Config struct {
 
 	Endpoint econfig.Endpoint
 
+	// Deprecated, use ProfilerPort instead
 	EnableMemProf bool
+
+	// Deprecated, use ProfilerPort instead
 	EnableCPUProf bool
+
+	ProfilerPort int
 
 	TLS *TLSConfig
 

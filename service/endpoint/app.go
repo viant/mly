@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"sync"
 	"time"
 
@@ -67,6 +68,13 @@ func RunAppWithConfigWaitError(version string, args []string, cp configProvider,
 func runApp(config *Config, wg *sync.WaitGroup) error {
 	if err := config.Validate(); err != nil {
 		return err
+	}
+
+	if config.ProfilerPort > 0 {
+		go func() {
+			log.Printf("!!! starting profile server on port %d !!!\n", config.ProfilerPort)
+			log.Println(http.ListenAndServe(fmt.Sprintf("localhost:%d", config.ProfilerPort), nil))
+		}()
 	}
 
 	start := time.Now()
