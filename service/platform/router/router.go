@@ -583,6 +583,7 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 
 	// unload obsolete models, ignore errors...
 	for model := range modelsToUnload {
+		wg.Add(1)
 		go func(model string) {
 			defer wg.Done()
 			err := r.tritonClient.ModelUnload(ctx, model)
