@@ -31,6 +31,7 @@ require (
 
 require (
 	github.com/cyningsun/heavy-hitters v0.0.0-20230601160639-238b21a6ddce
+	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/migotom/heavykeeper v0.0.0-20230118182531-d6958b4bb326
 	github.com/prometheus/client_golang v1.16.0
 	golang.org/x/sync v0.8.0
