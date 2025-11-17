@@ -470,14 +470,14 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 		}
 	}
 
-	var newConfig router.RouterConfig
+	newConfig := new(router.RouterConfig)
 
 	// TODO move this check earlier
 	if strings.Contains(r.configURL, ".yaml") {
 		decoder := yaml.NewDecoder(reader)
-		err = decoder.Decode(&newConfig)
+		err = decoder.Decode(newConfig)
 	} else if strings.Contains(r.configURL, ".json") {
-		err = json.NewDecoder(reader).Decode(&newConfig)
+		err = json.NewDecoder(reader).Decode(newConfig)
 	} else {
 		return fmt.Errorf("unsupported router configuration file type: %s", r.configURL)
 	}
@@ -486,6 +486,14 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 		return fmt.Errorf("failed to decode router configuration file: %w", err)
 	}
 
+	if err := r.applyRouterConfig(ctx, newConfig); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.RouterConfig) error {
 	modelsToLoad := make(map[string]struct{})
 	modelsToUnload := make(map[string]struct{})
 
@@ -509,14 +517,12 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 
 	if newConfig.GlobalModelName != "" {
 		if _, ok := modelsToUnload[newConfig.GlobalModelName]; ok {
-			// don't unload
 			delete(modelsToUnload, newConfig.GlobalModelName)
 		} else {
 			modelsToLoad[newConfig.GlobalModelName] = struct{}{}
 		}
 	}
 
-	// Launch goroutines to load models concurrently, collecting errors.
 	errCh := make(chan error, len(modelsToLoad))
 	var wg sync.WaitGroup
 
@@ -524,8 +530,7 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 		wg.Add(1)
 		go func(model string) {
 			defer wg.Done()
-			err := r.tritonClient.ModelLoad(ctx, model)
-			if err != nil {
+			if err := r.tritonClient.ModelLoad(ctx, model); err != nil {
 				errCh <- fmt.Errorf("failed to load model %s: %w", model, err)
 			}
 		}(model)
@@ -559,13 +564,13 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 
 	var globalEvaluator platform.PlatformEvaluator
 	if newConfig.GlobalModelName != "" {
+		var err error
 		globalEvaluator, err = tricli.NewRoutedTritonEvaluator(
 			newConfig.GlobalModelName,
 			r.tritonClient,
 			r.modelConfig.Triton.Timeout,
 			r.indexToName,
 		)
-
 		if err != nil {
 			return fmt.Errorf("failed to create Triton evaluator for global model %s: %w", newConfig.GlobalModelName, err)
 		}
@@ -577,17 +582,15 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 		defer r.routingTableLock.Unlock()
 		r.globalModel = globalEvaluator
 		r.routingMap = newModelMapping
-		r.routerConfig = &newConfig
+		r.routerConfig = newConfig
 		r.routingTable = newRoutingTable
 	}()
 
-	// unload obsolete models, ignore errors...
 	for model := range modelsToUnload {
 		wg.Add(1)
 		go func(model string) {
 			defer wg.Done()
-			err := r.tritonClient.ModelUnload(ctx, model)
-			if err != nil {
+			if err := r.tritonClient.ModelUnload(ctx, model); err != nil {
 				log.Printf("failed to unload model %s: %v\n", model, err)
 			}
 		}(model)
