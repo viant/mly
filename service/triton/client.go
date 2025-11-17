@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	grpcProm "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/viant/mly/service/config"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -26,6 +27,7 @@ type TritonClient interface {
 	Close() error
 }
 
+// NewClient creates either an HTTP or gRPC client.
 func NewClient(server config.TritonServer) (TritonClient, error) {
 	if server.GRPCBaseURL != "" {
 		grpcConn, err := grpc.NewClient(server.GRPCBaseURL,
@@ -38,21 +40,24 @@ func NewClient(server config.TritonServer) (TritonClient, error) {
 				},
 			}),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
+
+			grpc.WithUnaryInterceptor(grpcProm.UnaryClientInterceptor),
+			grpc.WithStreamInterceptor(grpcProm.StreamClientInterceptor),
 		)
 
 		if err != nil {
 			return nil, err
 		}
 
-		return NewGRPCClient(grpcConn), nil
+		return NewMeteredTritonClient(NewGRPCClient(grpcConn)), nil
 	}
 
 	// HTTP options seem a bit bare
 	// TODO see if DRY with
-	return &HTTPClient{
+	return NewMeteredTritonClient(&HTTPClient{
 		httpClient: &http.Client{
 			Timeout: time.Duration(server.HTTPClientTimeoutMs) * time.Millisecond,
 		},
 		serverURL: server.HTTPBaseURL,
-	}, nil
+	}), nil
 }

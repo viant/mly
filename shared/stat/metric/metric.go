@@ -6,6 +6,7 @@ import (
 	"github.com/viant/gmetric"
 )
 
+// EnterThenExit is a helper function to increment the metric on enter and decrement on exit.
 func EnterThenExit(metric *gmetric.Operation, start time.Time, enterValue interface{}, exitValue interface{}) func() {
 	metric.IncrementValue(enterValue)
 

@@ -55,7 +55,7 @@ func Build(
 	tritonClients map[string]triton.TritonClient,
 	hooks []Hook,
 	metrics *gmetric.Service,
-	promReg *prometheus.Registry,
+	promReg prometheus.Registerer,
 ) error {
 
 	cfge := config.Endpoint
@@ -85,7 +85,7 @@ func Build(
 		Subsystem: "model",
 		Name:      "idletime",
 
-		Help: "measured time between requests",
+		Help: "measured time between requests in nanoseconds",
 
 		Buckets: buckets,
 	}, []string{"model"})

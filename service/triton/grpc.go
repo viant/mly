@@ -13,8 +13,7 @@ import (
 type GRPCClient struct {
 	// Note that this is dangerous to Close if the connection is shared.
 	// See how TritonEvaluator handles Close().
-	grpcConn *grpc.ClientConn
-
+	grpcConn   *grpc.ClientConn
 	grpcClient triton.GRPCInferenceServiceClient
 }
 
@@ -54,7 +53,12 @@ func (c *GRPCClient) ModelInfer(ctx context.Context, modelName string, inputs []
 		return nil, err
 	}
 
-	return convertGRPCResponse(grpcResponse)
+	result, err := convertGRPCResponse(grpcResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func (c *GRPCClient) ModelReady(ctx context.Context, modelName string) (bool, error) {

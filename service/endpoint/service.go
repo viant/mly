@@ -196,8 +196,11 @@ func New(cfg *Config) (*Service, error) {
 	metricHandler := gmetric.NewHandler(common.MetricURI, metrics)
 	mux.Handle(common.MetricURI, metricHandler)
 
-	promReg := prometheus.NewRegistry()
-	mux.Handle("/v1/prometheus", promh.Handler(promReg))
+	// We use the default Prometheus registry here because go-grpc-prometheus seems to force us to use it.
+	promReg := prometheus.DefaultRegisterer
+
+	registerPrometheusMetrics(promReg)
+	mux.Handle("/v1/prometheus", promh.Handler(prometheus.DefaultGatherer))
 
 	datastores, err := datastore.NewStoresV2(&cfg.DatastoreList, metrics, true)
 	if err != nil {
