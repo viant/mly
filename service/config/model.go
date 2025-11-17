@@ -79,6 +79,14 @@ type Model struct {
 	// Modified shows the state of the model files.
 	Modified *Modified `json:",omitempty" yaml:",omitempty"`
 
+	// ReloadPollIntervalSeconds is the interval at which the model will be polled for reloads.
+	// Defaults to 60 seconds.
+	ReloadPollIntervalSeconds int `json:",omitempty" yaml:",omitempty"`
+
+	// ReloadTimeoutSeconds is the timeout for reloads.
+	// Defaults to 300 seconds.
+	ReloadTimeoutSeconds int `json:",omitempty" yaml:",omitempty"`
+
 	DictMeta DictionaryMeta
 
 	// Test is used to test the model on startup.
@@ -112,6 +120,14 @@ func (m *Model) Init(globalBatchConfig *batchconfig.BatcherConfig) {
 
 	if m.Location == "" {
 		m.Location = path.Join(os.TempDir(), m.ID+m.Dir)
+	}
+
+	if m.ReloadPollIntervalSeconds == 0 {
+		m.ReloadPollIntervalSeconds = 60
+	}
+
+	if m.ReloadTimeoutSeconds == 0 {
+		m.ReloadTimeoutSeconds = 300
 	}
 
 	_ = os.MkdirAll(m.Location, file.DefaultDirOsMode)
@@ -148,6 +164,14 @@ func (m *Model) Init(globalBatchConfig *batchconfig.BatcherConfig) {
 func (m *Model) Validate() error {
 	if m.ID == "" {
 		return fmt.Errorf("model.ID was empty")
+	}
+
+	if m.ReloadPollIntervalSeconds <= 0 {
+		return fmt.Errorf("model.ReloadPollIntervalSeconds must be greater than 0")
+	}
+
+	if m.ReloadTimeoutSeconds <= 0 {
+		return fmt.Errorf("model.ReloadTimeoutSeconds must be greater than 0")
 	}
 
 	// Platform-specific validation

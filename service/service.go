@@ -52,6 +52,9 @@ type Service struct {
 	// Deprecated: use GetHealth() instead
 	ReloadOK int32
 
+	reloadPollTicker *time.Ticker
+	reloadTimeout    time.Duration
+
 	// Platform evaluator context for multi-platform support
 	evaluator platform.PlatformEvaluator
 
@@ -359,10 +362,12 @@ func New(
 	}
 
 	srv := &Service{
-		config:        cfg,
-		evaluator:     evaluatorContext,
-		useDatastore:  cfg.UseDictionary() && cfg.DataStore != "",
-		serviceMetric: metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
+		config:           cfg,
+		evaluator:        evaluatorContext,
+		useDatastore:     cfg.UseDictionary() && cfg.DataStore != "",
+		serviceMetric:    metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
+		reloadPollTicker: time.NewTicker(time.Duration(cfg.ReloadPollIntervalSeconds) * time.Second),
+		reloadTimeout:    time.Duration(cfg.ReloadTimeoutSeconds) * time.Second,
 	}
 
 	// Set up reload metrics for platforms that support reloading
@@ -440,8 +445,8 @@ func (s *Service) GetHealth() int32 {
 }
 
 func (s *Service) pollModelReload() {
-	for range time.Tick(time.Minute) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	for range s.reloadPollTicker.C {
+		ctx, cancel := context.WithTimeout(context.Background(), s.reloadTimeout)
 		defer cancel()
 
 		stats := sstat.NewValues()
