@@ -405,6 +405,7 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 		// check health of all underlying models
 		var wg sync.WaitGroup
 
+		r.configLock.RLock()
 		errChannels := len(r.routingTable)
 		if r.globalModel != nil {
 			errChannels++
@@ -446,6 +447,7 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 			err = fmt.Errorf("one or more model reloading errors: %s", strings.Join(errStrings, "; "))
 		}
 
+		r.configLock.RUnlock()
 		return err
 	}
 
