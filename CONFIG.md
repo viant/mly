@@ -17,6 +17,8 @@ Properties:
 - `URL`: `string` - required - model location source.
   * to use S3, set environment variable `AWS_SDK_LOAD_CONFIG=true`
   * to use GCS, set environment variable `GOOGLE_APPLICATION_CREDENTIALS=true`
+- `Location`: `string` - optional - where a copy of the models will be stored when loading the model. Defaults to the system temporary directory.
+- `Dir`: `string` - optional - any further path elements in `Location`. Mainly used if using a ZIP file with additional directories.
 - `DataStore`: `string` - optional - name of Datastore to cache, should match `Datastores[].ID`.
 - `Transformer`: `string` - optional - name of model output transformer. See [#Transformer](#Transformer).
 - `Batch`: optional - enables or overrides server-side batching configuration. See [`service/tfmodel/batcher/config/config.go`](service/tfmodel/batcher/config/config.go).
