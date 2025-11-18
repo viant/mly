@@ -30,10 +30,11 @@ var (
 
 	routerWorkerChannelQueuedSummary = prometheus.NewSummary(
 		prometheus.SummaryOpts{
-			Namespace: "mly",
-			Subsystem: "router",
-			Name:      "worker_channel_queued_summary",
-			Help:      "Number of router predictions queued in the worker channel.",
+			Namespace:  "mly",
+			Subsystem:  "router",
+			Name:       "worker_channel_queued_summary",
+			Help:       "Number of router predictions queued in the worker channel.",
+			Objectives: buckets.CommonSummaryObjectives,
 		},
 	)
 
