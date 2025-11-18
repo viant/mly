@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/viant/mly/service/platform"
 )
 
@@ -31,7 +32,7 @@ type offsetResults struct {
 	results []interface{}
 }
 
-func handleWorkRequests(workCh chan *workRequest) {
+func handleWorkRequests(workCh chan *workRequest, observer prometheus.Observer) {
 	for request := range workCh {
 		if request == nil {
 			log.Println("work request is nil, stopping")
@@ -39,7 +40,7 @@ func handleWorkRequests(workCh chan *workRequest) {
 		}
 
 		func(request workRequest) {
-			routerWorkerChannelQueuedSummary.Observe(float64(time.Since(request.queuedTime).Microseconds()))
+			observer.Observe(float64(time.Since(request.queuedTime).Microseconds()))
 
 			defer request.wg.Done()
 			results, err := request.predictor.Predict(request.ctx, request.request)

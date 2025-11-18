@@ -81,7 +81,7 @@ func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricl
 
 	r.workCh = make(chan *workRequest, cfg.Router.MaxQueueSize)
 	for i := 0; i < cfg.Router.Workers; i++ {
-		go handleWorkRequests(r.workCh)
+		go handleWorkRequests(r.workCh, routerWorkerChannelQueuedSummary.WithLabelValues(r.routerName))
 	}
 
 	stopUnload := make(chan struct{})
@@ -374,7 +374,7 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 			// continue
 		default:
-			routerPredictDroppedCounter.Inc()
+			routerPredictDroppedCounter.WithLabelValues(r.routerName).Inc()
 			return nil, fmt.Errorf("work channel is full")
 		}
 	}
@@ -686,7 +686,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 	}()
 
 	for model := range modelsToUnload {
-		routerModelUnloadGauge.Inc()
+		routerModelUnloadGauge.WithLabelValues(r.routerName).Inc()
 		r.modelUnloadCh <- model
 	}
 
@@ -694,7 +694,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 }
 
 func (r *Router) unloadModel(ctx context.Context, modelName string) error {
-	defer routerModelUnloadGauge.Dec()
+	defer routerModelUnloadGauge.WithLabelValues(r.routerName).Dec()
 	if err := r.tritonClient.ModelUnload(ctx, modelName); err != nil {
 		return fmt.Errorf("failed to unload model %s: %w", modelName, err)
 	}
