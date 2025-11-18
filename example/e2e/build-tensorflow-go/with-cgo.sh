@@ -7,4 +7,6 @@ goenv_cgo::push /usr/local/lib /opt/homebrew/lib
 
 "$@"
 
+RET=$?
 goenv_cgo::pop
+exit $RET
