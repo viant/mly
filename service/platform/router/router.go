@@ -145,7 +145,7 @@ func (t *Router) handleIO(cfg *config.Model) error {
 
 		mappedInputs[input.Name] = &domain.Input{
 			Name:      input.Name,
-			Index:     input.Index,
+			Index:     len(inputs),
 			Type:      inputType,
 			Vocab:     false,
 			Auxiliary: input.Auxiliary,
