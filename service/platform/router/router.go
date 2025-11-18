@@ -363,6 +363,7 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			ctx:       ctx,
 			request:   request,
 
+			queuedTime:         time.Now(),
 			offset:             batchOffset,
 			modelOutputEnabled: r.modelOutputName != "",
 			routingValueString: routingValueString,
@@ -370,8 +371,10 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			responseCh: resultsCh,
 			errCh:      errCh,
 		}:
+
 			// continue
 		default:
+			routerPredictDroppedCounter.Inc()
 			return nil, fmt.Errorf("work channel is full")
 		}
 	}

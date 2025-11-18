@@ -28,6 +28,24 @@ var (
 		[]string{"router", "fixed_only"},
 	)
 
+	routerWorkerChannelQueuedSummary = prometheus.NewSummary(
+		prometheus.SummaryOpts{
+			Namespace: "mly",
+			Subsystem: "router",
+			Name:      "worker_channel_queued_summary",
+			Help:      "Number of router predictions queued in the worker channel.",
+		},
+	)
+
+	routerPredictDroppedCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "mly",
+			Subsystem: "router",
+			Name:      "predict_dropped_counter",
+			Help:      "Number of router predictions dropped.",
+		},
+	)
+
 	routerModelUnloadGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "mly",
@@ -42,4 +60,6 @@ func init() {
 	prometheus.MustRegister(routerPredictDurationMicrosSummary)
 	prometheus.MustRegister(routerReloadDurationMicrosSummary)
 	prometheus.MustRegister(routerModelUnloadGauge)
+	prometheus.MustRegister(routerPredictDroppedCounter)
+	prometheus.MustRegister(routerWorkerChannelQueuedSummary)
 }

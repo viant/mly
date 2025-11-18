@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/viant/mly/service/platform"
 )
@@ -16,6 +17,7 @@ type workRequest struct {
 	ctx       context.Context
 	request   []interface{}
 
+	queuedTime         time.Time
 	offset             int
 	modelOutputEnabled bool
 	routingValueString string
@@ -32,11 +34,13 @@ type offsetResults struct {
 func handleWorkRequests(workCh chan *workRequest) {
 	for request := range workCh {
 		if request == nil {
-			log.Println("work request is nil, breaking")
+			log.Println("work request is nil, stopping")
 			break
 		}
 
 		func(request workRequest) {
+			routerWorkerChannelQueuedSummary.Observe(float64(time.Since(request.queuedTime).Microseconds()))
+
 			defer request.wg.Done()
 			results, err := request.predictor.Predict(request.ctx, request.request)
 			if err != nil {
