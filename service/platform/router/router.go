@@ -39,7 +39,7 @@ type Router struct {
 	routingMap       map[int]string
 	routingTable     map[string]platform.PlatformEvaluator
 
-	maxConcurrency int
+	workCh chan *workRequest
 
 	globalModel     platform.PlatformEvaluator
 	fixedEvaluator  platform.Predictor
@@ -79,8 +79,9 @@ func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricl
 		return nil, fmt.Errorf("failed to handle IO: %w", err)
 	}
 
-	if cfg.Router.MaxConcurrency != 0 {
-		r.maxConcurrency = cfg.Router.MaxConcurrency
+	r.workCh = make(chan *workRequest, cfg.Router.MaxQueueSize)
+	for i := 0; i < cfg.Router.Workers; i++ {
+		go handleWorkRequests(r.workCh)
 	}
 
 	stopUnload := make(chan struct{})
@@ -244,11 +245,6 @@ func (t *Router) handleIO(cfg *config.Model) error {
 	return nil
 }
 
-type offsetResults struct {
-	offset  int
-	results []interface{}
-}
-
 // Predict performs model inference with the given parameters
 // params is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds)
 func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
@@ -366,25 +362,29 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 		routerRoutedModelsCounter.WithLabelValues(metricModelName, r.routerName).Inc()
 
-		go func(batchOffset int, request []interface{}, routingValueString string, evaluator platform.Predictor) {
-			defer predictWaitGroup.Done()
+		select {
+		case r.workCh <- &workRequest{
+			wg: &predictWaitGroup,
 
-			results, err := evaluator.Predict(ctx, request)
-			if err != nil {
-				errCh <- fmt.Errorf("failed to predict for row %d: %w", batchOffset, err)
-			}
+			predictor: evaluator,
+			ctx:       ctx,
+			request:   request,
 
-			if r.modelOutputName != "" {
-				// TODO ensure ordering
+			offset:             batchOffset,
+			modelOutputEnabled: r.modelOutputName != "",
+			routingValueString: routingValueString,
 
-				results = append(results, [][]string{{routingValueString}})
-			}
-
-			resultsCh <- offsetResults{offset: batchOffset, results: results}
-		}(batchOffset, request, routingValueString, evaluator)
+			responseCh: resultsCh,
+			errCh:      errCh,
+		}:
+			// continue
+		default:
+			return nil, fmt.Errorf("work channel is full")
+		}
 	}
 
 	predictWaitGroup.Wait()
+
 	close(errCh)
 	close(resultsCh)
 

@@ -15,7 +15,11 @@ type RouterConfig struct {
 
 	// The maximum number of concurrent requests to the backend.
 	// Defaults to 50.
-	MaxConcurrency int `json:",omitempty" yaml:",omitempty"`
+	Workers int `json:",omitempty" yaml:",omitempty"`
+
+	// The maximum number of requests to queue.
+	// Defaults to 1000.
+	MaxQueueSize int `json:",omitempty" yaml:",omitempty"`
 
 	Global GlobalModelConfig
 
@@ -53,8 +57,12 @@ type OutputConfig struct {
 }
 
 func (o *RouterConfig) Init() {
-	if o.MaxConcurrency == 0 {
-		o.MaxConcurrency = 50
+	if o.Workers == 0 {
+		o.Workers = 50
+	}
+
+	if o.MaxQueueSize == 0 {
+		o.MaxQueueSize = 1000
 	}
 }
 
