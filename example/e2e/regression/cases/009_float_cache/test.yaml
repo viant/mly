@@ -15,30 +15,21 @@ pipeline:
 
   assert:
     action: validator:assert
-    init:
-      actual: $AsJSON($test.Cmd[0].Stdout)
-    actual: $actual
+    actual: $AsJSON($test.Cmd[0].Stdout)
     expect: $LoadJSON('${parentPath}/expect.json')
 
   assertCache:
     action: validator:assert
-    init:
-      actual: $AsJSON($test.Cmd[1].Stdout)
-      expect: $LoadJSON('${parentPath}/expect-cache.json')
-    actual: $actual
-    expect: $expect
+    actual: $AsJSON($test.Cmd[1].Stdout)
+    expect: $LoadJSON('${parentPath}/expect-cache.json')
 
   assertNoCache:
     action: validator:assert
-    init:
-      actual: $AsJSON($test.Cmd[2].Stdout)
-    actual: $actual
+    actual: $AsJSON($test.Cmd[2].Stdout)
     expect: $LoadJSON('${parentPath}/expect-no-cache.json')
 
   assertNoDict:
     action: validator:assert
-    init:
-      actual: $AsJSON($test.Cmd[4].Stdout)
-    actual: $actual
+    actual: $AsJSON($test.Cmd[4].Stdout)
     expect: $LoadJSON('${parentPath}/expect-no-dict.json')
 

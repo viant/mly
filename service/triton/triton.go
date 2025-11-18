@@ -45,6 +45,7 @@ func NewTritonEvaluator(config *config.Model, tritonClients map[string]TritonCli
 				Timeout: timeout,
 			},
 			serverURL: config.URL,
+			debug:     config.Debug,
 		}
 	} else {
 		client = tritonClients[config.Triton.ServerID]
@@ -201,12 +202,12 @@ func (t *TritonEvaluator) ReloadIfNeeded(ctx context.Context) error {
 		return fmt.Errorf("failed to check Triton model %s health: %w", t.modelName, err)
 	}
 
-	if !t.repositoryExplicit {
-		return fmt.Errorf("model %s not ready and Triton is not in EXPLICIT Model Control Mode", t.modelName)
-	}
-
 	if ready {
 		return nil
+	}
+
+	if !t.repositoryExplicit {
+		return fmt.Errorf("model %s not ready and Triton is not in EXPLICIT Model Control Mode: %w", t.modelName, err)
 	}
 
 	err = t.client.ModelLoad(ctx, t.modelName)

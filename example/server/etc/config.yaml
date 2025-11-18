@@ -3,10 +3,10 @@ Endpoint:
 
 models:
   - id: sli_triton
-    url: http://localhost:8001
+    url: http://localhost:8000
     platform: triton
     triton:
-      modelName: sli
+      modelName: sli_2
       timeout: 5
     useDict: true
     debug: false
@@ -17,15 +17,11 @@ models:
       - aux
     inputs:
       - name: sa
-        index: 0
       - name: sl
-        index: 1
       - name: aux
-        index: 2
         auxiliary: true
     outputs:
       - name: expand
-        index: 0
         dataType: int
 
   - id: sli

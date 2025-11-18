@@ -18,7 +18,7 @@ pipeline:
     directory: /tmp/e2e
     checkError: true
     immuneToHangups: true
-    command: ./mly-endly -c=/tmp/e2e/config.yaml
+    command: ./mly-endly -c=/tmp/e2e/config.yaml 2>&1 >/tmp/e2e/mly-endly.log
     env:
       DEBUG: 'true'
       LD_LIBRARY_PATH: /usr/local/lib

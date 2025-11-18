@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"reflect"
 	"time"
@@ -16,12 +17,17 @@ import (
 // Deprecated: use GRPCClient instead
 type HTTPClient struct {
 	httpClient *http.Client
+	serverURL  string
 
-	serverURL string
+	debug bool
 }
 
-func (c *HTTPClient) statusRequest(ctx context.Context, method, url string) (*http.Response, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, method, url, nil)
+func (c *HTTPClient) sendRequestCheckStatus(ctx context.Context, method, path string) (*http.Response, error) {
+	if c.debug {
+		log.Printf("Sending request %s %s\n", method, path)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, method, c.serverURL+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
@@ -34,15 +40,15 @@ func (c *HTTPClient) statusRequest(ctx context.Context, method, url string) (*ht
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return resp, fmt.Errorf("triton server http status code: %d for %s %s", resp.StatusCode, method, url)
+		return resp, fmt.Errorf("triton server http status code: %d for %s %s", resp.StatusCode, method, path)
 	}
 
 	return resp, nil
 }
 
 func (c *HTTPClient) ServerReady(ctx context.Context) error {
-	url := c.serverURL + "/v2/health/ready"
-	_, err := c.statusRequest(ctx, "GET", url)
+	path := "/v2/health/ready"
+	_, err := c.sendRequestCheckStatus(ctx, "GET", path)
 	return err
 }
 
@@ -61,15 +67,15 @@ func (c *HTTPClient) ModelInfer(ctx context.Context, modelName string, inputs []
 }
 
 func (c *HTTPClient) ModelReady(ctx context.Context, modelName string) (bool, error) {
-	url := c.serverURL + "/v2/models/" + modelName + "/ready"
-	resp, err := c.statusRequest(ctx, "GET", url)
+	path := "/v2/models/" + modelName + "/ready"
+	resp, err := c.sendRequestCheckStatus(ctx, "GET", path)
 	if err != nil {
 		return false, err
 	}
 
 	if resp.StatusCode == http.StatusBadRequest {
 		// TODO "Model version not ready"
-		return false, nil
+		return false, fmt.Errorf("triton server returned status %d", resp.StatusCode)
 	} else if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return false, fmt.Errorf("triton server returned status %d: %s", resp.StatusCode, string(body))
@@ -79,14 +85,14 @@ func (c *HTTPClient) ModelReady(ctx context.Context, modelName string) (bool, er
 }
 
 func (c *HTTPClient) ModelLoad(ctx context.Context, modelName string) error {
-	url := c.serverURL + "/v2/repository/models/" + modelName + "/load"
-	_, err := c.statusRequest(ctx, "POST", url)
+	path := "/v2/repository/models/" + modelName + "/load"
+	_, err := c.sendRequestCheckStatus(ctx, "POST", path)
 	return err
 }
 
 func (c *HTTPClient) ModelUnload(ctx context.Context, modelName string) error {
-	url := c.serverURL + "/v2/repository/models/" + modelName + "/unload"
-	_, err := c.statusRequest(ctx, "POST", url)
+	path := "/v2/repository/models/" + modelName + "/unload"
+	_, err := c.sendRequestCheckStatus(ctx, "POST", path)
 	return err
 }
 
@@ -223,6 +229,8 @@ func (c *HTTPClient) handleRequestWithRetry(ctx context.Context, httpReq *http.R
 
 		if err == nil {
 			break
+		} else if resp == nil {
+			// do nothing
 		} else if resp.StatusCode >= 500 {
 			// try again on 5xx
 			resp.Body.Close()
