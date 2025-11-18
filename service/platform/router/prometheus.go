@@ -28,16 +28,6 @@ var (
 		[]string{"router", "fixed_only"},
 	)
 
-	routerRoutedModelsCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "mly",
-			Subsystem: "router",
-			Name:      "routed_models_counter",
-			Help:      "Number of models routed, labeled by model name.",
-		},
-		[]string{"model", "router"},
-	)
-
 	routerModelUnloadGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "mly",
@@ -50,7 +40,6 @@ var (
 
 func init() {
 	prometheus.MustRegister(routerPredictDurationMicrosSummary)
-	prometheus.MustRegister(routerRoutedModelsCounter)
 	prometheus.MustRegister(routerReloadDurationMicrosSummary)
 	prometheus.MustRegister(routerModelUnloadGauge)
 }

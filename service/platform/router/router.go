@@ -330,11 +330,8 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 		routingValueString, ok := r.routingMap[routingValueInt]
 
-		var metricModelName string
 		var evaluator platform.Predictor
 		if !ok {
-
-			metricModelName = "global"
 			if globalExists {
 				metricFixedOnly = false
 				// fallback to global model
@@ -351,16 +348,12 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		} else {
 			metricFixedOnly = false
 
-			metricModelName = routingValueString
-
 			var ok bool
 			evaluator, ok = r.routingTable[routingValueString]
 			if !ok {
 				return nil, fmt.Errorf("no evaluator found for routing value: %v", routingValue)
 			}
 		}
-
-		routerRoutedModelsCounter.WithLabelValues(metricModelName, r.routerName).Inc()
 
 		select {
 		case r.workCh <- &workRequest{
