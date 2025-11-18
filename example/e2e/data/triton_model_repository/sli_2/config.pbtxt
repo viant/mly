@@ -1,5 +1,4 @@
 
-name: "sli"
 backend: "tensorflow"
 max_batch_size: 32
 
@@ -9,13 +8,11 @@ input [
     name: "sa"
     data_type: TYPE_STRING
     dims: [ 1 ]
-    allow_ragged_batch: false
   },
   {
     name: "sl"
     data_type: TYPE_STRING
     dims: [ 1 ]
-    allow_ragged_batch: false
   }
 ]
 
