@@ -252,6 +252,10 @@ func TestRouter_Predict_RoutesAndConcats(t *testing.T) {
 				},
 			}
 
+			cfg.Init(nil)
+			cfg.Router.MaxQueueSize = 1000
+			cfg.Router.Workers = 3
+
 			router, err := NewRouter(cfg, nil, map[string]tricli.TritonClient{
 				"test_server": &mockTritonClient{},
 			})

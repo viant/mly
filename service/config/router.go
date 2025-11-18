@@ -71,6 +71,14 @@ func (o *RouterConfig) Validate() error {
 		return fmt.Errorf("config URL is required")
 	}
 
+	if o.Workers == 0 {
+		return fmt.Errorf("workers must be greater than 0")
+	}
+
+	if o.MaxQueueSize == 0 {
+		return fmt.Errorf("max queue size must be greater than 0")
+	}
+
 	if o.InputName == "" {
 		return fmt.Errorf("input name is required")
 	}

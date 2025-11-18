@@ -32,9 +32,6 @@ type Router struct {
 	configModified *config.Modified
 	routerConfig   *router.RouterConfig
 
-	modelUnloadCh     chan string
-	modelUnloadStopCh chan struct{}
-
 	routingTableLock sync.RWMutex
 	routingMap       map[int]string
 	routingTable     map[string]platform.PlatformEvaluator
@@ -62,6 +59,11 @@ func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricl
 		return nil, fmt.Errorf("router configuration is required")
 	}
 
+	if err := cfg.Router.Validate(); err != nil {
+		return nil, fmt.Errorf("router configuration is invalid: %w", err)
+
+	}
+
 	tritonClient, ok := tritonClients[cfg.Triton.ServerID]
 	if !ok {
 		return nil, fmt.Errorf("triton client not found for server ID: %s", cfg.Triton.ServerID)
@@ -83,29 +85,6 @@ func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricl
 	for i := 0; i < cfg.Router.Workers; i++ {
 		go handleWorkRequests(r.workCh, routerWorkerChannelQueuedSummary.WithLabelValues(r.routerName))
 	}
-
-	stopUnload := make(chan struct{})
-	modelUnloadCh := make(chan string)
-
-	r.modelUnloadCh = modelUnloadCh
-	r.modelUnloadStopCh = stopUnload
-
-	go func() {
-		for {
-			select {
-			case modelName := <-modelUnloadCh:
-				unloadCtx, unloadCtxCancel := context.WithTimeout(context.Background(), 10*time.Second)
-
-				if err := r.unloadModel(unloadCtx, modelName); err != nil {
-					log.Printf("failed to unload model %s: %v\n", modelName, err)
-				}
-
-				unloadCtxCancel()
-			case <-stopUnload:
-				return
-			}
-		}
-	}()
 
 	return r, nil
 }
@@ -421,9 +400,6 @@ func (r *Router) Stats(stats map[string]interface{}) {
 }
 
 func (r *Router) Close() error {
-	r.modelUnloadStopCh <- struct{}{}
-	close(r.modelUnloadStopCh)
-	close(r.modelUnloadCh)
 	return nil
 }
 
@@ -687,7 +663,16 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 
 	for model := range modelsToUnload {
 		routerModelUnloadGauge.WithLabelValues(r.routerName).Inc()
-		r.modelUnloadCh <- model
+
+		go func(modelName string) {
+			defer routerModelUnloadGauge.WithLabelValues(r.routerName).Dec()
+
+			ctxTo, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := r.unloadModel(ctxTo, modelName); err != nil {
+				log.Printf("failed to unload model %s: %v\n", modelName, err)
+			}
+		}(model)
 	}
 
 	return nil
