@@ -305,6 +305,8 @@ func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs a
 		return err
 	}
 
+	atomic.StoreInt32(&s.ReloadOK, 1)
+
 	s.transformer, err = transform.Get(cfg.Transformer)
 	if err != nil {
 		return err
@@ -441,7 +443,7 @@ func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datast
 // GetHealth returns the health status of the service
 // Implements service/endpoint/health.GetHealth
 func (s *Service) GetHealth() int32 {
-	return s.ReloadOK
+	return atomic.LoadInt32(&s.ReloadOK)
 }
 
 func (s *Service) pollModelReload() {
@@ -457,13 +459,18 @@ func (s *Service) pollModelReload() {
 			}()
 		}
 
+		var reloadOK int32
 		err := s.evaluator.ReloadIfNeeded(ctx)
 		if err != nil {
 			stats.AppendError(err)
 			log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
-			// Update health status for reload failure (TensorFlow models)
-			atomic.StoreInt32(&s.ReloadOK, 0)
+
+			reloadOK = 0
+		} else {
+			reloadOK = 1
 		}
+
+		atomic.StoreInt32(&s.ReloadOK, reloadOK)
 
 		if atomic.LoadInt32(&s.closed) != 0 {
 			log.Printf("[%s reload] shutting down, stopping reload loop", s.config.ID)
