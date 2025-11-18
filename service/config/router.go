@@ -84,7 +84,7 @@ func (o *RouterConfig) Validate() error {
 	}
 
 	if !o.Global.Exists && len(o.Global.PredictionReplacements) == 0 {
-		return fmt.Errorf("global model does not exist but no rediction replacements were provided")
+		return fmt.Errorf("global model does not exist but no prediction replacements were provided")
 	}
 
 	if o.Output.NoModelID == "" {
