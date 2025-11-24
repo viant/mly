@@ -114,7 +114,7 @@ func Build(
 
 			log.Printf("[%s] Model loading", model.ID)
 
-			// Validate model configuration first
+			// Validate model configuration first - this is redundant
 			if validateErr := model.Validate(); validateErr != nil {
 				log.Printf("[%s] ERROR: Model validation failed: %v", model.ID, validateErr)
 				lock.Lock()

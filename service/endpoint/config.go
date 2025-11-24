@@ -87,6 +87,34 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ConfigCheck validates relationships with other config entities
+func (c *Config) ConfigCheck() error {
+	connectionIDs := make(map[string]struct{})
+	for _, connection := range c.DatastoreList.Connections {
+		connectionIDs[connection.ID] = struct{}{}
+	}
+
+	validDatastoreIDs := make(map[string]struct{})
+	for _, datastore := range c.DatastoreList.Datastores {
+		if err := datastore.ConfigCheck(connectionIDs); err != nil {
+			return err
+		}
+
+		validDatastoreIDs[datastore.ID] = struct{}{}
+	}
+
+	validTritonServerIDs := make(map[string]struct{})
+	for _, tritonServer := range c.TritonServers {
+		validTritonServerIDs[tritonServer.ID] = struct{}{}
+	}
+
+	if err := c.ModelList.ConfigCheck(validDatastoreIDs, validTritonServerIDs); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (c *Config) LoadFromURL(ctx context.Context, URL string, target interface{}) error {
 	fs := afs.New()
 	reader, err := fs.OpenURL(ctx, URL)

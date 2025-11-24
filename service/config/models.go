@@ -35,3 +35,13 @@ func (l *ModelList) Validate() error {
 	}
 	return nil
 }
+
+func (l *ModelList) ConfigCheck(validDatastoreIDs map[string]struct{}, validTransformerIDs map[string]struct{}) error {
+	for _, model := range l.Models {
+		if err := model.ConfigCheck(validDatastoreIDs, validTransformerIDs); err != nil {
+			return fmt.Errorf("failed to validate model: %s, err: %w", model.ID, err)
+		}
+	}
+
+	return nil
+}

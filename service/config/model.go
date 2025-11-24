@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/viant/afs/file"
+	"github.com/viant/mly/service/domain/transformer"
 	batchconfig "github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/shared"
 	"github.com/viant/tapper/config"
@@ -190,8 +191,6 @@ func (m *Model) Validate() error {
 			return fmt.Errorf("triton model %s requires Triton configuration", m.ID)
 		}
 
-		m.Triton.Init()
-
 		if err := m.Triton.Validate(m.Mode == "router", m.URL != ""); err != nil {
 			return fmt.Errorf("triton model %s config invalid: %w", m.ID, err)
 		}
@@ -206,6 +205,35 @@ func (m *Model) Validate() error {
 
 		if err := m.Router.Validate(); err != nil {
 			return fmt.Errorf("router model %s config invalid: %w", m.ID, err)
+		}
+	}
+
+	return nil
+}
+
+// ConfigCheck is a path to validate relationships with other config entities.
+func (m *Model) ConfigCheck(validDatastoreIDs map[string]struct{}, validTritonServerIDs map[string]struct{}) error {
+	if m.DataStore != "" {
+		_, ok := validDatastoreIDs[m.DataStore]
+		if !ok {
+			return fmt.Errorf("datastore %s is not valid", m.DataStore)
+		}
+	}
+
+	if m.Transformer != "" {
+		_, err := transformer.Singleton().Lookup(m.Transformer)
+		if err != nil {
+			return fmt.Errorf("transformer %s is not valid: %w", m.Transformer, err)
+		}
+	}
+
+	if m.Platform == "triton" {
+		if m.Triton == nil {
+			return fmt.Errorf("triton model %s requires Triton configuration", m.ID)
+		}
+
+		if err := m.Triton.CheckConfig(validTritonServerIDs); err != nil {
+			return fmt.Errorf("triton model %s config invalid: %w", m.ID, err)
 		}
 	}
 
@@ -244,6 +272,15 @@ func (t *TritonConfig) Validate(isRouter bool, urlPresent bool) error {
 
 	if t.ServerID == "" && !urlPresent {
 		return fmt.Errorf("triton ServerID or Model.URL is required")
+	}
+
+	return nil
+}
+
+func (m *TritonConfig) CheckConfig(validServerIDs map[string]struct{}) error {
+	_, ok := validServerIDs[m.ServerID]
+	if m.ServerID != "" && !ok {
+		return fmt.Errorf("triton server ID %s is not valid", m.ServerID)
 	}
 
 	return nil
