@@ -338,6 +338,7 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 			"modelB": &mockPredictOnly{},
 		},
 		globalModel: &mockPredictOnly{},
+		debug:       true,
 	}
 
 	reusedModelB := router.routingTable["modelB"]

@@ -50,6 +50,7 @@ func handleWorkRequests(workCh chan *workRequest, observer prometheus.Observer) 
 			}
 
 			if request.modelOutputEnabled {
+				// TODO fix ordering
 				results = append(results, [][]string{{request.routingValueString}})
 			}
 

@@ -50,6 +50,8 @@ type Router struct {
 	indexToName map[int]string
 	inputs      map[string]*domain.Input
 
+	debug bool
+
 	// router input offset is the index of the router input in the inputs array
 	routerInputOffset int
 }
@@ -75,6 +77,7 @@ func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricl
 		routerName:   cfg.ID,
 		modelConfig:  cfg,
 		tritonClient: tritonClient,
+		debug:        cfg.Debug,
 	}
 
 	if err := r.handleIO(cfg); err != nil {
@@ -557,12 +560,20 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 
 	newModelMapping := make(map[int]string)
 	for _, entity := range newConfig.EntityMapping {
+		if r.debug {
+			log.Printf("router: add mapping: %d -> %s", entity.EntityID, entity.ModelName)
+		}
+
 		newModelMapping[entity.EntityID] = entity.ModelName
 		delete(modelsToUnload, entity.ModelName)
 	}
 
 	globalModelName := newConfig.GlobalModelName
 	if globalModelName != "" {
+		if r.debug {
+			log.Printf("router: global model: %s", globalModelName)
+		}
+
 		delete(modelsToUnload, globalModelName)
 	}
 
@@ -616,7 +627,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 	}
 
 	wg := sync.WaitGroup{}
-	errCh := make(chan error, 1)
+	errCh := make(chan error, len(newRoutingTable)+1)
 	if globalEvaluator != nil {
 		wg.Add(1)
 		go func() {
@@ -631,11 +642,25 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 		wg.Add(1)
 		go func(model string) {
 			defer wg.Done()
+
+			if r.debug {
+				log.Printf("router: reload model: %s", model)
+			}
+
 			if err := newRoutingTable[model].ReloadIfNeeded(ctx); err != nil {
+				if r.debug {
+					log.Printf("router: failed to reload model: %s: %v", model, err)
+				}
+
 				errCh <- fmt.Errorf("failed to reload model %s: %w", model, err)
 			}
 		}(model)
 	}
+
+	if r.debug {
+		log.Printf("router: wait for reloads")
+	}
+
 	wg.Wait()
 	close(errCh)
 
