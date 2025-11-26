@@ -34,9 +34,9 @@ type PlatformEvaluator interface {
 	// Close releases resources
 	Close() error
 
-	// ReloadIfNeeded will update models as needed, and check their health.
+	// ReloadIfNeeded will update models as needed, check their health, and consolidate signatures, if implemented.
 	// For in-process models (TensorFlow), this will check if the underlying models need to be updated.
-	// For external models (Triton), this will check Triton models' health.
+	// For external models (Triton), this will use the Model Control API to load, unload, and check the health of Triton models.
 	ReloadIfNeeded(ctx context.Context) error
 }
 

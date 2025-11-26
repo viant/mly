@@ -135,7 +135,6 @@ func (m *MetaInput) FieldByName() map[string]*Field {
 // On the server, it is called after reading the configuration file.
 // On the client, it is called after fetching the configuration from the server, which will have already processed it via reconcileIOFromSignature().
 func (m *MetaInput) Init() {
-	// TODO assess why this approach was taken - this condition could be improved by having a map to see if the field by name already exists
 	if len(m.Inputs) == 0 {
 		// Add KeyFields to Inputs
 		if len(m.KeyFields) > 0 {

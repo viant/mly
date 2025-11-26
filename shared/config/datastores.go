@@ -2,16 +2,17 @@ package config
 
 import (
 	"fmt"
+
 	"github.com/viant/mly/shared/config/datastore"
 )
 
-//DatastoreList represents datastore list
+// DatastoreList represents datastore list
 type DatastoreList struct {
 	Connections []*datastore.Connection
 	Datastores  []*Datastore
 }
 
-//Init initialises list
+// Init initialises list
 func (d *DatastoreList) Init() {
 	if len(d.Connections) > 0 {
 		for i := range d.Connections {
@@ -25,14 +26,16 @@ func (d *DatastoreList) Init() {
 	}
 }
 
-//Validate checks if datastore list is valid
+// Validate checks if datastore list is valid
 func (d *DatastoreList) Validate() error {
 	if len(d.Connections) == 0 && len(d.Datastores) == 0 {
 		return nil
 	}
+
 	if len(d.Connections) > 0 && len(d.Datastores) == 0 {
 		return fmt.Errorf("item were empty, but item defined")
 	}
+
 	if len(d.Connections) > 0 {
 		for _, item := range d.Connections {
 			if err := item.Validate(); err != nil {
@@ -40,10 +43,12 @@ func (d *DatastoreList) Validate() error {
 			}
 		}
 	}
+
 	for _, item := range d.Datastores {
 		if err := item.Validate(); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }

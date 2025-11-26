@@ -21,6 +21,7 @@ type Input struct {
 	Vocab bool
 
 	// Auxiliary is true if this input isn't part of the model
+	// TODO redesign model IO vs server IO concerns
 	Auxiliary bool
 
 	Type reflect.Type
