@@ -25,7 +25,22 @@ type TritonClient interface {
 
 	ModelUnload(ctx context.Context, modelName string) error
 
+	ModelMetadata(ctx context.Context, modelName string) (*ModelMetadata, error)
+
 	Close() error
+}
+
+// https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#model-metadata-response-json-object `$metadata_tensor`
+type MetadataTensor struct {
+	Name     string  `json:"name"`
+	Datatype string  `json:"datatype"`
+	Shape    []int64 `json:"shape"`
+}
+
+// stripped down version of https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#model-metadata-response-json-object
+type ModelMetadata struct {
+	Inputs  []MetadataTensor `json:"inputs"`
+	Outputs []MetadataTensor `json:"outputs"`
 }
 
 // NewClient creates either an HTTP or gRPC client.
@@ -54,7 +69,6 @@ func NewClient(server config.TritonServer) (TritonClient, error) {
 	}
 
 	// HTTP options seem a bit bare
-	// TODO see if DRY with
 	return NewMeteredTritonClient(&HTTPClient{
 		httpClient: &http.Client{
 			Timeout: time.Duration(server.HTTPClientTimeoutMs) * time.Millisecond,

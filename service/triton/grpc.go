@@ -81,6 +81,41 @@ func (c *GRPCClient) ModelUnload(ctx context.Context, modelName string) error {
 	return nil
 }
 
+func (c *GRPCClient) ModelMetadata(ctx context.Context, modelName string) (*ModelMetadata, error) {
+	grpcResponse, err := c.grpcClient.ModelMetadata(ctx, &triton.ModelMetadataRequest{
+		Name: modelName,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return convertGRPCModelMetadataResponse(grpcResponse), nil
+}
+
+func convertGRPCModelMetadataResponse(response *triton.ModelMetadataResponse) *ModelMetadata {
+	inputs := make([]MetadataTensor, len(response.Inputs))
+	for i, input := range response.Inputs {
+		inputs[i] = MetadataTensor{
+			Name:     input.Name,
+			Datatype: input.Datatype,
+			Shape:    input.Shape,
+		}
+	}
+
+	outputs := make([]MetadataTensor, len(response.Outputs))
+	for i, output := range response.Outputs {
+		outputs[i] = MetadataTensor{
+			Name:     output.Name,
+			Datatype: output.Datatype,
+			Shape:    output.Shape,
+		}
+	}
+
+	return &ModelMetadata{
+		Inputs:  inputs,
+		Outputs: outputs,
+	}
+}
+
 func (c *GRPCClient) Close() error {
 	return c.grpcConn.Close()
 }

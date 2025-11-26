@@ -9,8 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	triton "github.com/viant/mly/proto/triton"
-	"github.com/viant/mly/service/config"
-	"github.com/viant/mly/shared"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -28,21 +26,90 @@ func createMockTritonConn(ctx context.Context, t *testing.T, listener *bufconn.L
 	return conn
 }
 
-func createMockGRPCTritonEvaluator(t *testing.T, cfg *config.Model, grpcConn *grpc.ClientConn) *TritonEvaluator {
-	grpcClient := triton.NewGRPCInferenceServiceClient(grpcConn)
-	cfg.Triton.Init()
-	evaluator, err := NewTritonEvaluator(cfg, map[string]TritonClient{
-		cfg.Triton.ServerID: &GRPCClient{
-			grpcConn:   grpcConn,
-			grpcClient: grpcClient,
-		},
-	})
+// mockTritonServer implements triton.GRPCInferenceServiceServer for testing
+type mockTritonServer struct {
+	triton.UnimplementedGRPCInferenceServiceServer
 
+	modelReady bool
+	responses  map[string]*triton.ModelInferResponse
+}
+
+func (m *mockTritonServer) RepositoryModelLoad(ctx context.Context, req *triton.RepositoryModelLoadRequest) (*triton.RepositoryModelLoadResponse, error) {
+	return &triton.RepositoryModelLoadResponse{}, nil
+}
+
+func (m *mockTritonServer) ModelReady(ctx context.Context, req *triton.ModelReadyRequest) (*triton.ModelReadyResponse, error) {
+	return &triton.ModelReadyResponse{Ready: m.modelReady}, nil
+}
+
+func (m *mockTritonServer) ModelInfer(ctx context.Context, req *triton.ModelInferRequest) (*triton.ModelInferResponse, error) {
+	if resp, ok := m.responses[req.ModelName]; ok {
+		return resp, nil
+	}
+
+	// Return a default response
+	return &triton.ModelInferResponse{
+		ModelName: req.ModelName,
+		Outputs: []*triton.ModelInferResponse_InferOutputTensor{
+			{
+				Name:     "output",
+				Datatype: "FP32",
+				Shape:    []int64{1, 1},
+				Contents: &triton.InferTensorContents{
+					Fp32Contents: []float32{0.5},
+				},
+			},
+		},
+	}, nil
+}
+
+// startMockGRPCServer starts an in-memory gRPC server for testing
+func startMockGRPCServer(t *testing.T, mock *mockTritonServer) (*grpc.Server, *bufconn.Listener) {
+	buffer := 1024 * 1024
+	listener := bufconn.Listen(buffer)
+
+	server := grpc.NewServer()
+	triton.RegisterGRPCInferenceServiceServer(server, mock)
+
+	go func() {
+		if err := server.Serve(listener); err != nil {
+			t.Fatalf("Server exited with error: %v", err)
+		}
+	}()
+
+	return server, listener
+}
+
+func createClient(t *testing.T, ctx context.Context, mock *mockTritonServer) (func(), *GRPCClient) {
+	server, listener := startMockGRPCServer(t, mock)
+
+	grpcConn := createMockTritonConn(ctx, t, listener)
+	client := &GRPCClient{
+		grpcConn:   grpcConn,
+		grpcClient: triton.NewGRPCInferenceServiceClient(grpcConn),
+	}
+
+	return func() {
+		server.Stop()
+	}, client
+}
+
+func TestGRPCClient_ModelLoad(t *testing.T) {
+	ctx := context.Background()
+
+	// Set up mock server
+	mock := &mockTritonServer{
+		modelReady: true,
+	}
+
+	stopper, client := createClient(t, ctx, mock)
+	defer stopper()
+
+	err := client.ModelLoad(ctx, "test_model")
 	require.NoError(t, err)
-	return evaluator
 }
 
-func TestTritonEvaluator_ReloadAndSupportsReload(t *testing.T) {
+func TestGRPCClient_ModelInfer(t *testing.T) {
 	ctx := context.Background()
 
 	// Set up mock server
@@ -65,88 +132,15 @@ func TestTritonEvaluator_ReloadAndSupportsReload(t *testing.T) {
 		},
 	}
 
-	server, listener := startMockGRPCServer(t, mock)
-	defer server.Stop()
-
-	cfg := &config.Model{
-		ID:       "test_model",
-		Platform: "triton",
-		MetaInput: shared.MetaInput{
-			Inputs: []*shared.Field{
-				{Name: "input1", Index: 0, DataType: "string"},
-			},
-			Outputs: []*shared.Field{
-				{Name: "output1", Index: 0, DataType: "float32"},
-			},
-		},
-		Triton: &config.TritonConfig{
-			ModelName: "test_model",
-			ServerID:  "test_server",
-		},
-	}
-
-	grpcConn := createMockTritonConn(ctx, t, listener)
-	evaluator := createMockGRPCTritonEvaluator(t, cfg, grpcConn)
-	defer evaluator.Close()
-
-	// ReloadIfNeeded should be a no-op
-	err := evaluator.ReloadIfNeeded(context.Background())
-	assert.NoError(t, err)
-}
-
-func TestTritonEvaluator_PredictWithMockServer(t *testing.T) {
-	ctx := context.Background()
-
-	// Set up mock server
-	mock := &mockTritonServer{
-		modelReady: true,
-		responses: map[string]*triton.ModelInferResponse{
-			"test_model": {
-				ModelName: "test_model",
-				Outputs: []*triton.ModelInferResponse_InferOutputTensor{
-					{
-						Name:     "output",
-						Datatype: "INT64",
-						Shape:    []int64{2, 1},
-						Contents: &triton.InferTensorContents{
-							Int64Contents: []int64{42, 100},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	server, listener := startMockGRPCServer(t, mock)
-	defer server.Stop()
-
-	// Create evaluator with mock connection
-	cfg := &config.Model{
-		ID:       "test_model",
-		Platform: "triton",
-		MetaInput: shared.MetaInput{
-			Inputs: []*shared.Field{
-				{Name: "input1", Index: 0, DataType: "string"},
-			},
-			Outputs: []*shared.Field{
-				{Name: "output", Index: 0, DataType: "int64"},
-			},
-		},
-		Triton: &config.TritonConfig{
-			ModelName: "test_model",
-			ServerID:  "test_server",
-		},
-	}
-	grpcConn := createMockTritonConn(ctx, t, listener)
-	evaluator := createMockGRPCTritonEvaluator(t, cfg, grpcConn)
-	defer evaluator.Close()
+	stopper, client := createClient(t, ctx, mock)
+	defer stopper()
 
 	// Test prediction
 	params := []interface{}{
 		[][]string{{"value1"}, {"value2"}}, // 2 batch items
 	}
 
-	results, err := evaluator.Predict(ctx, params)
+	results, err := client.ModelInfer(ctx, "test_model", params, map[int]string{0: "input1"})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
@@ -158,7 +152,7 @@ func TestTritonEvaluator_PredictWithMockServer(t *testing.T) {
 	assert.Equal(t, []int64{100}, output[1])
 }
 
-func TestTritonEvaluator_PredictWithRawOutputContents(t *testing.T) {
+func TestGRPCClient_ModelInferWithRawOutputContents(t *testing.T) {
 	ctx := context.Background()
 
 	// Set up mock server with raw output contents
@@ -181,35 +175,14 @@ func TestTritonEvaluator_PredictWithRawOutputContents(t *testing.T) {
 		},
 	}
 
-	server, listener := startMockGRPCServer(t, mock)
-	defer server.Stop()
-
-	cfg := &config.Model{
-		ID:       "test_model",
-		Platform: "triton",
-		MetaInput: shared.MetaInput{
-			Inputs: []*shared.Field{
-				{Name: "input1", Index: 0, DataType: "string"},
-			},
-			Outputs: []*shared.Field{
-				{Name: "output", Index: 0, DataType: "float32"},
-			},
-		},
-		Triton: &config.TritonConfig{
-			ModelName: "test_model",
-			ServerID:  "test_server",
-		},
-	}
-
-	grpcConn := createMockTritonConn(ctx, t, listener)
-	evaluator := createMockGRPCTritonEvaluator(t, cfg, grpcConn)
-	defer evaluator.Close()
+	stopper, client := createClient(t, ctx, mock)
+	defer stopper()
 
 	params := []interface{}{
 		[][]string{{"value1"}, {"value2"}},
 	}
 
-	results, err := evaluator.Predict(ctx, params)
+	results, err := client.ModelInfer(ctx, "test_model", params, map[int]string{0: "input1"})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
@@ -220,7 +193,7 @@ func TestTritonEvaluator_PredictWithRawOutputContents(t *testing.T) {
 	assert.InDelta(t, 50.0, output[1][0], 0.01)
 }
 
-func TestTritonEvaluator_PredictAllInputTypes(t *testing.T) {
+func TestGRPCClient_ModelInferAllInputTypes(t *testing.T) {
 	ctx := context.Background()
 
 	testCases := []struct {
@@ -315,31 +288,10 @@ func TestTritonEvaluator_PredictAllInputTypes(t *testing.T) {
 				responses:  map[string]*triton.ModelInferResponse{"test_model": tc.expectedResp},
 			}
 
-			server, listener := startMockGRPCServer(t, mock)
-			grpcConn := createMockTritonConn(ctx, t, listener)
-			defer server.Stop()
+			stopper, client := createClient(t, ctx, mock)
+			defer stopper()
 
-			cfg := &config.Model{
-				ID:       "test_model",
-				Platform: "triton",
-				MetaInput: shared.MetaInput{
-					Inputs: []*shared.Field{
-						{Name: "input1", Index: 0, DataType: tc.inputType},
-					},
-					Outputs: []*shared.Field{
-						{Name: "output", Index: 0, DataType: tc.inputType},
-					},
-				},
-				Triton: &config.TritonConfig{
-					ModelName: "test_model",
-					ServerID:  "test_server",
-				},
-			}
-
-			evaluator := createMockGRPCTritonEvaluator(t, cfg, grpcConn)
-			defer evaluator.Close()
-
-			results, err := evaluator.Predict(ctx, []interface{}{tc.inputData})
+			results, err := client.ModelInfer(ctx, "test_model", []interface{}{tc.inputData}, map[int]string{0: "input1"})
 			require.NoError(t, err)
 			require.Len(t, results, 1)
 			assert.NotNil(t, results[0])
@@ -347,55 +299,7 @@ func TestTritonEvaluator_PredictAllInputTypes(t *testing.T) {
 	}
 }
 
-// mockTritonServer implements triton.GRPCInferenceServiceServer for testing
-type mockTritonServer struct {
-	triton.UnimplementedGRPCInferenceServiceServer
-	modelReady bool
-	responses  map[string]*triton.ModelInferResponse
-}
-
-func (m *mockTritonServer) ModelReady(ctx context.Context, req *triton.ModelReadyRequest) (*triton.ModelReadyResponse, error) {
-	return &triton.ModelReadyResponse{Ready: m.modelReady}, nil
-}
-
-func (m *mockTritonServer) ModelInfer(ctx context.Context, req *triton.ModelInferRequest) (*triton.ModelInferResponse, error) {
-	if resp, ok := m.responses[req.ModelName]; ok {
-		return resp, nil
-	}
-	// Return a default response
-	return &triton.ModelInferResponse{
-		ModelName: req.ModelName,
-		Outputs: []*triton.ModelInferResponse_InferOutputTensor{
-			{
-				Name:     "output",
-				Datatype: "FP32",
-				Shape:    []int64{1, 1},
-				Contents: &triton.InferTensorContents{
-					Fp32Contents: []float32{0.5},
-				},
-			},
-		},
-	}, nil
-}
-
-// startMockGRPCServer starts an in-memory gRPC server for testing
-func startMockGRPCServer(t *testing.T, mock *mockTritonServer) (*grpc.Server, *bufconn.Listener) {
-	buffer := 1024 * 1024
-	listener := bufconn.Listen(buffer)
-
-	server := grpc.NewServer()
-	triton.RegisterGRPCInferenceServiceServer(server, mock)
-
-	go func() {
-		if err := server.Serve(listener); err != nil {
-			t.Logf("Server exited with error: %v", err)
-		}
-	}()
-
-	return server, listener
-}
-
-func TestTritonEvaluator_PredictBytesOutput(t *testing.T) {
+func TestGRPCClient_ModelInferBytesOutput(t *testing.T) {
 	ctx := context.Background()
 
 	mock := &mockTritonServer{
@@ -417,35 +321,14 @@ func TestTritonEvaluator_PredictBytesOutput(t *testing.T) {
 		},
 	}
 
-	server, listener := startMockGRPCServer(t, mock)
-	defer server.Stop()
-
-	cfg := &config.Model{
-		ID:       "test_model",
-		Platform: "triton",
-		MetaInput: shared.MetaInput{
-			Inputs: []*shared.Field{
-				{Name: "input1", Index: 0, DataType: "string"},
-			},
-			Outputs: []*shared.Field{
-				{Name: "output", Index: 0, DataType: "string"},
-			},
-		},
-		Triton: &config.TritonConfig{
-			ModelName: "test_model",
-			ServerID:  "test_server",
-		},
-	}
-
-	grpcConn := createMockTritonConn(ctx, t, listener)
-	evaluator := createMockGRPCTritonEvaluator(t, cfg, grpcConn)
-	defer evaluator.Close()
+	stopper, client := createClient(t, ctx, mock)
+	defer stopper()
 
 	params := []interface{}{
 		[][]string{{"input1"}, {"input2"}},
 	}
 
-	results, err := evaluator.Predict(ctx, params)
+	results, err := client.ModelInfer(ctx, "test_model", params, map[int]string{0: "input1"})
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
@@ -456,7 +339,7 @@ func TestTritonEvaluator_PredictBytesOutput(t *testing.T) {
 	assert.Equal(t, []string{"result2"}, output[1])
 }
 
-func TestTritonEvaluator_PredictDifferentBatchSizes(t *testing.T) {
+func TestGRPCClient_ModelInferDifferentBatchSizes(t *testing.T) {
 	ctx := context.Background()
 
 	testCases := []struct {
@@ -496,29 +379,8 @@ func TestTritonEvaluator_PredictDifferentBatchSizes(t *testing.T) {
 				},
 			}
 
-			server, listener := startMockGRPCServer(t, mock)
-			defer server.Stop()
-
-			cfg := &config.Model{
-				ID:       "test_model",
-				Platform: "triton",
-				MetaInput: shared.MetaInput{
-					Inputs: []*shared.Field{
-						{Name: "input1", Index: 0, DataType: "string"},
-					},
-					Outputs: []*shared.Field{
-						{Name: "output", Index: 0, DataType: "int64"},
-					},
-				},
-				Triton: &config.TritonConfig{
-					ModelName: "test_model",
-					ServerID:  "test_server",
-				},
-			}
-
-			grpcConn := createMockTritonConn(ctx, t, listener)
-			evaluator := createMockGRPCTritonEvaluator(t, cfg, grpcConn)
-			defer evaluator.Close()
+			stopper, client := createClient(t, ctx, mock)
+			defer stopper()
 
 			// Generate input batch
 			inputBatch := make([][]string, tc.batchSize)
@@ -526,7 +388,7 @@ func TestTritonEvaluator_PredictDifferentBatchSizes(t *testing.T) {
 				inputBatch[i] = []string{fmt.Sprintf("input_%d", i)}
 			}
 
-			results, err := evaluator.Predict(ctx, []interface{}{inputBatch})
+			results, err := client.ModelInfer(ctx, "test_model", []interface{}{inputBatch}, map[int]string{0: "input1"})
 			require.NoError(t, err)
 			require.Len(t, results, 1)
 
@@ -537,7 +399,7 @@ func TestTritonEvaluator_PredictDifferentBatchSizes(t *testing.T) {
 	}
 }
 
-func TestTritonEvaluator_PredictUnsupportedType(t *testing.T) {
+func TestGRPCClient_ModelInferUnsupportedType(t *testing.T) {
 	ctx := context.Background()
 
 	mock := &mockTritonServer{
@@ -560,66 +422,19 @@ func TestTritonEvaluator_PredictUnsupportedType(t *testing.T) {
 		},
 	}
 
-	server, listener := startMockGRPCServer(t, mock)
-	defer server.Stop()
-
-	cfg := &config.Model{
-		ID:       "test_model",
-		Platform: "triton",
-		MetaInput: shared.MetaInput{
-			Inputs: []*shared.Field{
-				{Name: "input1", Index: 0, DataType: "string"},
-			},
-			Outputs: []*shared.Field{
-				{Name: "output", Index: 0, DataType: "string"},
-			},
-		},
-		Triton: &config.TritonConfig{
-			ModelName: "test_model",
-			ServerID:  "test_server",
-		},
-	}
-
-	grpcConn := createMockTritonConn(ctx, t, listener)
-	evaluator := createMockGRPCTritonEvaluator(t, cfg, grpcConn)
-	defer evaluator.Close()
+	stopper, client := createClient(t, ctx, mock)
+	defer stopper()
 
 	params := []interface{}{
 		[][]string{{"test"}},
 	}
 
-	_, err := evaluator.Predict(ctx, params)
+	_, err := client.ModelInfer(ctx, "test_model", params, map[int]string{0: "input1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported")
 }
 
-func TestTritonEvaluator_PredictEmptyBatch(t *testing.T) {
-	cfg := &config.Model{
-		ID:       "test_model",
-		Platform: "triton",
-		MetaInput: shared.MetaInput{
-			Inputs: []*shared.Field{
-				{Name: "input1", Index: 0, DataType: "string"},
-			},
-			Outputs: []*shared.Field{
-				{Name: "output", Index: 0, DataType: "int64"},
-			},
-		},
-		Triton: &config.TritonConfig{
-			ModelName: "test_model",
-			ServerID:  "test_server",
-		},
-	}
-
-	evaluator := createMockGRPCTritonEvaluator(t, cfg, nil)
-	defer evaluator.Close()
-
-	_, err := evaluator.Predict(context.Background(), []interface{}{})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no input parameters")
-}
-
-func TestTritonEvaluator_PredictMissingOutput(t *testing.T) {
+func TestGRPCClient_ModelInferMissingOutput(t *testing.T) {
 	ctx := context.Background()
 
 	mock := &mockTritonServer{
@@ -639,35 +454,14 @@ func TestTritonEvaluator_PredictMissingOutput(t *testing.T) {
 		},
 	}
 
-	server, listener := startMockGRPCServer(t, mock)
-	defer server.Stop()
-
-	cfg := &config.Model{
-		ID:       "test_model",
-		Platform: "triton",
-		MetaInput: shared.MetaInput{
-			Inputs: []*shared.Field{
-				{Name: "input1", Index: 0, DataType: "string"},
-			},
-			Outputs: []*shared.Field{
-				{Name: "output", Index: 0, DataType: "int64"},
-			},
-		},
-		Triton: &config.TritonConfig{
-			ModelName: "test_model",
-			ServerID:  "test_server",
-		},
-	}
-
-	grpcConn := createMockTritonConn(ctx, t, listener)
-	evaluator := createMockGRPCTritonEvaluator(t, cfg, grpcConn)
-	defer evaluator.Close()
+	stopper, client := createClient(t, ctx, mock)
+	defer stopper()
 
 	params := []interface{}{
 		[][]string{{"test"}},
 	}
 
-	_, err := evaluator.Predict(ctx, params)
+	_, err := client.ModelInfer(ctx, "test_model", params, map[int]string{0: "input1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing contents")
 }

@@ -3,8 +3,8 @@ package triton
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
-	"reflect"
 	"time"
 
 	"github.com/viant/mly/service/config"
@@ -25,8 +25,15 @@ type TritonEvaluator struct {
 
 	timeout time.Duration
 
-	signature   *domain.Signature
+	modelID string
+	debug   bool
+
+	signature *domain.Signature
+
+	// maps feeds index to input name
 	indexToName map[int]string
+
+	configuredInputs []*shared.Field
 
 	inputs map[string]*domain.Input
 }
@@ -65,9 +72,10 @@ func NewTritonEvaluator(config *config.Model, tritonClients map[string]TritonCli
 		repositoryExplicit: !isPrivateClient || config.Triton.RepositoryExplicit,
 	}
 
-	if err := evaluator.handleIO(&config.MetaInput); err != nil {
-		return nil, err
-	}
+	evaluator.configuredInputs = config.MetaInput.Inputs
+
+	evaluator.modelID = config.ID
+	evaluator.debug = config.Debug
 
 	return evaluator, nil
 }
@@ -84,6 +92,10 @@ func NewRoutedTritonEvaluator(modelName string, client TritonClient, timeoutMs i
 
 // Predict performs inference via Triton Inference Server
 func (t *TritonEvaluator) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
+	if len(params) == 0 {
+		return nil, fmt.Errorf("no input parameters")
+	}
+
 	requestCtx := ctx
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
@@ -94,87 +106,12 @@ func (t *TritonEvaluator) Predict(ctx context.Context, params []interface{}) ([]
 	return t.client.ModelInfer(requestCtx, t.modelName, params, t.indexToName)
 }
 
-func (t *TritonEvaluator) handleIO(io *shared.MetaInput) error {
-	var inputs []domain.Input
-	var outputs []domain.Output
-
-	indexToName := make(map[int]string)
-
-	mappedInputs := make(map[string]*domain.Input)
-
-	if len(io.Inputs) > 0 {
-		for _, input := range io.Inputs {
-			if !input.Auxiliary {
-				inputs = append(inputs, domain.Input{
-					Name:  input.Name,
-					Index: input.Index,
-				})
-
-				indexToName[input.Index] = input.Name
-			}
-
-			inputType := reflect.TypeOf("")
-			if input.DataType != "" {
-				switch input.DataType {
-				case "string":
-					inputType = reflect.TypeOf("")
-				case "int":
-					inputType = reflect.TypeOf(0)
-				case "int32":
-					inputType = reflect.TypeOf(int32(0))
-				case "int64":
-					inputType = reflect.TypeOf(int64(0))
-				case "float32":
-					inputType = reflect.TypeOf(float32(0))
-				case "float64":
-					inputType = reflect.TypeOf(float64(0))
-				}
-			}
-
-			mappedInputs[input.Name] = &domain.Input{
-				Name:      input.Name,
-				Index:     input.Index,
-				Type:      inputType,
-				Vocab:     false,
-				Auxiliary: input.Auxiliary,
-			}
-		}
-	} else {
-		return fmt.Errorf("missing input configuration for Triton evaluator. " +
-			"Add 'inputs' section to your model configuration YAML with field definitions")
-	}
-
-	if len(io.Outputs) > 0 {
-		for i, output := range io.Outputs {
-			outputs = append(outputs, domain.Output{
-				Name:     output.Name,
-				Index:    i,
-				DataType: output.DataType,
-			})
-		}
-	} else {
-		return fmt.Errorf("missing output configuration for Triton evaluator. " +
-			"Add 'outputs' section to your model configuration YAML with field definitions")
-	}
-
-	t.indexToName = indexToName
-
-	t.signature = &domain.Signature{
-		Inputs:  inputs,
-		Outputs: outputs,
-		Output:  outputs[0],
-	}
-
-	t.inputs = mappedInputs
-
-	return nil
-}
-
 func (t *TritonEvaluator) Signature() *domain.Signature {
 	return t.signature
 }
 
 func (t *TritonEvaluator) Dictionary() *common.Dictionary {
+	// no dictionary
 	return nil
 }
 
@@ -195,33 +132,115 @@ func (t *TritonEvaluator) Close() error {
 	return nil
 }
 
-// ReloadIfNeeded for independent Triton models, reloading is not supported.
+// For independent Triton server models, reloading is not supported.
 func (t *TritonEvaluator) ReloadIfNeeded(ctx context.Context) error {
 	ready, err := t.client.ModelReady(ctx, t.modelName)
 	if err != nil {
 		return fmt.Errorf("failed to check Triton model %s health: %w", t.modelName, err)
 	}
 
-	if ready {
+	if ready && t.signature != nil {
+		// only a health check
 		return nil
 	}
 
-	if !t.repositoryExplicit {
-		return fmt.Errorf("model %s not ready and Triton is not in EXPLICIT Model Control Mode: %w", t.modelName, err)
-	}
+	if !ready {
+		if !t.repositoryExplicit {
+			return fmt.Errorf("model %s not ready and Triton is not in EXPLICIT Model Control Mode: %w", t.modelName, err)
+		}
 
-	err = t.client.ModelLoad(ctx, t.modelName)
-	if err != nil {
-		return fmt.Errorf("failed to load Triton model %s: %w", t.modelName, err)
-	}
+		err = t.client.ModelLoad(ctx, t.modelName)
+		if err != nil {
+			return fmt.Errorf("failed to load Triton model %s: %w", t.modelName, err)
+		}
 
-	ready, err = t.client.ModelReady(ctx, t.modelName)
-	if err != nil {
-		return fmt.Errorf("failed to check Triton model %s health after loading: %w", t.modelName, err)
+		ready, err = t.client.ModelReady(ctx, t.modelName)
+		if err != nil {
+			return fmt.Errorf("failed to check Triton model %s health after loading: %w", t.modelName, err)
+		}
 	}
 
 	if !ready {
 		return fmt.Errorf("model %s is not ready after loading", t.modelName)
+	}
+
+	// we need to get the model metadata and consolidate the signature
+	metadata, err := t.client.ModelMetadata(ctx, t.modelName)
+	if err != nil || metadata == nil {
+		return fmt.Errorf("failed to get Triton model %s metadata: %w", t.modelName, err)
+	}
+
+	mappedInputs := make(map[string]*domain.Input)
+	indexedInputNames := make(map[int]string)
+
+	signatureInputs := make([]domain.Input, len(metadata.Inputs))
+	for i, input := range metadata.Inputs {
+		goType := TritonToGoType(input.Datatype)
+		di := domain.Input{
+			Name: input.Name,
+			// for now, since the request provides a []interface{}, we populate the Index
+			Index:     i,
+			Type:      goType,
+			Vocab:     false,
+			Auxiliary: false,
+		}
+
+		if t.debug {
+			log.Printf("[%s] Triton[%s] input:%s index:%d datatype:%s goType:%s",
+				t.modelID, t.modelName, input.Name, di.Index, input.Datatype, goType.Name())
+		}
+
+		signatureInputs[i] = di
+		mappedInputs[input.Name] = &di
+		indexedInputNames[i] = input.Name
+	}
+
+	t.indexToName = indexedInputNames
+
+	for _, input := range t.configuredInputs {
+		iName := input.Name
+		if _, ok := mappedInputs[iName]; !ok {
+			goType, err := common.DataType(input.DataType)
+			if err != nil {
+				return fmt.Errorf("failed to get data type for %s: %w", iName, err)
+			}
+
+			mappedInputs[iName] = &domain.Input{
+				Name:      iName,
+				Index:     len(mappedInputs),
+				Type:      goType,
+				Vocab:     false,
+				Auxiliary: true,
+			}
+
+			if t.debug {
+				log.Printf("[%s] Triton[%s] auxiliary input:%s goType:%s",
+					t.modelID, t.modelName, iName, goType.Name())
+			}
+		}
+	}
+
+	t.inputs = mappedInputs
+
+	outputs := make([]domain.Output, len(metadata.Outputs))
+	for i, output := range metadata.Outputs {
+		o := domain.Output{
+			Name:  output.Name,
+			Index: len(outputs),
+		}
+
+		goType := TritonToGoType(output.Datatype)
+		o.SetType(goType)
+		o.DataType = goType.Name()
+		o.DataTypeKind = goType.Kind()
+
+		outputs[i] = o
+	}
+
+	t.signature = &domain.Signature{
+		Inputs:  signatureInputs,
+		Outputs: outputs,
+		Output:  outputs[0],
 	}
 
 	return nil
