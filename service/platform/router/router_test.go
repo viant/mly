@@ -92,6 +92,16 @@ func (m *mockTritonClient) ModelUnload(ctx context.Context, modelName string) er
 	}
 	return nil
 }
+func (m *mockTritonClient) ModelMetadata(ctx context.Context, modelName string) (*tricli.ModelMetadata, error) {
+	return &tricli.ModelMetadata{
+		Inputs: []tricli.MetadataTensor{
+			{Name: "input1", Datatype: "INT32"},
+		},
+		Outputs: []tricli.MetadataTensor{
+			{Name: "output1", Datatype: "FP32"},
+		},
+	}, nil
+}
 func (m *mockTritonClient) Close() error { return nil }
 
 func (m *mockTritonClient) snapshotLoadCalls() []string {
