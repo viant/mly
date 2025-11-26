@@ -1,0 +1,23 @@
+init:
+  parentPath: $parent.path
+
+pipeline:
+  test:
+    action: exec:run
+    target: $target
+    checkError: true
+    commands:
+      - /tmp/e2e/mlyc -m sli_triton -a 'sa:b;sl:a;aux:c1'
+      - /tmp/e2e/mlyc -m sli_triton -a 'sa:b;sl:a;aux:c2'
+
+  # assert:
+  #   action: validator:assert
+  #   actual: $AsJSON($test.Cmd[0].Stdout)
+  #   expect: $LoadJSON('${parentPath}/expect.json')
+
+  # assertCache:
+  #   action: validator:assert
+  #   actual: $AsJSON($test.Cmd[1].Stdout)
+  #   expect: $LoadJSON('${parentPath}/expect-cache.json')
+
+

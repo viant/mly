@@ -24,13 +24,18 @@ pipeline:
       request: '@build'
       tasks: '*'
 
+  test:
+    action: run
+    description: run regression test
+    request: '@regression/regression'
+
   stop:
     stop:
       action: run
       request: '@regression/app'
       tasks: stop
 
-  test:
-    action: run
-    description: run regression test
-    request: '@regression/regression'
+    stopSystem:
+      action: run
+      request: '@system'
+      tasks: stop

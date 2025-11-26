@@ -3,11 +3,31 @@ Endpoint:
 
 models:
   - id: sli_triton
-    url: http://localhost:8000
+    url: http://localhost:8070
     platform: triton
     triton:
       modelName: sli_2
       timeout: 5
+    useDict: true
+    debug: false
+    datastore: sli_triton
+    inputs:
+      - name: sa
+        wildcard: true
+      - name: sl
+        wildcard: true
+      - name: aux
+        wildcard: true
+        auxiliary: true
+    outputs:
+      - name: expand
+        dataType: int
+
+  - id: sli_triton_grpc_explicit
+    platform: triton
+    triton:
+      modelName: sli_2
+      serverID: triton_grpc_explicit
     useDict: true
     debug: false
     datastore: sli_triton
@@ -17,11 +37,31 @@ models:
       - aux
     inputs:
       - name: sa
+        wildcard: true
       - name: sl
+        wildcard: true
       - name: aux
+        wildcard: true
         auxiliary: true
     outputs:
       - name: expand
+        dataType: int
+
+  - id: ko_triton
+    platform: triton
+    triton:
+      modelName: ko
+      serverID: triton_grpc_explicit
+    debug: false
+    inputs:
+      - name: buggy_aux
+        auxiliary: true
+      - name: i
+        dataType: int
+    outputs:
+      - name: i0_copy
+        dataType: int
+      - name: i1_copy
         dataType: int
 
   - id: sli
@@ -107,6 +147,15 @@ connections:
     hostnames: localhost
     port: 3000
     timeout: 300
+
+tritonServers:
+  - id: triton_grpc_explicit
+    grpcBaseURL: localhost:8101
+    grpcConnectParams:
+      baseDelayMs: 10
+      multiplier: 2
+      jitter: 0.1
+      maxDelayMs: 150
 
 datastores:
   - id: sli_triton

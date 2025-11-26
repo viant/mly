@@ -14,16 +14,12 @@ pipeline:
 
   assertMetricsInvalid:
     action: validator:assert
-    init:
-      actual: $AsJSON($test.Cmd[3].Stdout)
-    actual: $actual
+    actual: $AsJSON($test.Cmd[3].Stdout)
     expect: $LoadJSON('${parentPath}/metrics.json')
 
   assertMetricsJSONError:
     action: validator:assert
-    init:
-      actual: $AsJSON($test.Cmd[4].Stdout)
-    actual: $actual
+    actual: $AsJSON($test.Cmd[4].Stdout)
     expect: $LoadJSON('${parentPath}/metrics-json.json')
 
 
