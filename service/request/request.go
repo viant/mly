@@ -21,6 +21,8 @@ type Request struct {
 
 	// Passed through to Evaluator.
 	// This is expected to be [numInputs]([batchSize][1]T).
+	// TODO: This shape is fixed, and should be addressed.
+	// Also, the fact that it is a []interface{} is a TensorFlow concern; ideally it should be map[string]interface{}.
 	Feeds []interface{}
 
 	supplied map[string]struct{} // used to check if the required inputs were provided
@@ -57,45 +59,47 @@ func (r *Request) Put(key string, value string) error {
 			return nil
 		}
 
+		inputIndex := input.Index
+
 		switch input.Type.Kind() {
 		case reflect.String:
-			r.Feeds[input.Index] = [][]string{{value}}
+			r.Feeds[inputIndex] = [][]string{{value}}
 		case reflect.Bool:
 			val, err := strconv.ParseBool(value)
 			if err != nil {
 				return fmt.Errorf("failed to parse bool: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = [][]bool{{val}}
+			r.Feeds[inputIndex] = [][]bool{{val}}
 		case reflect.Int:
 			val, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
 				return fmt.Errorf("failed to parse int: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = [][]int{{int(val)}}
+			r.Feeds[inputIndex] = [][]int{{int(val)}}
 		case reflect.Int32:
 			val, err := strconv.ParseInt(value, 10, 32)
 			if err != nil {
 				return fmt.Errorf("failed to parse int32: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = [][]int32{{int32(val)}}
+			r.Feeds[inputIndex] = [][]int32{{int32(val)}}
 		case reflect.Int64:
 			val, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
 				return fmt.Errorf("failed to parse int64: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = [][]int64{{val}}
+			r.Feeds[inputIndex] = [][]int64{{val}}
 		case reflect.Float64:
 			val, err := strconv.ParseFloat(value, 64)
 			if err != nil {
 				return fmt.Errorf("failed to parse float64: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = [][]float64{{val}}
+			r.Feeds[inputIndex] = [][]float64{{val}}
 		case reflect.Float32:
 			val, err := strconv.ParseFloat(value, 32)
 			if err != nil {
 				return fmt.Errorf("failed to parse float32: '%v' for %v, %w", val, key, err)
 			}
-			r.Feeds[input.Index] = [][]float32{{float32(val)}}
+			r.Feeds[inputIndex] = [][]float32{{float32(val)}}
 		default:
 			// TODO add more type support
 			return fmt.Errorf("unsupported input type: %T", reflect.New(input.Type).Interface())
@@ -143,7 +147,14 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 		}
 
 		r.supplied[key] = exists
-		inputValue, err := r.Input.SetAt(input.Index, input.Name, input.Type.Kind())
+
+		inputIndex := input.Index
+
+		if inputIndex >= len(r.Feeds) && !input.Auxiliary {
+			return fmt.Errorf("non-aux input %s index %d is out of range for %d feeds", input.Name, inputIndex, len(r.Feeds))
+		}
+
+		inputValue, err := r.Input.SetAt(inputIndex, input.Name, input.Type.Kind())
 		if err != nil {
 			return err
 		}
@@ -153,7 +164,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 				return err
 			}
 			if !input.Auxiliary {
-				r.Feeds[input.Index] = inputValue.Feed(r.Input.BatchSize)
+				r.Feeds[inputIndex] = inputValue.Feed(r.Input.BatchSize)
 			}
 			return nil
 		}
@@ -168,7 +179,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 				}
 				_ = inputValue.Set(value)
 				if !input.Auxiliary {
-					r.Feeds[input.Index] = [][]string{{value}}
+					r.Feeds[inputIndex] = [][]string{{value}}
 				}
 			case reflect.Bool:
 				var value bool
@@ -176,7 +187,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					return err
 				}
 				if !input.Auxiliary {
-					r.Feeds[input.Index] = [][]bool{{value}}
+					r.Feeds[inputIndex] = [][]bool{{value}}
 				}
 				_ = inputValue.Set(value)
 			case reflect.Int:
@@ -185,7 +196,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					return err
 				}
 				if !input.Auxiliary {
-					r.Feeds[input.Index] = [][]int{{value}}
+					r.Feeds[inputIndex] = [][]int{{value}}
 				}
 				_ = inputValue.Set(value)
 			case reflect.Int32:
@@ -194,7 +205,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					return err
 				}
 				if !input.Auxiliary {
-					r.Feeds[input.Index] = [][]int32{{value}}
+					r.Feeds[inputIndex] = [][]int32{{value}}
 				}
 				_ = inputValue.Set(value)
 			case reflect.Int64:
@@ -203,7 +214,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					return err
 				}
 				if !input.Auxiliary {
-					r.Feeds[input.Index] = [][]int64{{value}}
+					r.Feeds[inputIndex] = [][]int64{{value}}
 				}
 				_ = inputValue.Set(value)
 			case reflect.Float64:
@@ -212,7 +223,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					return err
 				}
 				if !input.Auxiliary {
-					r.Feeds[input.Index] = [][]float64{{value}}
+					r.Feeds[inputIndex] = [][]float64{{value}}
 				}
 				_ = inputValue.Set(value)
 			case reflect.Float32:
@@ -221,7 +232,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 					return err
 				}
 				if !input.Auxiliary {
-					r.Feeds[input.Index] = [][]float32{{float32(value)}}
+					r.Feeds[inputIndex] = [][]float32{{float32(value)}}
 				}
 				_ = inputValue.Set(value)
 			default:

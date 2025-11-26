@@ -28,7 +28,12 @@ func TestDecode(t *testing.T) {
 		inputs[modelInput.Name] = modelInput
 	}
 
-	numInputs := len(modelInputs)
+	nonAuxCount := 0
+	for _, input := range modelInputs {
+		if !input.Auxiliary {
+			nonAuxCount++
+		}
+	}
 
 	testCases := []struct {
 		desc            string
@@ -41,7 +46,7 @@ func TestDecode(t *testing.T) {
 			requestEnc: `{
 	"batch_size": 1,
 	"a2": ["a2_0"],
-	"a1": ["a1_0"], 
+	"a1": ["a1_0"],
 	"a3": ["a3_0"],
 	"cache_key": ["ck1"],
 }`,
@@ -61,7 +66,7 @@ func TestDecode(t *testing.T) {
 			desc: "invalid",
 			requestEnc: `{
 	"batch_size": 1,
-	"a1": ["a1_0"], 
+	"a1": ["a1_0"],
 	"a3": ["a3_0"],
 	"cache_key": ["ck1"],
 }`,
@@ -71,9 +76,9 @@ func TestDecode(t *testing.T) {
 			desc: "duplicate_aux",
 			requestEnc: `{
 	"batch_size": 1,
-	"a1": ["a1_0"], 
-	"a2": ["a1_0"], 
-	"a3": ["a3_0"], 
+	"a1": ["a1_0"],
+	"a2": ["a1_0"],
+	"a3": ["a3_0"],
 	"a3": ["a3_1"],
 	"cache_key": ["ck1"],
 }`,
@@ -83,9 +88,9 @@ func TestDecode(t *testing.T) {
 			desc: "duplicate_input",
 			requestEnc: `{
 	"batch_size": 1,
-	"a1": ["a1_0"], 
-	"a2": ["a2_0"], 
-	"a2": ["a2_1"], 
+	"a1": ["a1_0"],
+	"a2": ["a2_0"],
+	"a2": ["a2_1"],
 	"a3": ["a3_0"],
 	"cache_key": ["ck1"],
 }`,
@@ -101,8 +106,8 @@ func TestDecode(t *testing.T) {
 			desc: "bad_batch_expansion",
 			requestEnc: `{
 	"batch_size": 2,
-	"a1": ["a1_0"], 
-	"a2": ["a2_0", "a2_1"], 
+	"a1": ["a1_0"],
+	"a2": ["a2_0", "a2_1"],
 	"a3": ["a3_0", "a3_1"],
 	"cache_key": ["ck1", "ck2"],
 }`,
@@ -132,7 +137,7 @@ func TestDecode(t *testing.T) {
 	for _, tc := range testCases {
 		r := &Request{
 			inputs: inputs,
-			Feeds:  make([]interface{}, numInputs, numInputs),
+			Feeds:  make([]interface{}, nonAuxCount),
 		}
 
 		err := gojay.Unmarshal([]byte(tc.requestEnc), r)
