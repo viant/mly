@@ -64,7 +64,6 @@ type Service struct {
 
 	// outputs
 	transformer domain.Transformer
-	newStorable func() common.Storable
 
 	// serviceMetric measures validate + model + transformer
 	serviceMetric *gmetric.Operation
@@ -93,6 +92,7 @@ func (s *Service) Config() *config.Model {
 	return s.config
 }
 
+// Signature is invoked after at least 1 successful ReloadIfNeeded().
 func (s *Service) Signature() *domain.Signature {
 	return s.evaluator.Signature()
 }
@@ -307,13 +307,18 @@ func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs a
 
 	atomic.StoreInt32(&s.ReloadOK, 1)
 
+	signature := s.Signature()
+	if signature == nil {
+		return fmt.Errorf("signature could not be determined")
+	}
+
 	s.transformer, err = transform.Get(cfg.Transformer)
 	if err != nil {
 		return err
 	}
 
 	if err = s.initDatastore(cfg, datastores); err != nil {
-		return err
+		return fmt.Errorf("failed to initialize datastore: %w", err)
 	}
 
 	if cfg.Stream != nil {
@@ -407,10 +412,11 @@ func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datast
 
 	signature := s.Signature()
 	if signature == nil {
-		return fmt.Errorf("signature was emtpy")
+		return fmt.Errorf("signature was not provided")
 	}
 
 	if len(cfg.KeyFields) == 0 {
+		// add all inputs from model signature as a key field
 		for _, input := range signature.Inputs {
 			cfg.KeyFields = append(cfg.KeyFields, input.Name)
 		}
@@ -431,10 +437,6 @@ func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datast
 			fields = append(fields, f)
 		}
 		_ = datastoreConfig.FieldsDescriptor(fields)
-	}
-
-	if s.newStorable == nil {
-		s.newStorable = getStorable(datastoreConfig)
 	}
 
 	return nil
