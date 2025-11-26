@@ -16,6 +16,7 @@ type TritonClient interface {
 	ServerReady(ctx context.Context) error
 
 	// inputs is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds)
+	// inputs will never be empty
 	ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error)
 
 	ModelReady(ctx context.Context, modelName string) (bool, error)
