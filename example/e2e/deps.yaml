@@ -3,10 +3,10 @@ init:
 
 pipeline:
   deploy:
-    # set_sdk:
-    #   action: sdk.set
-    #   target: $target
-    #   sdk: go:${goVersion}
+    set_sdk:
+      action: sdk.set
+      target: $target
+      sdk: go:${goVersion}
 
     install_dependencies:
       action: exec:run
