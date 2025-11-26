@@ -21,18 +21,12 @@ func TestDecode(t *testing.T) {
 		},
 	}
 
-	inputs := make(map[string]*domain.Input, len(modelInputs))
+	numInputs := len(modelInputs)
+	inputs := make(map[string]*domain.Input, numInputs)
 
 	for i, modelInput := range modelInputs {
 		modelInput.Index = i
 		inputs[modelInput.Name] = modelInput
-	}
-
-	nonAuxCount := 0
-	for _, input := range modelInputs {
-		if !input.Auxiliary {
-			nonAuxCount++
-		}
 	}
 
 	testCases := []struct {
@@ -135,10 +129,7 @@ func TestDecode(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		r := &Request{
-			inputs: inputs,
-			Feeds:  make([]interface{}, nonAuxCount),
-		}
+		r := NewRequest(numInputs, inputs)
 
 		err := gojay.Unmarshal([]byte(tc.requestEnc), r)
 

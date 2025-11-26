@@ -119,6 +119,8 @@ func (m *MetaInput) OutputByName() map[string]*Field {
 	return outputByName
 }
 
+// TODO look into history of this method then document its purpose.
+// Is "key" key as in "important" or as in "cache key"?
 func (d *MetaInput) KeysLen() int {
 	return len(d.Inputs)
 }

@@ -31,6 +31,8 @@ type Request struct {
 
 	// type metadata from service/tfservice.Service.inputs
 	// see service/tfmodel.(*Service).reconcileIOFromSignature
+	// The key is expected to be the name of the input.
+	// Uses fields Index, Auxiliary, Type, and Name (for debugging)
 	inputs map[string]*domain.Input
 }
 
