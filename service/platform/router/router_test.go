@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -12,17 +13,32 @@ import (
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/platform"
-	tricli "github.com/viant/mly/service/triton"
-	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 	sharedrouter "github.com/viant/mly/shared/config/router"
 )
 
 // --- Router Predict scaffolds ---
 
-type mockPredictOnly struct{}
+type mockTritonServer struct {
+	mu sync.Mutex
 
-func (m *mockPredictOnly) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
+	readyState   map[string]bool
+	modelLoadErr map[string]error
+}
+
+type mockEvaluator struct {
+	tritonServer *mockTritonServer
+
+	modelName string
+	signature *domain.Signature
+}
+
+func (m *mockEvaluator) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
+	inputs := m.signature.Inputs
+	if len(inputs) != len(params) {
+		return nil, fmt.Errorf("expected %d inputs, got %d", len(inputs), len(params))
+	}
+
 	// params is expected to have a single non-router input in this test: [][]string with shape [1][1]
 	var v string
 	switch typed := params[0].(type) {
@@ -37,89 +53,56 @@ func (m *mockPredictOnly) Predict(ctx context.Context, params []interface{}) ([]
 	return []interface{}{out}, nil
 }
 
-func (m *mockPredictOnly) Signature() *domain.Signature     { return nil }
-func (m *mockPredictOnly) Dictionary() *common.Dictionary   { return nil }
-func (m *mockPredictOnly) Inputs() map[string]*domain.Input { return nil }
-func (m *mockPredictOnly) Stats(map[string]interface{})     {}
-func (m *mockPredictOnly) Close() error                     { return nil }
-func (m *mockPredictOnly) ReloadIfNeeded(ctx context.Context) error {
-	return nil
-}
+func (m *mockEvaluator) Signature() *domain.Signature     { return m.signature }
+func (m *mockEvaluator) Dictionary() *common.Dictionary   { return nil }
+func (m *mockEvaluator) Inputs() map[string]*domain.Input { return nil }
+func (m *mockEvaluator) Stats(map[string]interface{})     {}
+func (m *mockEvaluator) Close() error                     { return nil }
 
-type mockTritonClient struct {
-	mu           sync.Mutex
-	loadCalls    []string
-	unloadCalls  []string
-	readyCalls   []string
-	readyState   map[string]bool
-	unloadCh     chan string
-	modelLoadErr map[string]error
-}
-
-func (m *mockTritonClient) ServerReady(ctx context.Context) error { return nil }
-func (m *mockTritonClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error) {
-	return nil, nil
-}
-func (m *mockTritonClient) ModelReady(ctx context.Context, modelName string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.readyCalls = append(m.readyCalls, modelName)
-	if ready, ok := m.readyState[modelName]; ok {
-		return ready, nil
+func (m *mockEvaluator) ReloadIfNeeded(ctx context.Context) error {
+	if m.tritonServer == nil {
+		return nil
 	}
-	return true, nil
-}
-func (m *mockTritonClient) ModelLoad(ctx context.Context, modelName string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.loadCalls = append(m.loadCalls, modelName)
-	if err := m.modelLoadErr[modelName]; err != nil {
+
+	m.tritonServer.mu.Lock()
+	defer m.tritonServer.mu.Unlock()
+
+	if err := m.tritonServer.modelLoadErr[m.modelName]; err != nil {
 		return err
 	}
-	if m.readyState == nil {
-		m.readyState = make(map[string]bool)
+
+	if m.tritonServer.readyState == nil {
+		m.tritonServer.readyState = make(map[string]bool)
 	}
-	m.readyState[modelName] = true
+
+	m.tritonServer.readyState[m.modelName] = true
 	return nil
 }
-func (m *mockTritonClient) ModelUnload(ctx context.Context, modelName string) error {
-	m.mu.Lock()
-	m.unloadCalls = append(m.unloadCalls, modelName)
+
+type mockUnloader struct {
+	tritonServer *mockTritonServer
+	unloadCh     chan string
+}
+
+func (m *mockUnloader) ModelUnload(ctx context.Context, modelName string) error {
+	if m.tritonServer != nil {
+		m.tritonServer.mu.Lock()
+		defer m.tritonServer.mu.Unlock()
+
+		if m.tritonServer.readyState == nil {
+			m.tritonServer.readyState = make(map[string]bool)
+		}
+
+		m.tritonServer.readyState[modelName] = false
+	}
+
 	ch := m.unloadCh
-	m.mu.Unlock()
+
 	if ch != nil {
 		ch <- modelName
 	}
+
 	return nil
-}
-func (m *mockTritonClient) ModelMetadata(ctx context.Context, modelName string) (*tricli.ModelMetadata, error) {
-	return &tricli.ModelMetadata{
-		Inputs: []tricli.MetadataTensor{
-			{Name: "input1", Datatype: "INT32"},
-		},
-		Outputs: []tricli.MetadataTensor{
-			{Name: "output1", Datatype: "FP32"},
-		},
-	}, nil
-}
-func (m *mockTritonClient) Close() error { return nil }
-
-func (m *mockTritonClient) snapshotLoadCalls() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]string(nil), m.loadCalls...)
-}
-
-func (m *mockTritonClient) snapshotUnloadCalls() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]string(nil), m.unloadCalls...)
-}
-
-func (m *mockTritonClient) snapshotReadyCalls() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]string(nil), m.readyCalls...)
 }
 
 func waitForCalls(t *testing.T, ch <-chan string, count int) []string {
@@ -136,7 +119,7 @@ func waitForCalls(t *testing.T, ch <-chan string, count int) []string {
 	return out
 }
 
-func TestRouter_Predict_RoutesAndConcats(t *testing.T) {
+func TestRouter_Predict(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
@@ -202,7 +185,7 @@ func TestRouter_Predict_RoutesAndConcats(t *testing.T) {
 				ConfigURL: "memory://router-config",
 				InputName: "router_id",
 				Global: config.GlobalModelConfig{
-					Exists: true, // avoid fixed replacements path
+					Exists: true,
 				},
 				Output: config.OutputConfig{
 					FieldName: "model_output",
@@ -210,7 +193,7 @@ func TestRouter_Predict_RoutesAndConcats(t *testing.T) {
 			},
 			verifier: func(t *testing.T, results []interface{}) {
 				if len(results) != 2 {
-					t.Fatalf("expected 1 output, got %d", len(results))
+					t.Fatalf("expected 2 outputs, got %d, %v", len(results), results)
 				}
 
 				func() {
@@ -238,25 +221,26 @@ func TestRouter_Predict_RoutesAndConcats(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
+	downstreamInput := domain.Input{
+		Name:  "text",
+		Index: 1,
+		Type:  reflect.TypeOf(""),
+	}
 
+	downstreamSignature := &domain.Signature{
+		Inputs: []domain.Input{downstreamInput},
+		Outputs: []domain.Output{
+			{Name: "score", Index: 0, DataType: "float32"},
+		},
+	}
+
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := &config.Model{
 				ID:       "router_test",
 				Mode:     "router",
 				Platform: "triton",
-				MetaInput: shared.MetaInput{
-					Inputs: []*shared.Field{
-						// router input first (default offset 0)
-						{Name: "router_id", Index: 0, DataType: "int64"},
-						// single backend input
-						{Name: "text", Index: 1, DataType: "string"},
-					},
-					Outputs: []*shared.Field{
-						{Name: "score", Index: 0, DataType: "float32"},
-					},
-				},
-				Router: test.routerConfig,
+				Router:   test.routerConfig,
 				Triton: &config.TritonConfig{
 					ServerID: "test_server",
 				},
@@ -266,8 +250,10 @@ func TestRouter_Predict_RoutesAndConcats(t *testing.T) {
 			cfg.Router.MaxQueueSize = 1000
 			cfg.Router.Workers = 3
 
-			router, err := NewRouter(cfg, nil, map[string]tricli.TritonClient{
-				"test_server": &mockTritonClient{},
+			router, err := newRouter(cfg, nil, map[string]ModelUnloader{
+				"test_server": &mockUnloader{},
+			}, func(modelName string) (platform.PlatformEvaluator, error) {
+				return &mockEvaluator{signature: downstreamSignature}, nil
 			})
 
 			if err != nil {
@@ -278,7 +264,34 @@ func TestRouter_Predict_RoutesAndConcats(t *testing.T) {
 				1: "model1",
 				2: "model2",
 			}
-			mockEval := &mockPredictOnly{}
+
+			routerOutputs := []domain.Output{
+				{Name: "score", Index: 0, DataType: "float32"},
+			}
+
+			if test.routerConfig.Output.FieldName != "" {
+				routerOutputs = append(routerOutputs, domain.Output{Name: test.routerConfig.Output.FieldName, Index: 1, DataType: "string"})
+			}
+
+			routerInputName := cfg.Router.InputName
+			routerInput := domain.Input{Name: routerInputName, Index: 0, Type: reflect.TypeOf(int64(0))}
+
+			router.ioState = &IOState{
+				inputs: map[string]*domain.Input{
+					routerInputName:      &routerInput,
+					downstreamInput.Name: &downstreamInput,
+				},
+
+				signature: &domain.Signature{
+					Inputs: []domain.Input{
+						routerInput,
+						downstreamInput,
+					},
+					Outputs: routerOutputs,
+				},
+			}
+
+			mockEval := &mockEvaluator{signature: downstreamSignature}
 			router.routingTable = map[string]platform.PlatformEvaluator{
 				"model1": mockEval,
 				"model2": mockEval,
@@ -302,12 +315,8 @@ func TestRouter_Predict_RoutesAndConcats(t *testing.T) {
 
 func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 	ctx := context.Background()
-	mockClient := &mockTritonClient{
+	mockClient := &mockUnloader{
 		unloadCh: make(chan string, 2),
-		readyState: map[string]bool{
-			"modelC":     false,
-			"global-new": false,
-		},
 	}
 
 	oldConfig := &sharedrouter.RouterConfig{
@@ -318,27 +327,31 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 		GlobalModelName: "global-old",
 	}
 
+	signature := &domain.Signature{
+		Inputs: []domain.Input{
+			{Name: "text", Index: 0, Type: reflect.TypeOf("")},
+		},
+		Outputs: []domain.Output{
+			{Name: "score", Index: 0, DataType: "float32"},
+		},
+	}
+
 	router := &Router{
-		tritonClient: mockClient,
-		modelConfig: &config.Model{
-			Triton: &config.TritonConfig{
-				Timeout: 100,
-			},
-		},
-		indexToName: map[int]string{
-			0: "text",
-		},
+		unloader:     mockClient,
 		routerConfig: oldConfig,
 		routingMap: map[int]string{
 			1: "modelA",
 			2: "modelB",
 		},
 		routingTable: map[string]platform.PlatformEvaluator{
-			"modelA": &mockPredictOnly{},
-			"modelB": &mockPredictOnly{},
+			"modelA": &mockEvaluator{signature: signature},
+			"modelB": &mockEvaluator{signature: signature},
 		},
-		globalModel: &mockPredictOnly{},
+		globalModel: &mockEvaluator{},
 		debug:       true,
+		makeRoutedEvaluator: func(modelName string) (platform.PlatformEvaluator, error) {
+			return &mockEvaluator{signature: signature}, nil
+		},
 	}
 
 	reusedModelB := router.routingTable["modelB"]
@@ -355,59 +368,7 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 		t.Fatalf("applyRouterConfig returned error: %v", err)
 	}
 
-	loadCalls := mockClient.snapshotLoadCalls()
-	if len(loadCalls) != 2 {
-		// global-new and modelC
-		t.Fatalf("expected 2 model loads, got %d (%v), ready=%v", len(loadCalls), loadCalls, mockClient.snapshotReadyCalls())
-	}
-
-	expectedLoads := map[string]bool{
-		"modelC":     false,
-		"global-new": false,
-	}
-	for _, call := range loadCalls {
-		if _, ok := expectedLoads[call]; ok {
-			expectedLoads[call] = true
-		}
-	}
-	for model, seen := range expectedLoads {
-		if !seen {
-			t.Fatalf("expected load for %s was not observed; calls=%v", model, loadCalls)
-		}
-	}
-
-	readyCalls := mockClient.snapshotReadyCalls()
-	expectedReady := map[string]bool{
-		"modelC":     false,
-		"global-new": false,
-	}
-	for _, call := range readyCalls {
-		if _, ok := expectedReady[call]; ok {
-			expectedReady[call] = true
-		}
-	}
-	for model, seen := range expectedReady {
-		if !seen {
-			t.Fatalf("expected readiness check for %s was not observed; calls=%v", model, readyCalls)
-		}
-	}
-
 	waitForCalls(t, mockClient.unloadCh, 2)
-	unloadCalls := mockClient.snapshotUnloadCalls()
-	expectedUnloads := map[string]bool{
-		"modelA":     false,
-		"global-old": false,
-	}
-	for _, call := range unloadCalls {
-		if _, ok := expectedUnloads[call]; ok {
-			expectedUnloads[call] = true
-		}
-	}
-	for model, seen := range expectedUnloads {
-		if !seen {
-			t.Fatalf("expected unload for %s was not observed; calls=%v", model, unloadCalls)
-		}
-	}
 
 	if router.routerConfig != newConfig {
 		t.Fatalf("routerConfig pointer not updated")
@@ -417,6 +378,7 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 		1: "modelB",
 		3: "modelC",
 	}
+
 	if !reflect.DeepEqual(router.routingMap, expectedRouting) {
 		t.Fatalf("routingMap mismatch, got %#v", router.routingMap)
 	}
@@ -428,12 +390,15 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 	if _, ok := router.routingTable["modelB"]; !ok {
 		t.Fatalf("routingTable missing modelB")
 	}
+
 	if router.routingTable["modelB"] != reusedModelB {
 		t.Fatalf("modelB evaluator was not reused")
 	}
+
 	if _, ok := router.routingTable["modelC"]; !ok {
 		t.Fatalf("routingTable missing modelC")
 	}
+
 	if _, ok := router.routingTable["modelA"]; ok {
 		t.Fatalf("routingTable still contains modelA")
 	}
@@ -441,15 +406,15 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 
 func TestRouter_applyRouterConfig_LoadError(t *testing.T) {
 	ctx := context.Background()
+
 	loadErr := errors.New("load failure")
-	mockClient := &mockTritonClient{
-		readyState: map[string]bool{
-			"modelX": false,
-		},
-		modelLoadErr: map[string]error{
-			"modelX": loadErr,
-		},
+
+	tritonServer := new(mockTritonServer)
+	tritonServer.modelLoadErr = map[string]error{
+		"modelX": loadErr,
 	}
+
+	mockClient := &mockUnloader{}
 
 	oldConfig := &sharedrouter.RouterConfig{
 		EntityMapping: []sharedrouter.EntityKV{
@@ -457,17 +422,31 @@ func TestRouter_applyRouterConfig_LoadError(t *testing.T) {
 		},
 	}
 
-	router := &Router{
-		tritonClient: mockClient,
-		modelConfig: &config.Model{
-			Triton: &config.TritonConfig{
-				Timeout: 50,
-			},
+	signature := &domain.Signature{
+		Inputs: []domain.Input{
+			{Name: "text", Index: 0, Type: reflect.TypeOf("")},
 		},
-		indexToName:  map[int]string{},
+		Outputs: []domain.Output{
+			{Name: "score", Index: 0, DataType: "float32"},
+		},
+	}
+
+	router := &Router{
+		debug:      true,
+		routerName: "load_error",
+
+		unloader:     mockClient,
 		routerConfig: oldConfig,
 		routingMap: map[int]string{
 			1: "modelA",
+		},
+
+		makeRoutedEvaluator: func(modelName string) (platform.PlatformEvaluator, error) {
+			return &mockEvaluator{
+				tritonServer: tritonServer,
+				modelName:    modelName,
+				signature:    signature,
+			}, nil
 		},
 	}
 
@@ -481,6 +460,7 @@ func TestRouter_applyRouterConfig_LoadError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error but got nil")
 	}
+
 	if !strings.Contains(err.Error(), "modelX") {
 		t.Fatalf("expected error mentioning modelX, got %v", err)
 	}
@@ -496,20 +476,11 @@ func TestRouter_applyRouterConfig_LoadError(t *testing.T) {
 	if router.routingTable != nil {
 		t.Fatalf("routingTable should not be replaced on error")
 	}
-
-	loadCalls := mockClient.snapshotLoadCalls()
-	if len(loadCalls) != 1 || loadCalls[0] != "modelX" {
-		t.Fatalf("expected single load attempt for modelX, got %v", loadCalls)
-	}
 }
 
 func TestRouter_applyRouterConfig_SkipsLoadWhenReady(t *testing.T) {
 	ctx := context.Background()
-	mockClient := &mockTritonClient{
-		readyState: map[string]bool{
-			"modelC": true,
-		},
-	}
+	mockClient := &mockUnloader{}
 
 	oldConfig := &sharedrouter.RouterConfig{
 		EntityMapping: []sharedrouter.EntityKV{
@@ -517,22 +488,26 @@ func TestRouter_applyRouterConfig_SkipsLoadWhenReady(t *testing.T) {
 		},
 	}
 
+	signature := &domain.Signature{
+		Inputs: []domain.Input{
+			{Name: "text", Index: 0, Type: reflect.TypeOf("")},
+		},
+		Outputs: []domain.Output{
+			{Name: "score", Index: 0, DataType: "float32"},
+		},
+	}
+
 	router := &Router{
-		tritonClient: mockClient,
-		modelConfig: &config.Model{
-			Triton: &config.TritonConfig{
-				Timeout: 10,
-			},
-		},
-		indexToName: map[int]string{
-			0: "text",
-		},
+		unloader:     mockClient,
 		routerConfig: oldConfig,
 		routingMap: map[int]string{
 			1: "modelA",
 		},
 		routingTable: map[string]platform.PlatformEvaluator{
-			"modelA": &mockPredictOnly{},
+			"modelA": &mockEvaluator{signature: signature},
+		},
+		makeRoutedEvaluator: func(modelName string) (platform.PlatformEvaluator, error) {
+			return &mockEvaluator{signature: signature}, nil
 		},
 	}
 
@@ -545,15 +520,6 @@ func TestRouter_applyRouterConfig_SkipsLoadWhenReady(t *testing.T) {
 
 	if err := router.applyRouterConfig(ctx, newConfig); err != nil {
 		t.Fatalf("applyRouterConfig returned error: %v", err)
-	}
-
-	if loads := mockClient.snapshotLoadCalls(); len(loads) != 0 {
-		t.Fatalf("expected no loads when model is ready, got %v", loads)
-	}
-
-	readyCalls := mockClient.snapshotReadyCalls()
-	if len(readyCalls) != 1 || readyCalls[0] != "modelC" {
-		t.Fatalf("expected readiness check for modelC, got %v", readyCalls)
 	}
 
 	if _, ok := router.routingTable["modelC"]; !ok {

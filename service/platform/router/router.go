@@ -24,66 +24,128 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// Router implements the PlatformEvaluator interface for router mode.
-type Router struct {
-	configURL      string
-	fs             afs.Service
-	configLock     sync.RWMutex
-	configModified *config.Modified
-	routerConfig   *router.RouterConfig
-
-	routingTableLock sync.RWMutex
-	routingMap       map[int]string
-	routingTable     map[string]platform.PlatformEvaluator
-
-	workCh chan *workRequest
-
-	globalModel     platform.PlatformEvaluator
-	fixedEvaluator  platform.Predictor
-	modelOutputName string
-
-	modelConfig  *config.Model
-	routerName   string
-	tritonClient tricli.TritonClient
-
-	signature   *domain.Signature
-	indexToName map[int]string
-	inputs      map[string]*domain.Input
-
-	debug bool
+type IOState struct {
+	inputs    map[string]*domain.Input
+	signature *domain.Signature
 
 	// router input offset is the index of the router input in the inputs array
 	routerInputOffset int
 }
 
-func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricli.TritonClient) (*Router, error) {
+type ModelUnloader interface {
+	ModelUnload(ctx context.Context, modelName string) error
+}
+
+// Router implements the PlatformEvaluator interface for router mode.
+type Router struct {
+	configURL string
+	fs        afs.Service
+
+	// config lock only protects the configModified field
+	configLock     sync.RWMutex
+	configModified *config.Modified
+
+	// routingTableLock protects:
+	// - routerConfig
+	// - routingMap
+	// - routingTable
+	// - globalModel
+	// - ioState
+	routingTableLock sync.RWMutex
+
+	// routerConfig contains the last loaded router configuration
+	routerConfig *router.RouterConfig
+
+	hasGlobalModel      bool
+	makeRoutedEvaluator func(modelName string) (platform.PlatformEvaluator, error)
+
+	routerInputFieldName string
+
+	routingMap   map[int]string
+	routingTable map[string]platform.PlatformEvaluator
+
+	// TODO see if this can be removed, may just need to map via model name
+	globalModel platform.PlatformEvaluator
+
+	// fixedEvaluator is non-nil IFF there is no global model configured
+	fixedEvaluator platform.Predictor
+
+	// fixedEvaluatorFields is for checking all outputs in the signature are replaced
+	fixedEvaluatorFields map[string]struct{}
+	outputConfig         config.OutputConfig
+
+	workCh chan *workRequest
+
+	modelOutputName string
+
+	routerName string
+	debug      bool
+	unloader   ModelUnloader
+
+	ioState *IOState
+}
+
+// NewRouter creates a new Router instance.
+// cfg is expected to be Init()'d and Validate()'d before calling this function.
+func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricli.TritonClient, makeEvaluator func(modelName string) (platform.PlatformEvaluator, error)) (*Router, error) {
+	unloaders := make(map[string]ModelUnloader)
+	for serverID, tritonClient := range tritonClients {
+		unloaders[serverID] = tritonClient
+	}
+
+	return newRouter(cfg, fs, unloaders, makeEvaluator)
+}
+
+// newRouter uses a map[string]ModelUnloader, where ModelUnloader is-a triton.TritonClient, for testing.
+func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]ModelUnloader, makeEvaluator func(modelName string) (platform.PlatformEvaluator, error)) (*Router, error) {
 	if cfg.Router == nil {
 		return nil, fmt.Errorf("router configuration is required")
 	}
 
-	if err := cfg.Router.Validate(); err != nil {
-		return nil, fmt.Errorf("router configuration is invalid: %w", err)
-
-	}
-
-	tritonClient, ok := tritonClients[cfg.Triton.ServerID]
+	unloader, ok := unloaders[cfg.Triton.ServerID]
 	if !ok {
 		return nil, fmt.Errorf("triton client not found for server ID: %s", cfg.Triton.ServerID)
 	}
 
+	var fixedEvaluator *fixedEvaluator
+	var fixedEvaluatorFields map[string]struct{}
+	if !cfg.Router.Global.Exists {
+		replacementsByName := make(map[string]config.PredictionReplacement)
+		for _, repl := range cfg.Router.Global.PredictionReplacements {
+			replacementsByName[repl.Name] = repl
+		}
+
+		var err error
+		fixedEvaluator, err = newFixedEvaluator(cfg.Router.Global.PredictionReplacements)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create fixed evaluator: %w", err)
+		}
+
+		fixedEvaluatorFields = make(map[string]struct{}, len(replacementsByName))
+		for name := range replacementsByName {
+			fixedEvaluatorFields[name] = struct{}{}
+		}
+	}
+
 	r := &Router{
-		configURL:    cfg.Router.ConfigURL,
-		fs:           fs,
-		routerName:   cfg.ID,
-		modelConfig:  cfg,
-		tritonClient: tritonClient,
-		debug:        cfg.Debug,
+		debug:      cfg.Debug,
+		routerName: cfg.ID,
+
+		configURL:           cfg.Router.ConfigURL,
+		fs:                  fs,
+		makeRoutedEvaluator: makeEvaluator,
+
+		unloader:       unloader,
+		outputConfig:   cfg.Router.Output,
+		hasGlobalModel: cfg.Router.Global.Exists,
+
+		modelOutputName: cfg.Router.Output.FieldName,
+
+		fixedEvaluator:       fixedEvaluator,
+		fixedEvaluatorFields: fixedEvaluatorFields,
 	}
 
-	if err := r.handleIO(cfg); err != nil {
-		return nil, fmt.Errorf("failed to handle IO: %w", err)
-	}
-
+	// spawn worker routines
 	r.workCh = make(chan *workRequest, cfg.Router.MaxQueueSize)
 	for i := 0; i < cfg.Router.Workers; i++ {
 		go handleWorkRequests(r.workCh, routerWorkerChannelQueuedSummary.WithLabelValues(r.routerName))
@@ -95,136 +157,6 @@ func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricl
 type preparedReplacement struct {
 	typ   string
 	value interface{}
-}
-
-func (t *Router) handleIO(cfg *config.Model) error {
-	io := &cfg.MetaInput
-
-	if len(io.Inputs) == 0 {
-		return fmt.Errorf("input configuration is required for a router")
-	}
-
-	if len(io.Outputs) == 0 {
-		return fmt.Errorf("output configuration is required for a router")
-	}
-
-	var inputs []domain.Input
-
-	// for declaring the router's inputs
-	mappedInputs := make(map[string]*domain.Input)
-
-	// generate backend input
-	indexToName := make(map[int]string)
-
-	i := 0
-	for _, input := range io.Inputs {
-		if !input.Auxiliary && input.Name != cfg.Router.InputName {
-			inputs = append(inputs, domain.Input{
-				Name:  input.Name,
-				Index: input.Index,
-			})
-
-			indexToName[i] = input.Name
-			i++
-		}
-
-		inputType := reflect.TypeOf("")
-		if input.DataType != "" {
-			switch input.DataType {
-			case "string":
-				inputType = reflect.TypeOf("")
-			case "int":
-				inputType = reflect.TypeOf(0)
-			case "int32":
-				inputType = reflect.TypeOf(int32(0))
-			case "int64":
-				inputType = reflect.TypeOf(int64(0))
-			case "float32", "float":
-				inputType = reflect.TypeOf(float32(0))
-			case "float64":
-				inputType = reflect.TypeOf(float64(0))
-			}
-		}
-
-		mappedInputs[input.Name] = &domain.Input{
-			Name:      input.Name,
-			Index:     len(inputs),
-			Type:      inputType,
-			Vocab:     false,
-			Auxiliary: input.Auxiliary,
-		}
-	}
-
-	var outputs []domain.Output
-	outputByName := make(map[string]domain.Output)
-
-	for i, output := range io.Outputs {
-		outputs = append(outputs, domain.Output{
-			Name:     output.Name,
-			Index:    i,
-			DataType: output.DataType,
-		})
-
-		outputByName[output.Name] = outputs[i]
-	}
-
-	modelOutputName := cfg.Router.Output.FieldName
-	hasModelOutputName := modelOutputName != ""
-
-	if !cfg.Router.Global.Exists {
-		replacementsByName := make(map[string]config.PredictionReplacement)
-		for _, repl := range cfg.Router.Global.PredictionReplacements {
-			replacementsByName[repl.Name] = repl
-		}
-
-		replacementOutputs := make([]config.PredictionReplacement, 0, len(outputs))
-		for _, output := range outputs {
-			if hasModelOutputName && output.Name == modelOutputName {
-				// model-used output field name is handled in a different way
-				continue
-			}
-
-			if _, ok := replacementsByName[output.Name]; !ok {
-				return fmt.Errorf("replacement for output %s not found", output.Name)
-			}
-
-			replacementOutputs = append(replacementOutputs, replacementsByName[output.Name])
-		}
-
-		fixedEvaluator, err := newFixedEvaluator(replacementOutputs)
-		if err != nil {
-			return fmt.Errorf("failed to create fixed evaluator: %w", err)
-		}
-
-		t.fixedEvaluator = fixedEvaluator
-	}
-
-	var modelOutputInOutputs bool = !hasModelOutputName
-	if hasModelOutputName {
-		_, modelOutputInOutputs = outputByName[modelOutputName]
-	}
-
-	if !modelOutputInOutputs {
-		outputs = append(outputs, domain.Output{
-			Name:     modelOutputName,
-			DataType: "string",
-			Index:    len(outputs),
-		})
-	}
-
-	t.modelOutputName = modelOutputName
-
-	t.indexToName = indexToName
-
-	t.signature = &domain.Signature{
-		Inputs:  inputs,
-		Outputs: outputs,
-		Output:  outputs[0],
-	}
-
-	t.inputs = mappedInputs
-
-	return nil
 }
 
 // Predict performs model inference with the given parameters
@@ -252,119 +184,137 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		return nil, err
 	}
 
-	numInputs := len(params)
-
-	r.routingTableLock.RLock()
-	defer r.routingTableLock.RUnlock()
-
-	globalExists := r.modelConfig.Router.Global.Exists
-	reportedGlobalModelName := r.modelConfig.Router.Output.GlobalModelOverride
-	noModelName := r.modelConfig.Router.Output.NoModelID
+	errCh := make(chan error, expectedBatchSize)
+	resultsCh := make(chan offsetResults, expectedBatchSize)
 
 	predictWaitGroup := sync.WaitGroup{}
 	predictWaitGroup.Add(expectedBatchSize)
 
-	errCh := make(chan error, expectedBatchSize)
-	resultsCh := make(chan offsetResults, expectedBatchSize)
+	var signature *domain.Signature
 
-	for batchOffset := range expectedBatchSize {
-		// 1 input is reserved for the router input
-		request := make([]interface{}, numInputs-1)
+	err = func() error {
+		r.routingTableLock.RLock()
+		defer r.routingTableLock.RUnlock()
 
-		var routingValueBatched interface{}
+		if r.ioState == nil {
+			return fmt.Errorf("ioState was not initialized")
+		}
 
-		for inputOffset := range numInputs {
-			debatched, err := shape.Debatch(params[inputOffset], batchOffset)
+		// this assignment isn't strictly required to be atomic as it should never change after initialization
+		signature = r.ioState.signature
+		routerInputOffset := r.ioState.routerInputOffset
+
+		globalExists := r.fixedEvaluator != nil
+
+		reportedGlobalModelName := r.outputConfig.GlobalModelOverride
+		noModelName := r.outputConfig.NoModelID
+
+		numInputs := len(params)
+
+		for batchOffset := range expectedBatchSize {
+			// 1 input is reserved for the router input
+			request := make([]interface{}, numInputs-1)
+
+			var routingValueBatched interface{}
+
+			// TODO support different input ordering per evaluator - see applyRouterConfig() regarding signatures
+			for inputOffset := range numInputs {
+				debatched, err := shape.Debatch(params[inputOffset], batchOffset)
+				if err != nil {
+					return fmt.Errorf("failed to debatch for row %d and input %d: %w", batchOffset, inputOffset, err)
+				}
+
+				if inputOffset < routerInputOffset {
+					request[inputOffset] = debatched
+				} else if inputOffset == routerInputOffset {
+					routingValueBatched = debatched
+				} else {
+					request[inputOffset-1] = debatched
+				}
+			}
+
+			routingValue, err := shape.SqueezeBatch(routingValueBatched)
 			if err != nil {
-				return nil, fmt.Errorf("failed to debatch for row %d and input %d: %w", batchOffset, inputOffset, err)
+				return fmt.Errorf("failed to extract from batch for row %d: %w", batchOffset, err)
 			}
 
-			if inputOffset < r.routerInputOffset {
-				request[inputOffset] = debatched
-			} else if inputOffset == r.routerInputOffset {
-				routingValueBatched = debatched
-			} else {
-				request[inputOffset-1] = debatched
+			var ok bool = true
+			var routingValueInt int
+			switch routingValue := routingValue.(type) {
+			case int:
+				routingValueInt = routingValue
+			case int32:
+				routingValueInt = int(routingValue)
+			case int64:
+				routingValueInt = int(routingValue)
+			default:
+				ok = false
 			}
-		}
 
-		routingValue, err := shape.SqueezeBatch(routingValueBatched)
-		if err != nil {
-			return nil, fmt.Errorf("failed to extract from batch for row %d: %w", batchOffset, err)
-		}
+			if !ok {
+				return fmt.Errorf("routing value is not an int: %v, is %T, for row %d", routingValue, routingValue, batchOffset)
+			}
 
-		var ok bool = true
-		var routingValueInt int
-		switch routingValue := routingValue.(type) {
-		case int:
-			routingValueInt = routingValue
-		case int32:
-			routingValueInt = int(routingValue)
-		case int64:
-			routingValueInt = int(routingValue)
-		default:
-			ok = false
-		}
+			routingValueString, ok := r.routingMap[routingValueInt]
 
-		if !ok {
-			return nil, fmt.Errorf("routing value is not an int: %v, is %T, for row %d", routingValue, routingValue, batchOffset)
-		}
+			var evaluator platform.Predictor
+			if !ok {
+				if globalExists {
+					metricFixedOnly = false
+					// fallback to global model
+					evaluator = r.globalModel
 
-		routingValueString, ok := r.routingMap[routingValueInt]
-
-		var evaluator platform.Predictor
-		if !ok {
-			if globalExists {
-				metricFixedOnly = false
-				// fallback to global model
-				evaluator = r.globalModel
-
-				// override model name
-				if reportedGlobalModelName != "" {
-					routingValueString = reportedGlobalModelName
+					// override model name
+					if reportedGlobalModelName != "" {
+						routingValueString = reportedGlobalModelName
+					}
+				} else {
+					routingValueString = noModelName
+					evaluator = r.fixedEvaluator
 				}
 			} else {
-				routingValueString = noModelName
-				evaluator = r.fixedEvaluator
-			}
-		} else {
-			metricFixedOnly = false
+				metricFixedOnly = false
 
-			var ok bool
-			evaluator, ok = r.routingTable[routingValueString]
-			if !ok {
-				return nil, fmt.Errorf("no evaluator found for routing value: %v", routingValue)
+				var ok bool
+				evaluator, ok = r.routingTable[routingValueString]
+				if !ok {
+					return fmt.Errorf("no evaluator found for routing value: %v", routingValue)
+				}
+			}
+
+			select {
+			case r.workCh <- &workRequest{
+				wg: &predictWaitGroup,
+
+				predictor: evaluator,
+				ctx:       ctx,
+				request:   request,
+
+				queuedTime:         time.Now(),
+				offset:             batchOffset,
+				modelOutputEnabled: r.modelOutputName != "",
+				routingValueString: routingValueString,
+
+				responseCh: resultsCh,
+				errCh:      errCh,
+			}:
+				// continue
+			default:
+				routerPredictDroppedCounter.WithLabelValues(r.routerName).Inc()
+				return fmt.Errorf("work channel is full")
 			}
 		}
 
-		select {
-		case r.workCh <- &workRequest{
-			wg: &predictWaitGroup,
-
-			predictor: evaluator,
-			ctx:       ctx,
-			request:   request,
-
-			queuedTime:         time.Now(),
-			offset:             batchOffset,
-			modelOutputEnabled: r.modelOutputName != "",
-			routingValueString: routingValueString,
-
-			responseCh: resultsCh,
-			errCh:      errCh,
-		}:
-
-			// continue
-		default:
-			routerPredictDroppedCounter.WithLabelValues(r.routerName).Inc()
-			return nil, fmt.Errorf("work channel is full")
-		}
-	}
+		return nil
+	}()
 
 	predictWaitGroup.Wait()
-
 	close(errCh)
 	close(resultsCh)
+
+	if err != nil {
+		return nil, err
+	}
 
 	for err := range errCh {
 		return nil, err
@@ -375,7 +325,7 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		allResults[results.offset] = results.results
 	}
 
-	endResults := make([]interface{}, len(r.signature.Outputs))
+	endResults := make([]interface{}, len(signature.Outputs))
 	for i, results := range allResults {
 		endResults, err = shape.ConcatAxis0(endResults, results)
 		if err != nil {
@@ -387,7 +337,9 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 }
 
 func (r *Router) Signature() *domain.Signature {
-	return r.signature
+	r.routingTableLock.RLock()
+	defer r.routingTableLock.RUnlock()
+	return r.ioState.signature
 }
 
 func (r *Router) Dictionary() *common.Dictionary {
@@ -395,15 +347,29 @@ func (r *Router) Dictionary() *common.Dictionary {
 }
 
 func (r *Router) Inputs() map[string]*domain.Input {
-	return r.inputs
+	r.routingTableLock.RLock()
+	defer r.routingTableLock.RUnlock()
+	return r.ioState.inputs
 }
 
 func (r *Router) Stats(stats map[string]interface{}) {
-
+	// do nothing
 }
 
 func (r *Router) Close() error {
 	return nil
+}
+
+func (r *Router) debugLogf(format string, args ...interface{}) {
+	if r.debug {
+		prefix := "[%s Router] "
+		log.Printf(prefix+format, append([]interface{}{r.routerName}, args...)...)
+	}
+}
+
+type modelSignature struct {
+	name      string
+	signature *domain.Signature
 }
 
 // TODO refactor with service/tfmodel/service.isModified()?
@@ -485,7 +451,7 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 				errStrings = append(errStrings, err.Error())
 			}
 
-			err = fmt.Errorf("one or more model reloading errors: %s", strings.Join(errStrings, "; "))
+			err = fmt.Errorf("reloading errors: %s", strings.Join(errStrings, "; "))
 		}
 
 		r.configLock.RUnlock()
@@ -538,12 +504,25 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 	return nil
 }
 
+// applyRouterConfig will both update evaluators to new configuration state and verify and build the signature
 func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.RouterConfig) error {
 	modelsToUnload := make(map[string]struct{})
 	reuseEvaluators := make(map[string]platform.PlatformEvaluator)
 	var reuseGlobal platform.PlatformEvaluator
 
-	oldConfig := r.routerConfig
+	var finalSignature *domain.Signature
+	var oldConfig *router.RouterConfig
+	func() {
+		r.routingTableLock.RLock()
+		defer r.routingTableLock.RUnlock()
+		if r.ioState != nil {
+			finalSignature = r.ioState.signature
+		}
+
+		reuseGlobal = r.globalModel
+		oldConfig = r.routerConfig
+	}()
+
 	if oldConfig != nil {
 		for _, entity := range oldConfig.EntityMapping {
 			modelsToUnload[entity.ModelName] = struct{}{}
@@ -554,26 +533,24 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 
 		if oldConfig.GlobalModelName != "" {
 			modelsToUnload[oldConfig.GlobalModelName] = struct{}{}
-			reuseGlobal = r.globalModel
 		}
 	}
 
 	newModelMapping := make(map[int]string)
 	for _, entity := range newConfig.EntityMapping {
-		if r.debug {
-			log.Printf("router: add mapping: %d -> %s", entity.EntityID, entity.ModelName)
-		}
+		r.debugLogf("add mapping: %d -> %s", entity.EntityID, entity.ModelName)
 
 		newModelMapping[entity.EntityID] = entity.ModelName
 		delete(modelsToUnload, entity.ModelName)
 	}
 
 	globalModelName := newConfig.GlobalModelName
-	if globalModelName != "" {
-		if r.debug {
-			log.Printf("router: global model: %s", globalModelName)
-		}
+	if globalModelName == "" && r.hasGlobalModel {
+		return fmt.Errorf("global model name is missing")
+	}
 
+	if globalModelName != "" {
+		r.debugLogf("global model: %s", globalModelName)
 		delete(modelsToUnload, globalModelName)
 	}
 
@@ -589,15 +566,10 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 			continue
 		}
 
-		evaluator, err := tricli.NewRoutedTritonEvaluator(
-			model,
-			r.tritonClient,
-			r.modelConfig.Triton.Timeout,
-			r.indexToName,
-		)
+		evaluator, err := r.makeRoutedEvaluator(model)
 
 		if err != nil {
-			return fmt.Errorf("failed to create Triton evaluator for model %s: %w", model, err)
+			return fmt.Errorf("failed to create Routed Evaluator for model %s: %w", model, err)
 		}
 
 		newRoutingTable[model] = evaluator
@@ -613,21 +585,23 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 			globalEvaluator = evaluator
 		} else {
 			var err error
-			globalEvaluator, err = tricli.NewRoutedTritonEvaluator(
-				globalModelName,
-				r.tritonClient,
-				r.modelConfig.Triton.Timeout,
-				r.indexToName,
-			)
-
+			globalEvaluator, err = r.makeRoutedEvaluator(globalModelName)
 			if err != nil {
-				return fmt.Errorf("failed to create Triton evaluator for global model %s: %w", globalModelName, err)
+				return fmt.Errorf("failed to create Routed Evaluator for global model %s: %w", globalModelName, err)
 			}
 		}
 	}
 
 	wg := sync.WaitGroup{}
-	errCh := make(chan error, len(newRoutingTable)+1)
+
+	numWorkers := len(newRoutingTable)
+	if globalEvaluator != nil {
+		numWorkers++
+	}
+
+	errCh := make(chan error, numWorkers)
+	signatureCh := make(chan modelSignature, numWorkers)
+
 	if globalEvaluator != nil {
 		wg.Add(1)
 		go func() {
@@ -643,26 +617,33 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 		go func(model string) {
 			defer wg.Done()
 
-			if r.debug {
-				log.Printf("router: reload model: %s", model)
+			r.debugLogf("reload model: %s", model)
+
+			modelEvaluator := newRoutingTable[model]
+			if err := modelEvaluator.ReloadIfNeeded(ctx); err != nil {
+				r.debugLogf("failed to reload model: %s: %v", model, err)
+				errCh <- fmt.Errorf("failed to reload model %s: %w", model, err)
 			}
 
-			if err := newRoutingTable[model].ReloadIfNeeded(ctx); err != nil {
-				if r.debug {
-					log.Printf("router: failed to reload model: %s: %v", model, err)
-				}
+			evalSig := modelEvaluator.Signature()
 
-				errCh <- fmt.Errorf("failed to reload model %s: %w", model, err)
+			if evalSig == nil {
+				errCh <- fmt.Errorf("model %s signature is nil", model)
+				return
+			}
+
+			signatureCh <- modelSignature{
+				name:      model,
+				signature: evalSig,
 			}
 		}(model)
 	}
 
-	if r.debug {
-		log.Printf("router: wait for reloads")
-	}
+	r.debugLogf("wait for reloads")
 
 	wg.Wait()
 	close(errCh)
+	close(signatureCh)
 
 	if len(errCh) > 0 {
 		var errStrings []string
@@ -672,18 +653,153 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 		return fmt.Errorf("one or more model reloading errors: %s", strings.Join(errStrings, "; "))
 	}
 
+	sigInputMap := make(map[string]*domain.Input)
+	sigOutputMap := make(map[string]*domain.Output)
+
+	// we only create ioState on the first reload
+	var ioState *IOState = new(IOState)
+	if finalSignature != nil {
+		for _, input := range finalSignature.Inputs {
+			sigInputMap[input.Name] = &input
+		}
+
+		for _, output := range finalSignature.Outputs {
+			sigOutputMap[output.Name] = &output
+		}
+	}
+
+	for signature := range signatureCh {
+		// accept first available signature as the final signature
+		if finalSignature == nil {
+			// in the creation of the signature, include the routing input
+
+			finalSignature = signature.signature
+
+			inputOffset := len(finalSignature.Inputs)
+
+			routerInput := domain.Input{
+				Name:  r.routerInputFieldName,
+				Index: inputOffset,
+				Type:  reflect.TypeOf(int64(0)),
+			}
+
+			ioState.routerInputOffset = inputOffset
+
+			finalSignature.Inputs = append(finalSignature.Inputs, routerInput)
+
+			for _, input := range finalSignature.Inputs {
+				sigInputMap[input.Name] = &input
+			}
+
+			if r.modelOutputName != "" {
+				// also, add the selected model output
+				modelOutput := domain.Output{
+					Name:     r.modelOutputName,
+					Index:    len(finalSignature.Outputs),
+					DataType: "string",
+				}
+
+				finalSignature.Outputs = append(finalSignature.Outputs, modelOutput)
+			}
+
+			for _, output := range finalSignature.Outputs {
+				sigOutputMap[output.Name] = &output
+			}
+
+			continue
+		}
+
+		thisSignature := signature.signature
+		// validate signature consistency
+		thisSignatureOutputMap := make(map[string]*domain.Output)
+		for _, output := range thisSignature.Outputs {
+			oldOutput, ok := sigOutputMap[output.Name]
+			if !ok {
+				return fmt.Errorf("signature output %s for model %s not found in the previous signature", output.Name, signature.name)
+			}
+
+			thisSignatureOutputMap[output.Name] = &output
+
+			// TODO permit this
+			if oldOutput.Index != output.Index {
+				return fmt.Errorf("signature output %s for model %s has index %d, and the previous signature has index %d", output.Name, signature.name, output.Index, oldOutput.Index)
+			}
+
+			if oldOutput.DataType != output.DataType {
+				return fmt.Errorf("signature output %s for model %s has data type %s, and the previous signature has data type %s", output.Name, signature.name, output.DataType, oldOutput.DataType)
+			}
+		}
+
+		for expectedOutput := range sigOutputMap {
+			if _, ok := thisSignatureOutputMap[expectedOutput]; !ok && expectedOutput != r.modelOutputName {
+				return fmt.Errorf("signature output %s for was not found in model %s signature", expectedOutput, signature.name)
+			}
+		}
+
+		thisSignatureInputMap := make(map[string]*domain.Input)
+		for _, input := range thisSignature.Inputs {
+			oldInput, ok := sigInputMap[input.Name]
+			if !ok {
+				return fmt.Errorf("signature input %s for model %s not found in the previous signature", input.Name, signature.name)
+			}
+
+			thisSignatureInputMap[input.Name] = &input
+
+			// TODO permit this
+			if oldInput.Index != input.Index {
+				return fmt.Errorf("signature input %s for model %s has index %d, and the previous signature has index %d", input.Name, signature.name, input.Index, oldInput.Index)
+			}
+
+			if !oldInput.Type.ConvertibleTo(input.Type) {
+				return fmt.Errorf("signature input %s for model %s has data type %s, and the previous signature has data type %s", input.Name, signature.name, input.Type.String(), oldInput.Type.String())
+			}
+		}
+
+		for expectedInput := range sigInputMap {
+			if _, ok := thisSignatureInputMap[expectedInput]; !ok && expectedInput != r.routerInputFieldName {
+				return fmt.Errorf("signature input %s for was not found in model %s signature", expectedInput, signature.name)
+			}
+		}
+	}
+
+	if r.fixedEvaluatorFields != nil {
+		// TODO this is actually an acceptable case, but needs to be addressed elsewhere first before it is permitted
+		for field := range r.fixedEvaluatorFields {
+			if _, ok := sigOutputMap[field]; !ok {
+				return fmt.Errorf("fixed evaluator field: %s was not found in the signature outputs", field)
+			}
+		}
+
+		for _, field := range sigOutputMap {
+			if _, ok := r.fixedEvaluatorFields[field.Name]; !ok && field.Name != r.modelOutputName {
+				return fmt.Errorf("signature output %s is not replaced", field.Name)
+			}
+		}
+	}
+
+	ioState.signature = finalSignature
+	ioState.inputs = sigInputMap
+
+	if globalEvaluator != nil {
+		if _, exists := newRoutingTable[globalModelName]; !exists {
+			newRoutingTable[globalModelName] = globalEvaluator
+		}
+	}
+
 	func() {
 		r.routingTableLock.Lock()
 		defer r.routingTableLock.Unlock()
-		if globalEvaluator != nil {
-			if _, exists := newRoutingTable[globalModelName]; !exists {
-				newRoutingTable[globalModelName] = globalEvaluator
-			}
-		}
-		r.globalModel = globalEvaluator
-		r.routingMap = newModelMapping
+
 		r.routerConfig = newConfig
+
+		r.routingMap = newModelMapping
 		r.routingTable = newRoutingTable
+
+		r.globalModel = globalEvaluator
+
+		if r.ioState == nil {
+			r.ioState = ioState
+		}
 	}()
 
 	for model := range modelsToUnload {
@@ -695,7 +811,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 			ctxTo, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if err := r.unloadModel(ctxTo, modelName); err != nil {
-				log.Printf("failed to unload model %s: %v\n", modelName, err)
+				r.debugLogf("failed to unload model %s: %v\n", modelName, err)
 			}
 		}(model)
 	}
@@ -705,7 +821,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 
 func (r *Router) unloadModel(ctx context.Context, modelName string) error {
 	defer routerModelUnloadGauge.WithLabelValues(r.routerName).Dec()
-	if err := r.tritonClient.ModelUnload(ctx, modelName); err != nil {
+	if err := r.unloader.ModelUnload(ctx, modelName); err != nil {
 		return fmt.Errorf("failed to unload model %s: %w", modelName, err)
 	}
 	return nil

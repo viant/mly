@@ -35,7 +35,11 @@ func CreateEvaluator(
 
 	case "triton":
 		if isRouter {
-			return router.NewRouter(cfg, fs, tritonClients)
+			makeEvaluator := func(modelName string) (platform.PlatformEvaluator, error) {
+				return triton.NewRoutedTritonEvaluator(modelName, cfg, tritonClients)
+			}
+
+			return router.NewRouter(cfg, fs, tritonClients, makeEvaluator)
 		}
 
 		return triton.NewTritonEvaluator(cfg, tritonClients)

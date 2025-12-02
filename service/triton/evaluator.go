@@ -70,24 +70,27 @@ func NewTritonEvaluator(config *config.Model, tritonClients map[string]TritonCli
 
 		// clients defined in TritonServers are assumed to be in EXPLICIT mode
 		repositoryExplicit: !isPrivateClient || config.Triton.RepositoryExplicit,
+
+		configuredInputs: config.MetaInput.Inputs,
+
+		modelID: config.ID,
+		debug:   config.Debug,
 	}
-
-	evaluator.configuredInputs = config.MetaInput.Inputs
-
-	evaluator.modelID = config.ID
-	evaluator.debug = config.Debug
 
 	return evaluator, nil
 }
 
-func NewRoutedTritonEvaluator(modelName string, client TritonClient, timeoutMs int, indexToName map[int]string) (*TritonEvaluator, error) {
-	return &TritonEvaluator{
-		client:             client,
-		modelName:          modelName,
-		timeout:            time.Duration(timeoutMs) * time.Millisecond,
-		repositoryExplicit: true,
-		indexToName:        indexToName,
-	}, nil
+// Upward dependency, but provides Evaluators as needed for the service/platform/router module.
+func NewRoutedTritonEvaluator(modelName string, config *config.Model, tritonClients map[string]TritonClient) (*TritonEvaluator, error) {
+	evaluator, err := NewTritonEvaluator(config, tritonClients)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Triton Routed evaluator: %w", err)
+	}
+
+	evaluator.modelName = modelName
+	evaluator.configuredInputs = nil // routed evaluators must not have any additional inputs
+
+	return evaluator, nil
 }
 
 // Predict performs inference via Triton Inference Server

@@ -203,6 +203,11 @@ func (m *Model) Validate() error {
 			return fmt.Errorf("router model %s requires Router configuration", m.ID)
 		}
 
+		if m.Triton == nil {
+			// TODO support TensorFlow
+			return fmt.Errorf("router model %s requires Triton configuration", m.ID)
+		}
+
 		if err := m.Router.Validate(); err != nil {
 			return fmt.Errorf("router model %s config invalid: %w", m.ID, err)
 		}
@@ -268,6 +273,10 @@ func (t *TritonConfig) Init() {
 func (t *TritonConfig) Validate(isRouter bool, urlPresent bool) error {
 	if !isRouter && t.ModelName == "" {
 		return fmt.Errorf("triton ModelName is required")
+	}
+
+	if isRouter && t.ServerID == "" {
+		return fmt.Errorf("triton ServerID is required for router mode")
 	}
 
 	if t.ServerID == "" && !urlPresent {
