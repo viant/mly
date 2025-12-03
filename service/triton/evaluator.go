@@ -13,10 +13,9 @@ import (
 	"github.com/viant/mly/shared/common"
 )
 
-// TritonEvaluator implements PlatformEvaluator for Triton Inference Server via gRPC
+// TritonEvaluator implements service/platform.PlatformEvaluator.
 type TritonEvaluator struct {
-	client TritonClient
-
+	service   *Service
 	modelName string
 
 	// if true, this client is used only for this instance
@@ -30,7 +29,7 @@ type TritonEvaluator struct {
 
 	signature *domain.Signature
 
-	// maps feeds index to input name
+	// maps Feeds index to input name
 	indexToName map[int]string
 
 	configuredInputs []*shared.Field
@@ -39,30 +38,35 @@ type TritonEvaluator struct {
 }
 
 // NewTritonEvaluator creates a new Triton evaluator
-func NewTritonEvaluator(config *config.Model, tritonClients map[string]TritonClient) (*TritonEvaluator, error) {
-	var client TritonClient
+func NewTritonEvaluator(config *config.Model, tritonClients map[string]*Service) (*TritonEvaluator, error) {
+	var service *Service
 
 	isPrivateClient := config.URL != ""
 	timeout := time.Duration(config.Triton.Timeout) * time.Millisecond
 
 	if isPrivateClient {
 		// "Private" URL configuration will only support HTTP
-		client = &HTTPClient{
+		client := &HTTPClient{
 			httpClient: &http.Client{
 				Timeout: timeout,
 			},
 			serverURL: config.URL,
 			debug:     config.Debug,
 		}
+
+		service = &Service{
+			Client: client,
+		}
 	} else {
-		client = tritonClients[config.Triton.ServerID]
-		if client == nil {
+		service = tritonClients[config.Triton.ServerID]
+		if service == nil {
 			return nil, fmt.Errorf("client not found for Triton, server ID: %s", config.Triton.ServerID)
 		}
 	}
 
 	evaluator := &TritonEvaluator{
-		client:    client,
+		service: service,
+
 		modelName: config.Triton.ModelName,
 		timeout:   timeout,
 
@@ -77,11 +81,16 @@ func NewTritonEvaluator(config *config.Model, tritonClients map[string]TritonCli
 		debug:   config.Debug,
 	}
 
+	err := evaluator.registerUsage()
+	if err != nil {
+		return nil, fmt.Errorf("failed to register usage for Triton evaluator: %w", err)
+	}
+
 	return evaluator, nil
 }
 
 // Upward dependency, but provides Evaluators as needed for the service/platform/router module.
-func NewRoutedTritonEvaluator(modelName string, config *config.Model, tritonClients map[string]TritonClient) (*TritonEvaluator, error) {
+func NewRoutedTritonEvaluator(modelName string, config *config.Model, tritonClients map[string]*Service) (*TritonEvaluator, error) {
 	evaluator, err := NewTritonEvaluator(config, tritonClients)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Triton Routed evaluator: %w", err)
@@ -90,7 +99,21 @@ func NewRoutedTritonEvaluator(modelName string, config *config.Model, tritonClie
 	evaluator.modelName = modelName
 	evaluator.configuredInputs = nil // routed evaluators must not have any additional inputs
 
+	err = evaluator.registerUsage()
+	if err != nil {
+		return nil, fmt.Errorf("failed to register usage for Triton Routed evaluator: %w", err)
+	}
+
 	return evaluator, nil
+}
+
+func (t *TritonEvaluator) registerUsage() error {
+	if t.modelName == "" {
+		return fmt.Errorf("model name is required for registering usage")
+	}
+
+	t.service.RegisterUsage(t.modelID, t.modelName)
+	return nil
 }
 
 // Predict performs inference via Triton Inference Server
@@ -106,7 +129,7 @@ func (t *TritonEvaluator) Predict(ctx context.Context, params []interface{}) ([]
 		defer cancel()
 	}
 
-	return t.client.ModelInfer(requestCtx, t.modelName, params, t.indexToName)
+	return t.service.Client.ModelInfer(requestCtx, t.modelName, params, t.indexToName)
 }
 
 func (t *TritonEvaluator) Signature() *domain.Signature {
@@ -129,7 +152,7 @@ func (t *TritonEvaluator) Inputs() map[string]*domain.Input {
 // Close releases Triton client resources and stops health monitoring
 func (t *TritonEvaluator) Close() error {
 	if t.isPrivateClient {
-		return t.client.Close()
+		return t.service.Client.Close()
 	}
 
 	return nil
@@ -137,7 +160,7 @@ func (t *TritonEvaluator) Close() error {
 
 // For independent Triton server models, reloading is not supported.
 func (t *TritonEvaluator) ReloadIfNeeded(ctx context.Context) error {
-	ready, err := t.client.ModelReady(ctx, t.modelName)
+	ready, err := t.service.Client.ModelReady(ctx, t.modelName)
 	if err != nil {
 		return fmt.Errorf("failed to check Triton model %s health: %w", t.modelName, err)
 	}
@@ -152,12 +175,12 @@ func (t *TritonEvaluator) ReloadIfNeeded(ctx context.Context) error {
 			return fmt.Errorf("model %s not ready and Triton is not in EXPLICIT Model Control Mode: %w", t.modelName, err)
 		}
 
-		err = t.client.ModelLoad(ctx, t.modelName)
+		err = t.service.Client.ModelLoad(ctx, t.modelName)
 		if err != nil {
 			return fmt.Errorf("failed to load Triton model %s: %w", t.modelName, err)
 		}
 
-		ready, err = t.client.ModelReady(ctx, t.modelName)
+		ready, err = t.service.Client.ModelReady(ctx, t.modelName)
 		if err != nil {
 			return fmt.Errorf("failed to check Triton model %s health after loading: %w", t.modelName, err)
 		}
@@ -168,7 +191,7 @@ func (t *TritonEvaluator) ReloadIfNeeded(ctx context.Context) error {
 	}
 
 	// we need to get the model metadata and consolidate the signature
-	metadata, err := t.client.ModelMetadata(ctx, t.modelName)
+	metadata, err := t.service.Client.ModelMetadata(ctx, t.modelName)
 	if err != nil || metadata == nil {
 		return fmt.Errorf("failed to get Triton model %s metadata: %w", t.modelName, err)
 	}

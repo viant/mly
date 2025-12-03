@@ -52,7 +52,7 @@ func Build(
 	mux *http.ServeMux,
 	config *Config,
 	datastores map[string]*datastore.Service,
-	tritonClients map[string]triton.TritonClient,
+	tritonServices map[string]*triton.Service,
 	hooks []Hook,
 	metrics *gmetric.Service,
 	promReg prometheus.Registerer,
@@ -129,7 +129,7 @@ func Build(
 				var modelSrv *service.Service
 				var err error
 
-				modelSrv, err = service.New(context.Background(), model, fs, metrics, datastores, tritonClients, sema, cfge.MaxEvaluatorWait, serviceOpts...)
+				modelSrv, err = service.New(context.Background(), model, fs, metrics, datastores, tritonServices, sema, cfge.MaxEvaluatorWait, serviceOpts...)
 
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)

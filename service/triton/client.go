@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// A TritonClient represents a client to a single Triton server.
 type TritonClient interface {
 	ServerReady(ctx context.Context) error
 
@@ -23,11 +24,15 @@ type TritonClient interface {
 
 	ModelLoad(ctx context.Context, modelName string) error
 
-	ModelUnload(ctx context.Context, modelName string) error
+	ModelUnloader
 
 	ModelMetadata(ctx context.Context, modelName string) (*ModelMetadata, error)
 
 	Close() error
+}
+
+type ModelUnloader interface {
+	ModelUnload(ctx context.Context, modelName string) error
 }
 
 // https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#model-metadata-response-json-object `$metadata_tensor`

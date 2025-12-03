@@ -160,6 +160,10 @@ func (m *Model) Init(globalBatchConfig *batchconfig.BatcherConfig) {
 	if m.Router != nil {
 		m.Router.Init()
 	}
+
+	if m.Triton != nil {
+		m.Triton.Init(m.IsRouter())
+	}
 }
 
 func (m *Model) Validate() error {
@@ -183,7 +187,7 @@ func (m *Model) Validate() error {
 			return fmt.Errorf("tensorflow model %s requires URL", m.ID)
 		}
 
-		if m.Mode == "router" {
+		if m.IsRouter() {
 			return fmt.Errorf("tensorflow model %s is not supported in router mode", m.ID)
 		}
 	case "triton":
@@ -191,14 +195,14 @@ func (m *Model) Validate() error {
 			return fmt.Errorf("triton model %s requires Triton configuration", m.ID)
 		}
 
-		if err := m.Triton.Validate(m.Mode == "router", m.URL != ""); err != nil {
+		if err := m.Triton.Validate(m.IsRouter(), m.URL != ""); err != nil {
 			return fmt.Errorf("triton model %s config invalid: %w", m.ID, err)
 		}
 	default:
 		return fmt.Errorf("unsupported platform '%s' for model %s (supported: tensorflow, triton)", platform, m.ID)
 	}
 
-	if m.Mode == "router" {
+	if m.IsRouter() {
 		if m.Router == nil {
 			return fmt.Errorf("router model %s requires Router configuration", m.ID)
 		}
@@ -214,6 +218,10 @@ func (m *Model) Validate() error {
 	}
 
 	return nil
+}
+
+func (m *Model) IsRouter() bool {
+	return m.Mode == "router"
 }
 
 // ConfigCheck is a path to validate relationships with other config entities.
@@ -264,9 +272,13 @@ type TritonConfig struct {
 	Timeout int `json:",omitempty" yaml:",omitempty"`
 }
 
-func (t *TritonConfig) Init() {
+func (t *TritonConfig) Init(isRouter bool) {
 	if t.Timeout == 0 {
 		t.Timeout = 100
+	}
+
+	if isRouter {
+		t.ModelName = ""
 	}
 }
 

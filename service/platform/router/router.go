@@ -19,6 +19,7 @@ import (
 	"github.com/viant/mly/service/platform"
 	"github.com/viant/mly/service/request/shape"
 	tricli "github.com/viant/mly/service/triton"
+	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/config/router"
 	"gopkg.in/yaml.v2"
@@ -32,8 +33,8 @@ type IOState struct {
 	routerInputOffset int
 }
 
-type ModelUnloader interface {
-	ModelUnload(ctx context.Context, modelName string) error
+type UnloadService interface {
+	UnloadModel(ctx context.Context, mlyModelID string, tritonModelName string) error
 }
 
 // Router implements the PlatformEvaluator interface for router mode.
@@ -53,8 +54,8 @@ type Router struct {
 	// - ioState
 	routingTableLock sync.RWMutex
 
-	// routerConfig contains the last loaded router configuration
-	routerConfig *router.RouterConfig
+	// routingConfig contains the last loaded routing configuration
+	routingConfig *router.RoutingConfig
 
 	hasGlobalModel      bool
 	makeRoutedEvaluator func(modelName string) (platform.PlatformEvaluator, error)
@@ -80,24 +81,26 @@ type Router struct {
 
 	routerName string
 	debug      bool
-	unloader   ModelUnloader
+	unloader   UnloadService
 
-	ioState *IOState
+	configuredInputs []*shared.Field
+	ioState          *IOState
 }
 
 // NewRouter creates a new Router instance.
 // cfg is expected to be Init()'d and Validate()'d before calling this function.
-func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricli.TritonClient, makeEvaluator func(modelName string) (platform.PlatformEvaluator, error)) (*Router, error) {
-	unloaders := make(map[string]ModelUnloader)
-	for serverID, tritonClient := range tritonClients {
-		unloaders[serverID] = tritonClient
+// makeEvaluator is expected to register usage for every created Evaluator.
+func NewRouter(cfg *config.Model, fs afs.Service, tritonServices map[string]*tricli.Service, makeEvaluator func(modelName string) (platform.PlatformEvaluator, error)) (*Router, error) {
+	unloaders := make(map[string]UnloadService)
+	for serverID, tritonService := range tritonServices {
+		unloaders[serverID] = tritonService
 	}
 
 	return newRouter(cfg, fs, unloaders, makeEvaluator)
 }
 
 // newRouter uses a map[string]ModelUnloader, where ModelUnloader is-a triton.TritonClient, for testing.
-func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]ModelUnloader, makeEvaluator func(modelName string) (platform.PlatformEvaluator, error)) (*Router, error) {
+func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]UnloadService, makeEvaluator func(modelName string) (platform.PlatformEvaluator, error)) (*Router, error) {
 	if cfg.Router == nil {
 		return nil, fmt.Errorf("router configuration is required")
 	}
@@ -116,6 +119,7 @@ func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]ModelUnlo
 		}
 
 		var err error
+
 		fixedEvaluator, err = newFixedEvaluator(cfg.Router.Global.PredictionReplacements)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create fixed evaluator: %w", err)
@@ -143,6 +147,9 @@ func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]ModelUnlo
 
 		fixedEvaluator:       fixedEvaluator,
 		fixedEvaluatorFields: fixedEvaluatorFields,
+
+		configuredInputs:     cfg.Inputs,
+		routerInputFieldName: cfg.Router.InputName,
 	}
 
 	// spawn worker routines
@@ -374,7 +381,7 @@ type modelSignature struct {
 
 // TODO refactor with service/tfmodel/service.isModified()?
 func (r *Router) isModified(snapshot *config.Modified) bool {
-	if r.routerConfig == nil || r.configModified == nil {
+	if r.routingConfig == nil || r.configModified == nil {
 		return true
 	}
 
@@ -481,7 +488,7 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 		}
 	}
 
-	newConfig := new(router.RouterConfig)
+	newConfig := new(router.RoutingConfig)
 
 	// TODO move this check earlier
 	if strings.Contains(r.configURL, ".yaml") {
@@ -505,13 +512,13 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 }
 
 // applyRouterConfig will both update evaluators to new configuration state and verify and build the signature
-func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.RouterConfig) error {
+func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.RoutingConfig) error {
 	modelsToUnload := make(map[string]struct{})
 	reuseEvaluators := make(map[string]platform.PlatformEvaluator)
 	var reuseGlobal platform.PlatformEvaluator
 
 	var finalSignature *domain.Signature
-	var oldConfig *router.RouterConfig
+	var oldConfig *router.RoutingConfig
 	func() {
 		r.routingTableLock.RLock()
 		defer r.routingTableLock.RUnlock()
@@ -520,7 +527,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 		}
 
 		reuseGlobal = r.globalModel
-		oldConfig = r.routerConfig
+		oldConfig = r.routingConfig
 	}()
 
 	if oldConfig != nil {
@@ -672,15 +679,15 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 		// accept first available signature as the final signature
 		if finalSignature == nil {
 			// in the creation of the signature, include the routing input
-
+			// DANGER: this uses the pointer to the signature, so since the signature is modified, the original signature will be modified!
+			// This doesn't happen in practice, but can cause issues in tests.
 			finalSignature = signature.signature
 
 			inputOffset := len(finalSignature.Inputs)
 
 			routerInput := domain.Input{
-				Name:  r.routerInputFieldName,
-				Index: inputOffset,
-				Type:  reflect.TypeOf(int64(0)),
+				Name: r.routerInputFieldName,
+				Type: reflect.TypeOf(int64(0)),
 			}
 
 			ioState.routerInputOffset = inputOffset
@@ -689,6 +696,25 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 
 			for _, input := range finalSignature.Inputs {
 				sigInputMap[input.Name] = &input
+			}
+
+			for _, input := range r.configuredInputs {
+				_, ok := sigInputMap[input.Name]
+
+				if ok {
+					// the input is configured and already in the self-reported signature
+					continue
+				}
+
+				if !input.Auxiliary {
+					return fmt.Errorf("non-auxiliary input %s for model %s was not in model inputs", input.Name, signature.name)
+				}
+
+				sigInputMap[input.Name] = &domain.Input{
+					Name:      input.Name,
+					Type:      input.RawType(),
+					Auxiliary: input.Auxiliary,
+				}
 			}
 
 			if r.modelOutputName != "" {
@@ -745,6 +771,10 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 
 			thisSignatureInputMap[input.Name] = &input
 
+			if oldInput.Auxiliary {
+				continue
+			}
+
 			// TODO permit this
 			if oldInput.Index != input.Index {
 				return fmt.Errorf("signature input %s for model %s has index %d, and the previous signature has index %d", input.Name, signature.name, input.Index, oldInput.Index)
@@ -790,7 +820,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 		r.routingTableLock.Lock()
 		defer r.routingTableLock.Unlock()
 
-		r.routerConfig = newConfig
+		r.routingConfig = newConfig
 
 		r.routingMap = newModelMapping
 		r.routingTable = newRoutingTable
@@ -810,6 +840,8 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 
 			ctxTo, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
+			r.debugLogf("request to unload model: %s", modelName)
+
 			if err := r.unloadModel(ctxTo, modelName); err != nil {
 				r.debugLogf("failed to unload model %s: %v\n", modelName, err)
 			}
@@ -821,7 +853,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Router
 
 func (r *Router) unloadModel(ctx context.Context, modelName string) error {
 	defer routerModelUnloadGauge.WithLabelValues(r.routerName).Dec()
-	if err := r.unloader.ModelUnload(ctx, modelName); err != nil {
+	if err := r.unloader.UnloadModel(ctx, r.routerName, modelName); err != nil {
 		return fmt.Errorf("failed to unload model %s: %w", modelName, err)
 	}
 	return nil

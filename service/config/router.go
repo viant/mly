@@ -6,7 +6,7 @@ type RouterConfig struct {
 	// Required if Model.Mode is "router".
 	ConfigURL string
 
-	// Required
+	// Required name of the input that will route the request to the backend.
 	InputName string `json:",omitempty" yaml:",omitempty"`
 
 	// Unimplemented.

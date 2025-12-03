@@ -8,7 +8,7 @@ import (
 )
 
 func TestJSON_EncodeDecode_WithGlobal(t *testing.T) {
-	cfg := &RouterConfig{
+	cfg := &RoutingConfig{
 		EntityMapping: []EntityKV{
 			{EntityID: 12345, ModelName: "roas_model_12345_202511121116"},
 			{EntityID: 12347, ModelName: "roas_model_12347_202511111116"},
@@ -22,7 +22,7 @@ func TestJSON_EncodeDecode_WithGlobal(t *testing.T) {
 	expected := `{"entityMapping":[{"entityID":12345,"modelName":"roas_model_12345_202511121116"},{"entityID":12347,"modelName":"roas_model_12347_202511111116"}],"globalModelName":"roas_global_202511111116"}`
 	require.Equal(t, expected, string(data))
 
-	var decoded RouterConfig
+	var decoded RoutingConfig
 	require.NoError(t, json.Unmarshal(data, &decoded))
 
 	require.Equal(t, cfg.GlobalModelName, decoded.GlobalModelName)
@@ -35,7 +35,7 @@ func TestJSON_EncodeDecode_WithGlobal(t *testing.T) {
 
 func TestJSON_Decode_NoGlobal(t *testing.T) {
 	data := []byte(`{"entityMapping":[{"entityID":1,"modelName":"m1"}]}`)
-	var cfg RouterConfig
+	var cfg RoutingConfig
 	require.NoError(t, json.Unmarshal(data, &cfg))
 	require.Empty(t, cfg.GlobalModelName)
 	require.Len(t, cfg.EntityMapping, 1)
@@ -45,7 +45,7 @@ func TestJSON_Decode_NoGlobal(t *testing.T) {
 
 func TestJSON_Decode_EmptyArray(t *testing.T) {
 	data := []byte(`{"entityMapping":[]}`)
-	var cfg RouterConfig
+	var cfg RoutingConfig
 	require.NoError(t, json.Unmarshal(data, &cfg))
 	require.NotNil(t, cfg.EntityMapping)
 	require.Len(t, cfg.EntityMapping, 0)
@@ -53,6 +53,6 @@ func TestJSON_Decode_EmptyArray(t *testing.T) {
 
 func TestJSON_Decode_InvalidEntityID(t *testing.T) {
 	data := []byte(`{"entityMapping":[{"entityID":"oops","modelName":"x"}]}`)
-	var cfg RouterConfig
+	var cfg RoutingConfig
 	require.Error(t, json.Unmarshal(data, &cfg))
 }

@@ -83,13 +83,13 @@ func (m *mockTritonClient) ModelMetadata(ctx context.Context, modelName string) 
 func (m *mockTritonClient) Close() error { return nil }
 
 func newTritonEvaluator(cfg *config.Model, mockClient *mockTritonClient) *TritonEvaluator {
-	cfg.Triton.Init()
+	cfg.Triton.Init(cfg.IsRouter())
 
 	evaluator := &TritonEvaluator{
 		modelName:          cfg.Triton.ModelName,
 		isPrivateClient:    true,
 		repositoryExplicit: false,
-		client:             mockClient,
+		service:            &Service{Client: mockClient},
 		configuredInputs:   cfg.MetaInput.Inputs,
 	}
 

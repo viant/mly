@@ -348,7 +348,7 @@ func New(
 	fs afs.Service,
 	metrics *gmetric.Service,
 	datastores map[string]*datastore.Service,
-	tritonClients map[string]triton.TritonClient,
+	tritonServices map[string]*triton.Service,
 	sema *semaphore.Weighted,
 	maxEvaluatorWait time.Duration,
 	options ...Option,
@@ -363,7 +363,7 @@ func New(
 	cfg.Init(nil)
 
 	// Create platform evaluator context
-	evaluatorContext, err := factory.CreateEvaluator(cfg, fs, metrics, sema, maxEvaluatorWait, tritonClients)
+	evaluatorContext, err := factory.CreateEvaluator(cfg, fs, metrics, sema, maxEvaluatorWait, tritonServices)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create platform evaluator for model %s: %w", cfg.ID, err)
 	}

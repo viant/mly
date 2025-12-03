@@ -22,10 +22,10 @@ func CreateEvaluator(
 	metrics *gmetric.Service,
 	sema *semaphore.Weighted,
 	maxEvaluatorWait time.Duration,
-	tritonClients map[string]triton.TritonClient,
+	tritonServices map[string]*triton.Service,
 ) (platform.PlatformEvaluator, error) {
 	p := cfg.GetPlatform()
-	isRouter := cfg.Mode == "router"
+	isRouter := cfg.IsRouter()
 
 	switch p {
 	case "tensorflow":
@@ -36,13 +36,13 @@ func CreateEvaluator(
 	case "triton":
 		if isRouter {
 			makeEvaluator := func(modelName string) (platform.PlatformEvaluator, error) {
-				return triton.NewRoutedTritonEvaluator(modelName, cfg, tritonClients)
+				return triton.NewRoutedTritonEvaluator(modelName, cfg, tritonServices)
 			}
 
-			return router.NewRouter(cfg, fs, tritonClients, makeEvaluator)
+			return router.NewRouter(cfg, fs, tritonServices, makeEvaluator)
 		}
 
-		return triton.NewTritonEvaluator(cfg, tritonClients)
+		return triton.NewTritonEvaluator(cfg, tritonServices)
 	default:
 		return nil, fmt.Errorf("unsupported platform: %s for model %s", p, cfg.ID)
 	}
