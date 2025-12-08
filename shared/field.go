@@ -15,7 +15,6 @@ type (
 		Index int
 
 		// The type of the field.
-		// Supports "float" which maps to float32.
 		// Otherwise, refer to reflect.Type.Name().
 		DataType string `json:",omitempty" yaml:",omitempty"`
 
@@ -78,9 +77,6 @@ func (f *Field) DataTypeToRawType() {
 // fieldDataTypeToRawType is a subset of reverse Name() to reflect.Type
 func fieldDataTypeToRawType(dataType string) reflect.Type {
 	switch dataType {
-	case "float":
-		// provided as a convenience
-		return reflect.TypeOf(float32(0))
 	case "":
 		// this case is treated as string in common.DataType(), but here it's not OK.
 		panic(fmt.Sprintf("unsupported data type: %s", dataType))

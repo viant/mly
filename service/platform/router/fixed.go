@@ -71,7 +71,7 @@ func newFixedEvaluator(repls []config.PredictionReplacement) (*fixedEvaluator, e
 				default:
 					return fmt.Errorf("router replacement %q: value %T not coercible to int64", r.Name, r.Value)
 				}
-			case "float", "float32":
+			case "float32":
 				switch n := r.Value.(type) {
 				case int:
 					pr = preparedReplacement{typ: "float32", value: float32(n)}
@@ -182,8 +182,6 @@ func (f *fixedEvaluator) Predict(ctx context.Context, params []interface{}) ([]i
 			results[i] = makeInt32(repl.value.(int32))
 		case "int64":
 			results[i] = makeInt64(repl.value.(int64))
-		case "float":
-			results[i] = makeFloat32(repl.value.(float32))
 		case "float32":
 			results[i] = makeFloat32(repl.value.(float32))
 		case "float64":
