@@ -6,10 +6,12 @@ package buckets
 
 var MicrosecondBuckets []float64 = []float64{
 	100, 500,
+	// 1 millisecond
 	1000, 2000, 3000, 5000, 7500,
 	10000, 20000, 30000, 50000, 75000,
 	100000, 200000, 400000, 800000,
-	1000000,
+	// 1 second
+	1000000, 2000000,
 }
 
 var MillisecondBuckets []float64 = []float64{
@@ -28,8 +30,9 @@ var SecondBuckets []float64 = []float64{
 }
 
 var CommonSummaryObjectives = map[float64]float64{
-	0.5:  0.05,
-	0.9:  0.01,
-	0.95: 0.005,
-	0.99: 0.001,
+	0.5:   0.05,
+	0.9:   0.01,
+	0.95:  0.005,
+	0.99:  0.001,
+	0.999: 0.001,
 }

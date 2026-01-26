@@ -53,7 +53,7 @@ func NewStoresV4(cfg *config.DatastoreList, gmetrics *gmetric.Service, verbose b
 				continue
 			}
 
-			aero, err := client.NewWithOptions(connection, clientOptions...)
+			aero, err := client.NewWithOptionsV2(connection, gmetrics, clientOptions...)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create client for %v, due to %w", connID, err)
 			}

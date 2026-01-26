@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/francoispqt/gojay"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/shared/client/config"
 	"github.com/viant/mly/shared/common"
@@ -66,6 +68,17 @@ type Service struct {
 	httpCliCounter *gmetric.Operation
 	dictCounter    *gmetric.Operation
 
+	// PrometheusRegisterer is used to register Prometheus metrics.
+	// If not provided, the default Prometheus registry will be used.
+	PrometheusRegisterer prometheus.Registerer
+
+	// noPrometheusSummaries is used to disable Prometheus summaries.
+	// If true, only histograms will be registered and used.
+	// See https://prometheus.io/docs/practices/histograms for guidance.
+	noPrometheusSummaries bool
+
+	prometheusMetrics prometheusMetrics
+
 	ErrorHistory tracker.Tracker
 }
 
@@ -80,15 +93,21 @@ func (s *Service) NewMessage() *Message {
 // input can vary in types, but if it is an instance of Cachable, then the configured
 // caching system will be used.
 func (s *Service) Run(ctx context.Context, input interface{}, response *Response) error {
-	onDone := s.counter.Begin(time.Now())
+	startTime := time.Now()
+	onDone := s.counter.Begin(startTime)
 	stats := stat.NewValues()
+
 	defer func() {
 		onDone(time.Now(), *stats...)
+
+		duration := time.Since(startTime).Microseconds()
+		s.prometheusMetrics.observeRunDuration(float64(duration))
 		s.releaseMessage(input)
 	}()
 
 	if ctx.Err() != nil {
 		stats.Append(stat.EarlyCtxError)
+		s.prometheusMetrics.runErrorEarlyCtxCounter.Inc()
 	}
 
 	if response.Data == nil {
@@ -107,6 +126,8 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		cachedCount, err = s.loadFromCache(ctx, &cached, batchSize, response, cachable)
 		if err != nil {
 			stats.AppendError(err)
+			s.prometheusMetrics.runBaseErrorCounters.Observe(err)
+
 			if ctx.Err() == nil && s.ErrorHistory != nil {
 				go s.ErrorHistory.AddBytes([]byte(err.Error()))
 			}
@@ -123,6 +144,8 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 		s.reportBatch(cachedCount, cached)
 	}
 
+	s.prometheusMetrics.observeBatchSize(float64(batchSize))
+
 	if (batchSize > 0 && cachedCount == batchSize) || (batchSize == 0 && cachedCount > 0) {
 		response.Status = common.StatusCached
 		return s.handleResponse(ctx, response.Data, cached, cachable)
@@ -131,6 +154,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	data, err := Marshal(input, modelName)
 	if err != nil {
 		stats.AppendError(err)
+		s.prometheusMetrics.runBaseErrorCounters.Observe(err)
 		return err
 	}
 
@@ -140,13 +164,18 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}
 
 	body, err := func() ([]byte, error) {
-		httpOnDone := s.httpCounter.Begin(time.Now())
+		startTime := time.Now()
+		httpOnDone := s.httpCounter.Begin(startTime)
 		httpStats := stat.NewValues()
 
-		od := metric.EnterThenExit(s.httpCounter, time.Now(), stat.Enter, stat.Exit)
+		od := metric.EnterThenExit(s.httpCounter, startTime, stat.Enter, stat.Exit)
 
 		defer func() {
 			httpOnDone(time.Now(), httpStats.Values()...)
+
+			duration := time.Since(startTime).Microseconds()
+			s.prometheusMetrics.observeHttpDuration(float64(duration))
+
 			od()
 		}()
 
@@ -158,6 +187,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 		if err != nil {
 			httpStats.AppendError(err)
+			s.prometheusMetrics.httpBaseErrorCounters.Observe(err)
 		}
 
 		return body, err
@@ -165,6 +195,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 	if err != nil {
 		stats.AppendError(err)
+		s.prometheusMetrics.runBaseErrorCounters.Observe(err)
 		if ctx.Err() == nil && s.ErrorHistory != nil {
 			go s.ErrorHistory.AddBytes([]byte(err.Error()))
 		}
@@ -175,6 +206,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	err = gojay.Unmarshal(body, response)
 	if err != nil {
 		stats.AppendError(err)
+		s.prometheusMetrics.runBaseErrorCounters.Observe(err)
 		return fmt.Errorf("failed to unmarshal: '%s'; due to %w", body, err)
 	}
 
@@ -188,6 +220,7 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 	if err = s.handleResponse(ctx, response.Data, cached, cachable); err != nil {
 		stats.AppendError(err)
+		s.prometheusMetrics.runBaseErrorCounters.Observe(err)
 		return fmt.Errorf("failed to handle resp: %w", err)
 	}
 
@@ -224,6 +257,7 @@ func (s *Service) loadFromCache(ctx context.Context, cached *[]interface{}, batc
 		response.Status = common.StatusCached
 		response.DictHash = dictHash
 	}
+
 	return cachedCount, nil
 }
 
@@ -257,6 +291,7 @@ func (s *Service) readFromCacheInBatch(ctx context.Context, batchSize int, dataT
 	return cachedCount, err
 }
 
+// readFromCache will return an error if target is not a pointer.
 func (s *Service) readFromCache(ctx context.Context, key string, target interface{}) (bool, int, error) {
 	if s.datastore == nil || !s.datastore.Enabled() {
 		return false, 0, nil
@@ -264,7 +299,7 @@ func (s *Service) readFromCache(ctx context.Context, key string, target interfac
 
 	dataType := reflect.TypeOf(target)
 	if dataType.Kind() != reflect.Ptr {
-		return false, 0, fmt.Errorf("invalid response data type: expeted ptr but had: %T", target)
+		return false, 0, fmt.Errorf("invalid response data type: expected reflect.Ptr but had: %T", target)
 	}
 
 	storeKey := s.datastore.Key(key)
@@ -292,6 +327,15 @@ func (s *Service) dictionary() *Dictionary {
 	return dict
 }
 
+func (s *Service) registerPrometheusMetrics() error {
+	pr := prometheus.DefaultRegisterer
+	if s.PrometheusRegisterer != nil {
+		pr = s.PrometheusRegisterer
+	}
+
+	return s.prometheusMetrics.registerPrometheusMetrics(pr, s.Model, s.noPrometheusSummaries)
+}
+
 func (s *Service) init() error {
 	if s.gmetrics == nil {
 		s.gmetrics = gmetric.New()
@@ -303,6 +347,11 @@ func (s *Service) init() error {
 	s.httpCliCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientHTTPCli", s.Model+" client HTTP client performance", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly())
 	s.dictCounter = s.gmetrics.MultiOperationCounter(location, s.Model+"ClientDict", s.Model+" client dictionary performance", time.Microsecond, time.Minute, 1, stat.ErrorOnly())
 
+	err := s.registerPrometheusMetrics()
+	if err != nil {
+		return fmt.Errorf("failed to register Prometheus metrics: %w", err)
+	}
+
 	if s.ErrorHistory == nil {
 		s.ErrorHistory = mg.NewK(20)
 	}
@@ -311,7 +360,7 @@ func (s *Service) init() error {
 		s.Config.MaxRetry = 3
 	}
 
-	err := s.initHTTPClient()
+	err = s.initHTTPClient()
 	if err != nil {
 		return err
 	}
@@ -604,6 +653,11 @@ func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values
 	// TODO per-host counters
 	host, err := s.getHost()
 	if err != nil {
+		if errors.Is(err, common.ErrNodeDown) {
+			mvt.Append(stat.Down)
+			s.prometheusMetrics.httpDownCounter.Inc()
+		}
+
 		return nil, err
 	}
 
@@ -614,7 +668,10 @@ func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values
 		if s.Config.Debug {
 			log.Printf("[%s postRequest] connection error:%s", s.Config.Model, err)
 		}
+
 		mvt.Append(stat.Down)
+		s.prometheusMetrics.httpDownCounter.Inc()
+
 		host.FlagDown()
 	}
 
@@ -627,16 +684,21 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 	var postErr error
 	for i := 0; i < s.MaxRetry; i++ {
 		data, err := func() ([]byte, error) {
-			onDone := s.httpCliCounter.Begin(time.Now())
+			startTime := time.Now()
+			onDone := s.httpCliCounter.Begin(startTime)
 			stats := stat.NewValues()
 
 			defer func() {
 				onDone(time.Now(), stats.Values()...)
+
+				duration := time.Since(startTime).Microseconds()
+				s.prometheusMetrics.observeHttpClientDuration(float64(duration))
 			}()
 
 			request, err := http.NewRequestWithContext(ctx, http.MethodPost, evalUrl, bytes.NewReader(data))
 			if err != nil {
 				stats.AppendError(err)
+				s.prometheusMetrics.httpClientBaseErrorCounters.Observe(err)
 				return nil, err
 			}
 
@@ -647,6 +709,7 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 
 			if err != nil {
 				stats.AppendError(err)
+				s.prometheusMetrics.httpClientBaseErrorCounters.Observe(err)
 				return nil, err
 			}
 
