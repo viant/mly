@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/expfmt"
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/endpoint/checker"
 	"github.com/viant/mly/shared/client"
@@ -187,6 +190,20 @@ func RunWithOptions(runOpts *Options) error {
 		tops := cli.ErrorHistory.TopK()
 		for _, t := range tops {
 			fmt.Printf("%d %s\n", t.Count, string(t.Data))
+		}
+	}
+
+	if runOpts.Prometheus {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		if err != nil {
+			return fmt.Errorf("failed to gather prometheus metrics: %w", err)
+		}
+
+		encoder := expfmt.NewEncoder(os.Stdout, expfmt.FmtText)
+		for _, mf := range mfs {
+			if err := encoder.Encode(mf); err != nil {
+				return fmt.Errorf("failed to encode metric family %s: %w", mf.GetName(), err)
+			}
 		}
 	}
 

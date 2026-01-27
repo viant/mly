@@ -11,75 +11,14 @@ import (
 	"github.com/viant/mly/shared/stat/promc"
 )
 
+const (
+	promDescRunDuration        = "Duration of client Run calls."
+	promDescHTTPDuration       = "Duration of client HTTP calls, including retries."
+	promDescHTTPClientDuration = "Duration of client HTTP client calls."
+	promDescBatchSize          = "Size of client batches."
+)
+
 var (
-	// end-to-end duration
-
-	runDurationSummaryMicros = prometheus.NewSummaryVec(
-		prometheus.SummaryOpts{
-			Namespace:  "mly",
-			Subsystem:  "client",
-			Name:       "run_duration_summary_us",
-			Help:       "Duration of client Run calls.",
-			Objectives: buckets.CommonSummaryObjectives,
-		},
-		[]string{"model"},
-	)
-
-	runDurationHistogramMicros = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "mly",
-			Subsystem: "client",
-			Name:      "run_duration_histogram_us",
-			Help:      "Duration of client Run calls.",
-			Buckets:   buckets.MicrosecondBuckets,
-		},
-		[]string{"model"},
-	)
-
-	httpDurationSummaryMicros = prometheus.NewSummaryVec(
-		prometheus.SummaryOpts{
-			Namespace:  "mly",
-			Subsystem:  "client",
-			Name:       "http_duration_summary_us",
-			Help:       "Duration of client HTTP calls including retries.",
-			Objectives: buckets.CommonSummaryObjectives,
-		},
-		[]string{"model"},
-	)
-
-	httpDurationHistogramMicros = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "mly",
-			Subsystem: "client",
-			Name:      "http_duration_histogram_us",
-			Help:      "Duration of client HTTP calls including retries.",
-			Buckets:   buckets.MicrosecondBuckets,
-		},
-		[]string{"model"},
-	)
-
-	httpClientDurationSummaryMicros = prometheus.NewSummaryVec(
-		prometheus.SummaryOpts{
-			Namespace:  "mly",
-			Subsystem:  "client",
-			Name:       "http_client_duration_summary_us",
-			Help:       "Duration of client HTTP client calls.",
-			Objectives: buckets.CommonSummaryObjectives,
-		},
-		[]string{"model"},
-	)
-
-	httpClientDurationHistogramMicros = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "mly",
-			Subsystem: "client",
-			Name:      "http_client_duration_histogram_us",
-			Help:      "Duration of client HTTP client calls.",
-			Buckets:   buckets.MicrosecondBuckets,
-		},
-		[]string{"model"},
-	)
-
 	// EarlyCtxError
 	// loadFromCache error - this can only be a type error from Response.DataItemType(), (*Service).readFromCache()
 
@@ -111,30 +50,6 @@ var (
 			Help:      "Number of client HTTP client errors.",
 		},
 		[]string{"model", "error"},
-	)
-
-	// batch size
-
-	batchSizeSummary = prometheus.NewSummaryVec(
-		prometheus.SummaryOpts{
-			Namespace:  "mly",
-			Subsystem:  "client",
-			Name:       "batch_size_summary",
-			Help:       "Size of client batches.",
-			Objectives: buckets.CommonSummaryObjectives,
-		},
-		[]string{"model"},
-	)
-
-	batchSizeHistogram = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "mly",
-			Subsystem: "client",
-			Name:      "batch_size_histogram",
-			Help:      "Size of client batches.",
-			Buckets:   buckets.MicrosecondBuckets,
-		},
-		[]string{"model"},
 	)
 )
 
@@ -228,11 +143,33 @@ func (m *prometheusMetrics) registerPrometheusMetrics(registerer prometheus.Regi
 
 	var err error
 	if !noPrometheusSummaries {
+		runDurationSummaryMicros := prometheus.NewSummaryVec(
+			prometheus.SummaryOpts{
+				Namespace:  "mly",
+				Subsystem:  "client",
+				Name:       "run_duration_summary_us",
+				Help:       promDescRunDuration,
+				Objectives: buckets.CommonSummaryObjectives,
+			},
+			[]string{"model"},
+		)
+
 		err = register(runDurationSummaryMicros)
 		if err != nil {
 			return err
 		}
 		m.runDurationSummary = runDurationSummaryMicros.WithLabelValues(model)
+
+		batchSizeSummary := prometheus.NewSummaryVec(
+			prometheus.SummaryOpts{
+				Namespace:  "mly",
+				Subsystem:  "client",
+				Name:       "batch_size_summary",
+				Help:       promDescBatchSize,
+				Objectives: buckets.CommonSummaryObjectives,
+			},
+			[]string{"model"},
+		)
 
 		err = register(batchSizeSummary)
 		if err != nil {
@@ -240,11 +177,33 @@ func (m *prometheusMetrics) registerPrometheusMetrics(registerer prometheus.Regi
 		}
 		m.batchSizeSummary = batchSizeSummary.WithLabelValues(model)
 
+		httpDurationSummaryMicros := prometheus.NewSummaryVec(
+			prometheus.SummaryOpts{
+				Namespace:  "mly",
+				Subsystem:  "client",
+				Name:       "http_duration_summary_us",
+				Help:       promDescHTTPDuration,
+				Objectives: buckets.CommonSummaryObjectives,
+			},
+			[]string{"model"},
+		)
+
 		err = register(httpDurationSummaryMicros)
 		if err != nil {
 			return err
 		}
 		m.httpDurationSummary = httpDurationSummaryMicros.WithLabelValues(model)
+
+		httpClientDurationSummaryMicros := prometheus.NewSummaryVec(
+			prometheus.SummaryOpts{
+				Namespace:  "mly",
+				Subsystem:  "client",
+				Name:       "http_client_duration_summary_us",
+				Help:       promDescHTTPClientDuration,
+				Objectives: buckets.CommonSummaryObjectives,
+			},
+			[]string{"model"},
+		)
 
 		err = register(httpClientDurationSummaryMicros)
 		if err != nil {
@@ -253,23 +212,65 @@ func (m *prometheusMetrics) registerPrometheusMetrics(registerer prometheus.Regi
 		m.httpClientDurationSummary = httpClientDurationSummaryMicros.WithLabelValues(model)
 	}
 
+	runDurationHistogramMicros := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "mly",
+			Subsystem: "client",
+			Name:      "run_duration_histogram_us",
+			Help:      promDescRunDuration,
+			Buckets:   buckets.MicrosecondBuckets,
+		},
+		[]string{"model"},
+	)
+
 	err = register(runDurationHistogramMicros)
 	if err != nil {
 		return err
 	}
 	m.runDurationHistogram = runDurationHistogramMicros.WithLabelValues(model)
 
+	batchSizeHistogram := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "mly",
+			Subsystem: "client",
+			Name:      "batch_size_histogram",
+			Help:      promDescBatchSize,
+			Buckets:   []float64{1, 2, 3, 4, 5, 7, 10, 12, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100},
+		},
+		[]string{"model"},
+	)
 	err = register(batchSizeHistogram)
 	if err != nil {
 		return err
 	}
 	m.batchSizeHistogram = batchSizeHistogram.WithLabelValues(model)
 
+	httpDurationHistogramMicros := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "mly",
+			Subsystem: "client",
+			Name:      "http_duration_histogram_us",
+			Help:      promDescHTTPDuration,
+			Buckets:   buckets.MicrosecondBuckets,
+		},
+		[]string{"model"},
+	)
 	err = register(httpDurationHistogramMicros)
 	if err != nil {
 		return err
 	}
 	m.httpDurationHistogram = httpDurationHistogramMicros.WithLabelValues(model)
+
+	httpClientDurationHistogramMicros := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "mly",
+			Subsystem: "client",
+			Name:      "http_client_duration_histogram_us",
+			Help:      promDescHTTPClientDuration,
+			Buckets:   buckets.MicrosecondBuckets,
+		},
+		[]string{"model"},
+	)
 
 	err = register(httpClientDurationHistogramMicros)
 	if err != nil {

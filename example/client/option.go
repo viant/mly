@@ -37,8 +37,11 @@ type Options struct {
 
 	SkipError bool `long:"skiperrs"`
 
-	NoOutput     bool `long:"noout"`
-	Metrics      bool `long:"metrics"`
+	// NoOutput suppresses model outputs.
+	NoOutput bool `long:"noout"`
+
+	Metrics      bool `long:"metrics" description:"print gmetric metrics"`
+	Prometheus   bool `long:"prometheus" description:"print prometheus metrics"`
 	ErrorHistory bool `long:"errhist"`
 
 	// Report forces NoOutput and SkipError true, Metrics and ErrorHistory false.
