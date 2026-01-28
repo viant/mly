@@ -41,7 +41,7 @@ func TestPut(t *testing.T) {
 		ID: "test",
 	}
 	config.Init()
-
+	
 	service, _ := NewWithOptionsV2(config, nil)
 	service.Client = mockAero
 
