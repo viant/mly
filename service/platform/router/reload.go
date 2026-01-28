@@ -505,7 +505,6 @@ func (r *Router) isModified(snapshot *config.Modified) bool {
 }
 
 func (r *Router) unloadModel(ctx context.Context, modelName string) error {
-	defer routerModelUnloadGauge.WithLabelValues(r.routerName).Dec()
 	if err := r.unloader.UnloadModel(ctx, r.routerName, modelName); err != nil {
 		return fmt.Errorf("failed to unload model %s: %w", modelName, err)
 	}
