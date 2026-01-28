@@ -30,7 +30,7 @@ type PlatformEvaluator interface {
 	// This will be invoked after at least 1 ReloadIfNeeded() succeeds.
 	Inputs() map[string]*domain.Input
 
-	// Stats returns platform-specific live metrics, for debugging
+	// Deprecated: Do not use or implement. Stats returns platform-specific live metrics, for debugging purposes
 	Stats(stats map[string]interface{})
 
 	Close() error
