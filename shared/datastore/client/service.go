@@ -240,6 +240,7 @@ func NewWithOptionsV2(config *datastore.Connection, gmetrics *gmetric.Service, o
 	}
 
 	srv.init(options...)
+
 	breaker := circut.New(time.Second, srv)
 	srv.Breaker = breaker
 	return srv, srv.connect()

@@ -9,7 +9,7 @@ import (
 
 	aero "github.com/aerospike/aerospike-client-go"
 	"github.com/viant/mly/shared/circut"
-	"golang.org/x/sync/singleflight"
+	"github.com/viant/mly/shared/config/datastore"
 )
 
 type MockAero struct {
@@ -37,13 +37,13 @@ func TestPut(t *testing.T) {
 		L: mockLock,
 	}
 
-	service := &Service{
-		Client: mockAero,
-		group:  new(singleflight.Group),
-		basePolicy: &aero.BasePolicy{
-			TotalTimeout: 15 * time.Second,
-		},
+	config := &datastore.Connection{
+		ID: "test",
 	}
+	config.Init()
+
+	service, _ := NewWithOptionsV2(config, nil)
+	service.Client = mockAero
 
 	breaker := circut.New(time.Second, service)
 	service.Breaker = breaker
