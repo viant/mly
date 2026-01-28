@@ -39,6 +39,19 @@ type TritonEvaluator struct {
 
 // NewTritonEvaluator creates a new Triton evaluator
 func NewTritonEvaluator(config *config.Model, tritonClients map[string]*Service) (*TritonEvaluator, error) {
+	evaluator, err := createEvaluator(config, tritonClients)
+	if err != nil {
+		return nil, err
+	}
+	err = evaluator.registerUsage()
+	if err != nil {
+		return nil, fmt.Errorf("failed to register usage for Triton evaluator: %w", err)
+	}
+
+	return evaluator, nil
+}
+
+func createEvaluator(config *config.Model, tritonClients map[string]*Service) (*TritonEvaluator, error) {
 	var service *Service
 
 	isPrivateClient := config.URL != ""
@@ -81,17 +94,13 @@ func NewTritonEvaluator(config *config.Model, tritonClients map[string]*Service)
 		debug:   config.Debug,
 	}
 
-	err := evaluator.registerUsage()
-	if err != nil {
-		return nil, fmt.Errorf("failed to register usage for Triton evaluator: %w", err)
-	}
-
 	return evaluator, nil
+
 }
 
 // Upward dependency, but provides Evaluators as needed for the service/platform/router module.
 func NewRoutedTritonEvaluator(modelName string, config *config.Model, tritonClients map[string]*Service) (*TritonEvaluator, error) {
-	evaluator, err := NewTritonEvaluator(config, tritonClients)
+	evaluator, err := createEvaluator(config, tritonClients)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Triton Routed evaluator: %w", err)
 	}
