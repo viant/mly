@@ -7,8 +7,8 @@ pipeline:
     target: $target
     checkError: true
     commands:
-      - /tmp/e2e/mlyc -m sli_triton -a 'sa:b;sl:a;aux:c1'
-      - /tmp/e2e/mlyc -m sli_triton -a 'sa:b;sl:a;aux:c2'
+      - /tmp/e2e/mlyc -m sli_router -a 'routing_id|int:1;sa:b;sl:a'
+      - /tmp/e2e/mlyc -m sli_router -a 'routing_id|int:2;sa:b;sl:a'
 
   # assert:
   #   action: validator:assert
@@ -19,5 +19,3 @@ pipeline:
   #   action: validator:assert
   #   actual: $AsJSON($test.Cmd[1].Stdout)
   #   expect: $LoadJSON('${parentPath}/expect-cache.json')
-
-

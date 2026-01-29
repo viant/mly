@@ -26,7 +26,7 @@ models:
   - id: sli_triton_grpc_explicit
     platform: triton
     triton:
-      modelName: sli_2
+      modelName: sli_exp
       serverID: triton_grpc_explicit
     useDict: true
     debug: false
@@ -46,6 +46,44 @@ models:
     outputs:
       - name: expand
         dataType: int
+
+  - id: sli_router
+    platform: triton
+    mode: router
+    triton:
+      serverID: triton_grpc_explicit
+    Router:
+      ConfigURL: ${appPath}/example/server/etc/router.yaml
+      InputName: routing_id
+      Workers: 2
+      Global:
+        Exists: false
+        PredictionReplacements:
+          - Name: expand
+            Type: int64
+            Value: 0
+      Output:
+        FieldName: model_id
+    Datastore: sli_triton
+    useDict: true
+    Inputs:
+      - name: routing_id
+        datatype: int64
+        wildcard: true
+      - name: sl
+        datatype: string
+        wildcard: true
+      - name: sa
+        datatype: string
+        wildcard: true
+    Outputs:
+      - name: expand
+        datatype: int64
+      - name: model_id
+        datatype: string
+
+    Test:
+      SingleBatch: true
 
   - id: ko_triton
     platform: triton

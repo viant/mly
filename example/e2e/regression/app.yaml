@@ -18,7 +18,7 @@ pipeline:
     directory: /tmp/e2e
     checkError: true
     immuneToHangups: true
-    command: ./mly-endly -c=/tmp/e2e/config.yaml 2>&1 >/tmp/e2e/mly-endly.log
+    command: bash ${appPath}/example/e2e/start-with-pid.sh /tmp/e2e/mly-endly.pid ./mly-endly -c=/tmp/e2e/config.yaml >/tmp/e2e/mly-endly.log 2>&1
     env:
       DEBUG: 'true'
       LD_LIBRARY_PATH: /usr/local/lib
@@ -28,5 +28,4 @@ pipeline:
     target: $target
     checkError: true
     commands:
-      - bash ${appPath}/example/e2e/check-port.sh localhost:8086 30
-
+      - bash ${appPath}/example/e2e/check-port.sh localhost:8086 30 1s /tmp/e2e/mly-endly.pid

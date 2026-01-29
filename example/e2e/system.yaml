@@ -25,6 +25,8 @@ pipeline:
       - cp -r ${appPath}/example/model/string_lookups_int_model/* ${modelRepo}/sli_1/1/model.savedmodel
       - mkdir -p ${modelRepo}/sli_2/1/model.savedmodel
       - cp -r ${appPath}/example/model/string_lookups_int_model/* ${modelRepo}/sli_2/1/model.savedmodel
+      - mkdir -p ${modelRepo}/sli_exp/1/model.savedmodel
+      - cp -r ${appPath}/example/model/string_lookups_int_model/* ${modelRepo}/sli_exp/1/model.savedmodel
       - mkdir -p ${modelRepo}/r2/1/model.savedmodel
       - cp -r ${appPath}/example/model/r2_output_model/* ${modelRepo}/r2/1/model.savedmodel
       - mkdir -p ${modelRepo}/ko/1/model.savedmodel
