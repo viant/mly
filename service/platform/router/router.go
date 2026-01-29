@@ -22,7 +22,7 @@ type IOState struct {
 	inputs    map[string]*domain.Input
 	signature *domain.Signature
 
-	// router input offset is the index of the router input in the inputs array
+	// router input offset is the index of the routing input in the inputs array
 	routerInputOffset int
 }
 
@@ -62,7 +62,7 @@ type Router struct {
 	globalModel platform.PlatformEvaluator
 
 	// fixedEvaluator is non-nil IFF there is no global model configured
-	fixedEvaluator platform.Predictor
+	fixedEvaluator *fixedEvaluator
 
 	// fixedEvaluatorFields is for checking all outputs in the signature are replaced
 	fixedEvaluatorFields map[string]struct{}
@@ -157,38 +157,36 @@ func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]UnloadSer
 	return r, nil
 }
 
-type preparedReplacement struct {
-	typ   string
-	value interface{}
-}
-
 // modelBatch holds accumulated rows destined for a single model evaluator
 type modelBatch struct {
-	evaluator  platform.Predictor
-	modelName  string
-	inputs     []interface{} // [numInputs][]interface{} - accumulated batched inputs
-	rowOffsets []int         // original positions in the incoming batch
+	evaluator    platform.PlatformEvaluator // need Signature() for input reordering
+	isFixedEval  bool                       // true if using fixedEvaluator (no reordering needed)
+	modelName    string
+	inputsByName map[string]interface{} // keyed by input name - accumulated batched inputs
+	rowOffsets   []int                  // original positions in the incoming batch
 }
 
 // batchResult holds the result from a batched model prediction
 type batchResult struct {
-	modelName string
-	results   []interface{}
-	offsets   []int
-	err       error
+	modelName   string
+	results     []interface{}
+	offsets     []int
+	err         error
+	outputNames []string // output names in the order returned by evaluator (for reordering)
 }
 
 // Predict performs model inference with the given parameters.
 // params is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds).
 //
 // Rows are grouped into batches based on their target model evaluator.
-// When ForceBatchSize1 is true, each row forms its own batch (batch size 1).
-// When ForceBatchSize1 is false (default), rows destined for the same model are grouped together.
+// When forceBatchSize1 is true, each row forms its own batch (batch size 1).
+// When forceBatchSize1 is false (default), rows destined for the same model are batched together.
 func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
 	if len(params) == 0 {
 		return nil, fmt.Errorf("no input parameters provided")
 	}
 
+	// metricFixedOnly is true if the request is only using the fixedEvaluator
 	metricFixedOnly := true
 	start := time.Now()
 	defer func() {
@@ -213,9 +211,7 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 	r.routingTableLock.RLock()
 	defer r.routingTableLock.RUnlock()
 
-	// Phase 1: Group rows into batches
-	// When forceBatchSize1 is true, each row gets a unique batch key (row offset as string)
-	// When false, rows are grouped by model name
+	// Phase 1: Group rows into batches by name
 	err = func() error {
 		if r.ioState == nil {
 			return fmt.Errorf("ioState was not initialized")
@@ -224,12 +220,11 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		signature = r.ioState.signature
 		routerInputOffset := r.ioState.routerInputOffset
 
-		globalExists := r.fixedEvaluator != nil
+		hasFixedEvaluator := r.fixedEvaluator != nil
 		reportedGlobalModelName := r.outputConfig.GlobalModelOverride
 		noModelName := r.outputConfig.NoModelID
 
 		numInputs := len(params)
-		numModelInputs := numInputs - 1 // exclude router input
 
 		for batchOffset := range expectedBatchSize {
 			// Extract routing value for this row
@@ -257,17 +252,19 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 			routingValueString, ok := r.routingMap[routingValueInt]
 
-			var evaluator platform.Predictor
+			var evaluator platform.PlatformEvaluator
+			isFixedEval := false
 			if !ok {
-				if globalExists {
+				if hasFixedEvaluator {
+					// No global model, use fixed evaluator (returns constant values)
+					routingValueString = noModelName
+					isFixedEval = true
+				} else {
 					metricFixedOnly = false
 					evaluator = r.globalModel
 					if reportedGlobalModelName != "" {
 						routingValueString = reportedGlobalModelName
 					}
-				} else {
-					routingValueString = noModelName
-					evaluator = r.fixedEvaluator
 				}
 			} else {
 				metricFixedOnly = false
@@ -287,31 +284,33 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			batch, exists := batches[batchKey]
 			if !exists {
 				batch = &modelBatch{
-					evaluator:  evaluator,
-					modelName:  routingValueString,
-					inputs:     make([]interface{}, numModelInputs),
-					rowOffsets: make([]int, 0, 1),
+					evaluator:    evaluator,
+					isFixedEval:  isFixedEval,
+					modelName:    routingValueString,
+					inputsByName: make(map[string]interface{}),
+					rowOffsets:   make([]int, 0, 1),
 				}
 				batches[batchKey] = batch
 			}
 
 			// Append this row's inputs to the batch (excluding router input)
-			inputIdx := 0
+			// Use signature to resolve input names for name-based accumulation
 			for paramOffset := range numInputs {
 				if paramOffset == routerInputOffset {
 					continue
 				}
 
+				inputName := signature.Inputs[paramOffset].Name
+
 				debatched, err := shape.Debatch(params[paramOffset], batchOffset)
 				if err != nil {
-					return fmt.Errorf("failed to debatch for row %d, input %d: %w", batchOffset, paramOffset, err)
+					return fmt.Errorf("failed to debatch for row %d, input %s: %w", batchOffset, inputName, err)
 				}
 
-				batch.inputs[inputIdx], err = shape.AppendRowToBatch(batch.inputs[inputIdx], debatched)
+				batch.inputsByName[inputName], err = shape.AppendRowToBatch(batch.inputsByName[inputName], debatched)
 				if err != nil {
-					return fmt.Errorf("failed to append row %d to batch for input %d: %w", batchOffset, paramOffset, err)
+					return fmt.Errorf("failed to append row %d to batch for input %s: %w", batchOffset, inputName, err)
 				}
-				inputIdx++
 			}
 
 			batch.rowOffsets = append(batch.rowOffsets, batchOffset)
@@ -344,8 +343,45 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
-			// Rely on downstream for timeouts
-			results, err := b.evaluator.Predict(ctx, b.inputs)
+			// Reorder inputs to match each evaluator's expected order before calling Predict
+			var results []interface{}
+			var err error
+			var outputNames []string
+
+			if b.isFixedEval {
+				// Fixed evaluator returns constant values
+				// Pass any accumulated input so it can determine batch size
+				var fixedInputs []interface{}
+				for _, inputData := range b.inputsByName {
+					fixedInputs = append(fixedInputs, inputData)
+					break // only need one input for batch size
+				}
+				results, err = r.fixedEvaluator.Predict(ctx, fixedInputs)
+				outputNames = r.fixedEvaluator.OutputNames()
+			} else {
+				// Reorder inputs to match this evaluator's expected order
+				evalSig := b.evaluator.Signature()
+				orderedInputs := make([]interface{}, len(evalSig.Inputs))
+				for i, sigInput := range evalSig.Inputs {
+					inputData, exists := b.inputsByName[sigInput.Name]
+					if !exists {
+						err = fmt.Errorf("input %s not found in batch for model %s", sigInput.Name, b.modelName)
+						break
+					}
+					orderedInputs[i] = inputData
+				}
+
+				if err == nil {
+					// Rely on downstream for timeouts
+					results, err = b.evaluator.Predict(ctx, orderedInputs)
+
+					// Capture output names for reordering in Phase 3
+					outputNames = make([]string, len(evalSig.Outputs))
+					for i, out := range evalSig.Outputs {
+						outputNames[i] = out.Name
+					}
+				}
+			}
 
 			// Append model name to results if configured
 			if r.modelOutputName != "" && err == nil {
@@ -354,13 +390,15 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 					modelNames[i] = []string{b.modelName}
 				}
 				results = append(results, modelNames)
+				outputNames = append(outputNames, r.modelOutputName)
 			}
 
 			resultCh <- batchResult{
-				modelName: b.modelName,
-				results:   results,
-				offsets:   b.rowOffsets,
-				err:       err,
+				modelName:   b.modelName,
+				results:     results,
+				offsets:     b.rowOffsets,
+				err:         err,
+				outputNames: outputNames,
 			}
 		}(batch)
 	}
@@ -369,6 +407,12 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 	close(resultCh)
 
 	// Phase 3: Reassemble results in original order
+	// Build router output name -> index mapping for reordering
+	routerOutputIndex := make(map[string]int, len(signature.Outputs))
+	for i, out := range signature.Outputs {
+		routerOutputIndex[out.Name] = i
+	}
+
 	allResults := make([][]interface{}, expectedBatchSize)
 
 	for res := range resultCh {
@@ -377,15 +421,32 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		}
 
 		// Extract individual rows from the batched result and place at original offsets
+		// Reorder outputs to match router's expected output order
 		for localIdx, originalOffset := range res.offsets {
-			rowResult := make([]interface{}, len(res.results))
-			for outputIdx, outputBatch := range res.results {
+			rowResult := make([]interface{}, len(signature.Outputs))
+			for evalOutputIdx, outputBatch := range res.results {
 				extracted, err := shape.ExtractRowFromBatch(outputBatch, localIdx)
 				if err != nil {
 					return nil, fmt.Errorf("failed to extract row %d from model %s output %d: %w",
-						localIdx, res.modelName, outputIdx, err)
+						localIdx, res.modelName, evalOutputIdx, err)
 				}
-				rowResult[outputIdx] = extracted
+
+				// Map evaluator output index to router output index by name
+				var routerIdx int
+				if res.outputNames == nil {
+					// Fallback: assume same order (shouldn't happen in normal operation)
+					routerIdx = evalOutputIdx
+				} else {
+					outputName := res.outputNames[evalOutputIdx]
+					var exists bool
+					routerIdx, exists = routerOutputIndex[outputName]
+					if !exists {
+						return nil, fmt.Errorf("output %s from model %s not found in router signature",
+							outputName, res.modelName)
+					}
+				}
+
+				rowResult[routerIdx] = extracted
 			}
 			allResults[originalOffset] = rowResult
 		}

@@ -8,8 +8,24 @@ import (
 	"github.com/viant/mly/service/request/shape"
 )
 
+// preparedReplacement holds a pre-parsed replacement value for fixed evaluator outputs
+type preparedReplacement struct {
+	name  string
+	typ   string
+	value interface{}
+}
+
 type fixedEvaluator struct {
 	prepared []preparedReplacement
+}
+
+// OutputNames returns the output names in the order they will be returned by Predict
+func (f *fixedEvaluator) OutputNames() []string {
+	names := make([]string, len(f.prepared))
+	for i, p := range f.prepared {
+		names[i] = p.name
+	}
+	return names
 }
 
 func newFixedEvaluator(repls []config.PredictionReplacement) (*fixedEvaluator, error) {
@@ -105,6 +121,7 @@ func newFixedEvaluator(repls []config.PredictionReplacement) (*fixedEvaluator, e
 				return fmt.Errorf("unsupported router replacement type %q for %q", r.Type, r.Name)
 			}
 
+			pr.name = r.Name
 			prepared = append(prepared, pr)
 		}
 

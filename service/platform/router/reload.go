@@ -307,16 +307,20 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 	for signature := range signatureCh {
 		// accept first available signature as the final signature
 		if finalSignature == nil {
-			// in the creation of the signature, include the routing input
-			// DANGER: this uses the pointer to the signature, so since the signature is modified, the original signature will be modified!
-			// This doesn't happen in practice, but can cause issues in tests.
-			finalSignature = signature.signature
+			srcSig := signature.signature
+			finalSignature = &domain.Signature{
+				Inputs:  make([]domain.Input, len(srcSig.Inputs), len(srcSig.Inputs)+1),
+				Outputs: make([]domain.Output, len(srcSig.Outputs)),
+			}
+			copy(finalSignature.Inputs, srcSig.Inputs)
+			copy(finalSignature.Outputs, srcSig.Outputs)
 
 			inputOffset := len(finalSignature.Inputs)
 
 			routerInput := domain.Input{
-				Name: r.routerInputFieldName,
-				Type: reflect.TypeOf(int64(0)),
+				Name:  r.routerInputFieldName,
+				Type:  reflect.TypeOf(int64(0)),
+				Index: inputOffset,
 			}
 
 			ioState.routerInputOffset = inputOffset
@@ -375,11 +379,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 
 			thisSignatureOutputMap[output.Name] = &output
 
-			// TODO permit this
-			if oldOutput.Index != output.Index {
-				return fmt.Errorf("signature output %s for model %s has index %d, and the previous signature has index %d", output.Name, signature.name, output.Index, oldOutput.Index)
-			}
-
+			// Note: Index differences are permitted - outputs are matched by name
 			if oldOutput.DataType != output.DataType {
 				return fmt.Errorf("signature output %s for model %s has data type %s, and the previous signature has data type %s", output.Name, signature.name, output.DataType, oldOutput.DataType)
 			}
@@ -404,11 +404,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 				continue
 			}
 
-			// TODO permit this
-			if oldInput.Index != input.Index {
-				return fmt.Errorf("signature input %s for model %s has index %d, and the previous signature has index %d", input.Name, signature.name, input.Index, oldInput.Index)
-			}
-
+			// Note: Index differences are permitted - inputs are reordered by name at dispatch time
 			if !oldInput.Type.ConvertibleTo(input.Type) {
 				return fmt.Errorf("signature input %s for model %s has data type %s, and the previous signature has data type %s", input.Name, signature.name, input.Type.String(), oldInput.Type.String())
 			}
