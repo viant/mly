@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/viant/afs"
@@ -79,10 +80,14 @@ type Router struct {
 
 	// forceBatchSize1 when true uses legacy per-sample dispatch; when false (default) uses batched dispatch
 	forceBatchSize1 bool
-	// workers limits concurrent model evaluations (used as semaphore capacity in batch mode)
-	workers int
+
+	// workerSemaphore limits concurrent model evaluations
+	workerSemaphore chan struct{}
+
 	// maxQueueSize limits queued batches before rejection
-	maxQueueSize int
+	maxQueueSize uint64
+
+	queued *atomic.Uint64
 }
 
 // NewRouter creates a new Router instance.
@@ -99,7 +104,8 @@ func NewRouter(cfg *config.Model, fs afs.Service, tritonServices map[string]*tri
 
 // newRouter uses a map[string]ModelUnloader, where ModelUnloader is-a triton.TritonClient, for testing.
 func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]UnloadService, makeEvaluator func(modelName string) (platform.PlatformEvaluator, error)) (*Router, error) {
-	if cfg.Router == nil {
+	rtCfg := cfg.Router
+	if rtCfg == nil {
 		return nil, fmt.Errorf("router configuration is required")
 	}
 
@@ -110,15 +116,15 @@ func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]UnloadSer
 
 	var fixedEvaluator *fixedEvaluator
 	var fixedEvaluatorFields map[string]struct{}
-	if !cfg.Router.Global.Exists {
+	if !rtCfg.Global.Exists {
 		replacementsByName := make(map[string]config.PredictionReplacement)
-		for _, repl := range cfg.Router.Global.PredictionReplacements {
+		for _, repl := range rtCfg.Global.PredictionReplacements {
 			replacementsByName[repl.Name] = repl
 		}
 
 		var err error
 
-		fixedEvaluator, err = newFixedEvaluator(cfg.Router.Global.PredictionReplacements)
+		fixedEvaluator, err = newFixedEvaluator(rtCfg.Global.PredictionReplacements)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create fixed evaluator: %w", err)
 		}
@@ -133,25 +139,26 @@ func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]UnloadSer
 		debug:      cfg.Debug,
 		routerName: cfg.ID,
 
-		configURL:           cfg.Router.ConfigURL,
+		configURL:           rtCfg.ConfigURL,
 		fs:                  fs,
 		makeRoutedEvaluator: makeEvaluator,
 
 		unloader:       unloader,
-		outputConfig:   cfg.Router.Output,
-		hasGlobalModel: cfg.Router.Global.Exists,
+		outputConfig:   rtCfg.Output,
+		hasGlobalModel: rtCfg.Global.Exists,
 
-		modelOutputName: cfg.Router.Output.FieldName,
+		modelOutputName: rtCfg.Output.FieldName,
 
 		fixedEvaluator:       fixedEvaluator,
 		fixedEvaluatorFields: fixedEvaluatorFields,
 
 		configuredInputs:     cfg.Inputs,
-		routerInputFieldName: cfg.Router.InputName,
+		routerInputFieldName: rtCfg.InputName,
 
-		forceBatchSize1: cfg.Router.ForceBatchSize1,
-		workers:         cfg.Router.Workers,
-		maxQueueSize:    cfg.Router.MaxQueueSize,
+		forceBatchSize1: rtCfg.ForceBatchSize1,
+		workerSemaphore: make(chan struct{}, rtCfg.Workers),
+		maxQueueSize:    uint64(rtCfg.MaxQueueSize),
+		queued:          &atomic.Uint64{},
 	}
 
 	return r, nil
@@ -204,14 +211,13 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		return nil, err
 	}
 
-	var signature *domain.Signature
-	batches := make(map[string]*modelBatch)
-
-	// Hold read lock to ensure evaluator references remain valid during prediction.
 	r.routingTableLock.RLock()
 	defer r.routingTableLock.RUnlock()
 
-	// Phase 1: Group rows into batches by name
+	var signature *domain.Signature
+	batches := make(map[string]*modelBatch)
+
+	// Phase 1: Group rows into batches by model name
 	err = func() error {
 		if r.ioState == nil {
 			return fmt.Errorf("ioState was not initialized")
@@ -226,9 +232,10 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 		numInputs := len(params)
 
+		routerInputBatch := params[routerInputOffset]
 		for batchOffset := range expectedBatchSize {
 			// Extract routing value for this row
-			routingValueBatched, err := shape.Debatch(params[routerInputOffset], batchOffset)
+			routingValueBatched, err := shape.Debatch(routerInputBatch, batchOffset)
 			if err != nil {
 				return fmt.Errorf("failed to debatch routing value for row %d: %w", batchOffset, err)
 			}
@@ -277,10 +284,9 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			// Determine batch key: unique per row when forceBatchSize1, otherwise by model name
 			batchKey := routingValueString
 			if r.forceBatchSize1 {
-				batchKey = routingValueString + "#" + strconv.Itoa(batchOffset)
+				batchKey = strconv.Itoa(batchOffset)
 			}
 
-			// Get or create batch
 			batch, exists := batches[batchKey]
 			if !exists {
 				batch = &modelBatch{
@@ -290,18 +296,17 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 					inputsByName: make(map[string]interface{}),
 					rowOffsets:   make([]int, 0, 1),
 				}
+
 				batches[batchKey] = batch
 			}
 
 			// Append this row's inputs to the batch (excluding router input)
-			// Use signature to resolve input names for name-based accumulation
 			for paramOffset := range numInputs {
 				if paramOffset == routerInputOffset {
 					continue
 				}
 
 				inputName := signature.Inputs[paramOffset].Name
-
 				debatched, err := shape.Debatch(params[paramOffset], batchOffset)
 				if err != nil {
 					return fmt.Errorf("failed to debatch for row %d, input %s: %w", batchOffset, inputName, err)
@@ -323,40 +328,49 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		return nil, err
 	}
 
-	// Check queue size limit
-	if len(batches) > r.maxQueueSize {
+	// early queue size check
+	currentQ := r.queued.Load()
+	if uint64(len(batches))+currentQ > r.maxQueueSize {
 		routerPredictDroppedCounter.WithLabelValues(r.routerName).Inc()
 		return nil, fmt.Errorf("too many batches (%d) exceeds max queue size (%d)", len(batches), r.maxQueueSize)
 	}
 
 	// Phase 2: Execute predictions in parallel with bounded concurrency
 	resultCh := make(chan batchResult, len(batches))
-	semaphore := make(chan struct{}, r.workers)
 	var wg sync.WaitGroup
 
 	for _, batch := range batches {
 		wg.Add(1)
+
+		// this must be decremented if queue is full and once no longer in queue
+		nowQueued := r.queued.Add(1)
+
+		if nowQueued > r.maxQueueSize {
+			r.queued.Add(^uint64(0))
+			return nil, fmt.Errorf("queue size exceeded")
+		}
+
 		go func(b *modelBatch) {
 			defer wg.Done()
 
 			// Acquire semaphore slot
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
+			r.workerSemaphore <- struct{}{}
+			r.queued.Add(^uint64(0))
+
+			defer func() {
+				<-r.workerSemaphore
+			}()
 
 			// Reorder inputs to match each evaluator's expected order before calling Predict
 			var results []interface{}
 			var err error
+
+			// Capture output names for reordering in Phase 3
 			var outputNames []string
+			bs := len(b.rowOffsets)
 
 			if b.isFixedEval {
-				// Fixed evaluator returns constant values
-				// Pass any accumulated input so it can determine batch size
-				var fixedInputs []interface{}
-				for _, inputData := range b.inputsByName {
-					fixedInputs = append(fixedInputs, inputData)
-					break // only need one input for batch size
-				}
-				results, err = r.fixedEvaluator.Predict(ctx, fixedInputs)
+				results, err = r.fixedEvaluator.Predict(bs)
 				outputNames = r.fixedEvaluator.OutputNames()
 			} else {
 				// Reorder inputs to match this evaluator's expected order
@@ -375,7 +389,6 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 					// Rely on downstream for timeouts
 					results, err = b.evaluator.Predict(ctx, orderedInputs)
 
-					// Capture output names for reordering in Phase 3
 					outputNames = make([]string, len(evalSig.Outputs))
 					for i, out := range evalSig.Outputs {
 						outputNames[i] = out.Name
@@ -385,10 +398,11 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 			// Append model name to results if configured
 			if r.modelOutputName != "" && err == nil {
-				modelNames := make([][]string, len(b.rowOffsets))
+				modelNames := make([][]string, bs)
 				for i := range modelNames {
 					modelNames[i] = []string{b.modelName}
 				}
+
 				results = append(results, modelNames)
 				outputNames = append(outputNames, r.modelOutputName)
 			}
@@ -408,11 +422,13 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 	// Phase 3: Reassemble results in original order
 	// Build router output name -> index mapping for reordering
+	// TODO see if memoizing this provides material performance boosts
 	routerOutputIndex := make(map[string]int, len(signature.Outputs))
 	for i, out := range signature.Outputs {
 		routerOutputIndex[out.Name] = i
 	}
 
+	// allResults will be [expectedBatchSize][len(signature.Outputs)]
 	allResults := make([][]interface{}, expectedBatchSize)
 
 	for res := range resultCh {
@@ -421,38 +437,41 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		}
 
 		// Extract individual rows from the batched result and place at original offsets
-		// Reorder outputs to match router's expected output order
-		for localIdx, originalOffset := range res.offsets {
+		for evalOffset, originalOffset := range res.offsets {
 			rowResult := make([]interface{}, len(signature.Outputs))
+
+			// Reorder outputs to match router's expected output order
 			for evalOutputIdx, outputBatch := range res.results {
-				extracted, err := shape.ExtractRowFromBatch(outputBatch, localIdx)
+				extracted, err := shape.ExtractRowFromBatch(outputBatch, evalOffset)
 				if err != nil {
-					return nil, fmt.Errorf("failed to extract row %d from model %s output %d: %w",
-						localIdx, res.modelName, evalOutputIdx, err)
+					return nil, fmt.Errorf("failed to extract row %d from model %s output index %d: %w",
+						evalOffset, res.modelName, evalOutputIdx, err)
 				}
 
 				// Map evaluator output index to router output index by name
-				var routerIdx int
+				var originalOutputIdx int
 				if res.outputNames == nil {
 					// Fallback: assume same order (shouldn't happen in normal operation)
-					routerIdx = evalOutputIdx
+					originalOutputIdx = evalOutputIdx
 				} else {
 					outputName := res.outputNames[evalOutputIdx]
+
 					var exists bool
-					routerIdx, exists = routerOutputIndex[outputName]
+					originalOutputIdx, exists = routerOutputIndex[outputName]
 					if !exists {
 						return nil, fmt.Errorf("output %s from model %s not found in router signature",
 							outputName, res.modelName)
 					}
 				}
 
-				rowResult[routerIdx] = extracted
+				rowResult[originalOutputIdx] = extracted
 			}
+
 			allResults[originalOffset] = rowResult
 		}
 	}
 
-	// Concatenate all rows into final output
+	// Reshape all values into [outputs][batch][M]
 	endResults := make([]interface{}, len(signature.Outputs))
 	for i, results := range allResults {
 		endResults, err = shape.ConcatAxis0(endResults, results)

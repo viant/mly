@@ -1,11 +1,9 @@
 package router
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/viant/mly/service/config"
-	"github.com/viant/mly/service/request/shape"
 )
 
 // preparedReplacement holds a pre-parsed replacement value for fixed evaluator outputs
@@ -19,7 +17,6 @@ type fixedEvaluator struct {
 	prepared []preparedReplacement
 }
 
-// OutputNames returns the output names in the order they will be returned by Predict
 func (f *fixedEvaluator) OutputNames() []string {
 	names := make([]string, len(f.prepared))
 	for i, p := range f.prepared {
@@ -134,12 +131,7 @@ func newFixedEvaluator(repls []config.PredictionReplacement) (*fixedEvaluator, e
 	return &fixedEvaluator{prepared: prepared}, nil
 }
 
-func (f *fixedEvaluator) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
-	batchSize, err := shape.DetermineBatchSize(params)
-	if err != nil {
-		return nil, err
-	}
-
+func (f *fixedEvaluator) Predict(batchSize int) ([]interface{}, error) {
 	makeString := func(v string) [][]string {
 		out := make([][]string, batchSize)
 		for i := 0; i < batchSize; i++ {

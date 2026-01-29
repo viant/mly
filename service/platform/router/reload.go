@@ -94,6 +94,7 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 		return err
 	}
 
+	// see defer above
 	isFullReload = true
 
 	// otherwise just abandon the routing table status checks
@@ -146,11 +147,13 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 	reuseEvaluators := make(map[string]platform.PlatformEvaluator)
 	var reuseGlobal platform.PlatformEvaluator
 
+	// copy members to local scope
 	var finalSignature *domain.Signature
 	var oldConfig *router.RoutingConfig
 	func() {
 		r.routingTableLock.RLock()
 		defer r.routingTableLock.RUnlock()
+
 		if r.ioState != nil {
 			finalSignature = r.ioState.signature
 		}
@@ -304,10 +307,11 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 		}
 	}
 
-	for signature := range signatureCh {
+	// dsmi stands for DownStream Model Information
+	for dsmi := range signatureCh {
 		// accept first available signature as the final signature
 		if finalSignature == nil {
-			srcSig := signature.signature
+			srcSig := dsmi.signature
 			finalSignature = &domain.Signature{
 				Inputs:  make([]domain.Input, len(srcSig.Inputs), len(srcSig.Inputs)+1),
 				Outputs: make([]domain.Output, len(srcSig.Outputs)),
@@ -331,6 +335,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 				sigInputMap[input.Name] = &input
 			}
 
+			// add configured (aux) inputs to signature
 			for _, input := range r.configuredInputs {
 				_, ok := sigInputMap[input.Name]
 
@@ -340,7 +345,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 				}
 
 				if !input.Auxiliary {
-					return fmt.Errorf("non-auxiliary input %s for model %s was not in model inputs", input.Name, signature.name)
+					return fmt.Errorf("non-auxiliary input %s for model %s was not in model inputs", input.Name, dsmi.name)
 				}
 
 				sigInputMap[input.Name] = &domain.Input{
@@ -351,7 +356,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 			}
 
 			if r.modelOutputName != "" {
-				// also, add the selected model output
+				// add the selected model output
 				modelOutput := domain.Output{
 					Name:     r.modelOutputName,
 					Index:    len(finalSignature.Outputs),
@@ -368,63 +373,64 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 			continue
 		}
 
-		thisSignature := signature.signature
+		dsSignature := dsmi.signature
 		// validate signature consistency
+		// Note: Index differences are permitted - IOs are matched by name
+
+		// check that the new signature has no new outputs
 		thisSignatureOutputMap := make(map[string]*domain.Output)
-		for _, output := range thisSignature.Outputs {
+		for _, output := range dsSignature.Outputs {
 			oldOutput, ok := sigOutputMap[output.Name]
 			if !ok {
-				return fmt.Errorf("signature output %s for model %s not found in the previous signature", output.Name, signature.name)
+				return fmt.Errorf("signature output %s for model %s not found in the previous signature", output.Name, dsmi.name)
 			}
 
 			thisSignatureOutputMap[output.Name] = &output
 
-			// Note: Index differences are permitted - outputs are matched by name
 			if oldOutput.DataType != output.DataType {
-				return fmt.Errorf("signature output %s for model %s has data type %s, and the previous signature has data type %s", output.Name, signature.name, output.DataType, oldOutput.DataType)
+				return fmt.Errorf("signature output %s for model %s has data type %s, and the previous signature has data type %s", output.Name, dsmi.name, output.DataType, oldOutput.DataType)
 			}
 		}
 
+		// check that the new signature has no new outputs except the model name output
 		for expectedOutput := range sigOutputMap {
 			if _, ok := thisSignatureOutputMap[expectedOutput]; !ok && expectedOutput != r.modelOutputName {
-				return fmt.Errorf("signature output %s for was not found in model %s signature", expectedOutput, signature.name)
+				return fmt.Errorf("signature output %s for was not found in model %s signature", expectedOutput, dsmi.name)
 			}
 		}
 
+		// check that the new signature has no new inputs
 		thisSignatureInputMap := make(map[string]*domain.Input)
-		for _, input := range thisSignature.Inputs {
+		for _, input := range dsSignature.Inputs {
 			oldInput, ok := sigInputMap[input.Name]
 			if !ok {
-				return fmt.Errorf("signature input %s for model %s not found in the previous signature", input.Name, signature.name)
+				return fmt.Errorf("signature input %s for model %s not found in the previous signature", input.Name, dsmi.name)
 			}
 
 			thisSignatureInputMap[input.Name] = &input
 
-			if oldInput.Auxiliary {
-				continue
-			}
-
-			// Note: Index differences are permitted - inputs are reordered by name at dispatch time
 			if !oldInput.Type.ConvertibleTo(input.Type) {
-				return fmt.Errorf("signature input %s for model %s has data type %s, and the previous signature has data type %s", input.Name, signature.name, input.Type.String(), oldInput.Type.String())
+				return fmt.Errorf("signature input %s for model %s has data type %s, and the previous signature has data type %s", input.Name, dsmi.name, input.Type.String(), oldInput.Type.String())
 			}
 		}
 
+		// check that the new signature has all expected inputs except for the routing input
 		for expectedInput := range sigInputMap {
 			if _, ok := thisSignatureInputMap[expectedInput]; !ok && expectedInput != r.routerInputFieldName {
-				return fmt.Errorf("signature input %s for was not found in model %s signature", expectedInput, signature.name)
+				return fmt.Errorf("signature input %s for was not found in model %s signature", expectedInput, dsmi.name)
 			}
 		}
 	}
 
 	if r.fixedEvaluatorFields != nil {
-		// TODO this is actually an acceptable case, but needs to be addressed elsewhere first before it is permitted
+		// TODO this is actually an acceptable case, we can simply ignore fixed evaluator fields that aren't applicable
 		for field := range r.fixedEvaluatorFields {
 			if _, ok := sigOutputMap[field]; !ok {
 				return fmt.Errorf("fixed evaluator field: %s was not found in the signature outputs", field)
 			}
 		}
 
+		// check that the fixed evaluator fields have all expected outputs
 		for _, field := range sigOutputMap {
 			if _, ok := r.fixedEvaluatorFields[field.Name]; !ok && field.Name != r.modelOutputName {
 				return fmt.Errorf("signature output %s is not replaced", field.Name)
