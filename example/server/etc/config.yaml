@@ -76,6 +76,9 @@ models:
       - name: sa
         datatype: string
         wildcard: true
+      - name: aux
+        datatype: string
+        auxiliary: true
     Outputs:
       - name: expand
         datatype: int64
