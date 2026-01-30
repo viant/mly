@@ -98,7 +98,8 @@ func createEvaluator(config *config.Model, tritonClients map[string]*Service) (*
 
 }
 
-// Upward dependency, but provides Evaluators as needed for the service/platform/router module.
+// Upward dependency.
+// Provides Evaluators as needed for the service/platform/router module.
 func NewRoutedTritonEvaluator(modelName string, config *config.Model, tritonClients map[string]*Service) (*TritonEvaluator, error) {
 	evaluator, err := createEvaluator(config, tritonClients)
 	if err != nil {
