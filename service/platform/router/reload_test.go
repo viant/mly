@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/viant/mly/service/config"
@@ -15,6 +16,67 @@ import (
 	"github.com/viant/mly/service/triton"
 	sharedrouter "github.com/viant/mly/shared/config/router"
 )
+
+type mockUnloader struct {
+	tritonServer *mockTritonServer
+	unloadCh     chan string
+}
+
+func (m *mockUnloader) ModelUnload(ctx context.Context, tritonModelName string) error {
+	if m.tritonServer != nil {
+		m.tritonServer.mu.Lock()
+		defer m.tritonServer.mu.Unlock()
+
+		if m.tritonServer.readyState == nil {
+			m.tritonServer.readyState = make(map[string]bool)
+		}
+
+		m.tritonServer.readyState[tritonModelName] = false
+	}
+
+	ch := m.unloadCh
+
+	if ch != nil {
+		ch <- tritonModelName
+	}
+
+	return nil
+}
+
+type wrappedUnloader struct {
+	tritonService *triton.Service
+
+	wg *sync.WaitGroup
+}
+
+func (w *wrappedUnloader) UnloadModel(ctx context.Context, mlyModelID string, tritonModelName string) error {
+	defer w.wg.Done()
+	return w.tritonService.UnloadModel(ctx, mlyModelID, tritonModelName)
+}
+
+type mockTritonServer struct {
+	mu sync.Mutex
+
+	readyState   map[string]bool
+	modelLoadErr map[string]error
+}
+
+func (m *mockTritonServer) ModelLoad(ctx context.Context, modelName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.modelLoadErr[modelName]; err != nil {
+		return err
+	}
+
+	if m.readyState == nil {
+		m.readyState = make(map[string]bool)
+	}
+
+	m.readyState[modelName] = true
+
+	return nil
+}
 
 func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 	ctx := context.Background()
@@ -57,6 +119,7 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 		makeRoutedEvaluator: func(modelName string) (platform.PlatformEvaluator, error) {
 			return &mockEvaluator{signature: makeSig}, nil
 		},
+		unloadGauge: routerModelUnloadGauge.WithLabelValues("test_router"),
 	}
 
 	reusedModelB := router.routingTable["modelB"]
@@ -153,6 +216,7 @@ func TestRouter_applyRouterConfig_LoadError(t *testing.T) {
 				signature:    func() *domain.Signature { return signature },
 			}, nil
 		},
+		unloadGauge: routerModelUnloadGauge.WithLabelValues("load_error"),
 	}
 
 	newConfig := &sharedrouter.RoutingConfig{
@@ -272,17 +336,6 @@ func TestRouter_applyRouterConfig_signature(t *testing.T) {
 	}
 
 	assert.Equal(t, 2, len(results))
-}
-
-type wrappedUnloader struct {
-	tritonService *triton.Service
-
-	wg *sync.WaitGroup
-}
-
-func (w *wrappedUnloader) UnloadModel(ctx context.Context, mlyModelID string, tritonModelName string) error {
-	defer w.wg.Done()
-	return w.tritonService.UnloadModel(ctx, mlyModelID, tritonModelName)
 }
 
 func TestRouter_applyRouterConfig_sharedTritonServer(t *testing.T) {
@@ -437,4 +490,18 @@ func TestRouter_applyRouterConfig_sharedTritonServer(t *testing.T) {
 	assert.False(t, tritonServer.readyState["modelA"], "modelA should be unloaded")
 	assert.True(t, tritonServer.readyState["modelB"], "modelB should still be loaded")
 	assert.True(t, tritonServer.readyState["modelC"], "modelC should be loaded")
+}
+
+func waitForCalls(t *testing.T, ch <-chan string, count int) []string {
+	t.Helper()
+	var out []string
+	for i := 0; i < count; i++ {
+		select {
+		case v := <-ch:
+			out = append(out, v)
+		case <-time.After(time.Second):
+			t.Fatalf("timeout waiting for call %d/%d", i+1, count)
+		}
+	}
+	return out
 }

@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/viant/afs"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
@@ -18,6 +19,8 @@ import (
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/config/router"
 )
+
+const queueSizeExceededError = "queue size exceeded"
 
 type IOState struct {
 	inputs    map[string]*domain.Input
@@ -71,9 +74,10 @@ type Router struct {
 
 	modelOutputName string
 
-	routerName string
-	debug      bool
-	unloader   UnloadService
+	routerName  string
+	debug       bool
+	unloader    UnloadService
+	unloadGauge prometheus.Gauge
 
 	configuredInputs []*shared.Field
 	ioState          *IOState
@@ -87,7 +91,9 @@ type Router struct {
 	// maxQueueSize limits queued batches before rejection
 	maxQueueSize uint64
 
-	queued *atomic.Uint64
+	queued                *atomic.Uint64
+	queueDurationObserver prometheus.Observer
+	droppedCounter        prometheus.Counter
 }
 
 // NewRouter creates a new Router instance.
@@ -135,15 +141,18 @@ func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]UnloadSer
 		}
 	}
 
+	routerName := cfg.ID
 	r := &Router{
 		debug:      cfg.Debug,
-		routerName: cfg.ID,
+		routerName: routerName,
 
 		configURL:           rtCfg.ConfigURL,
 		fs:                  fs,
 		makeRoutedEvaluator: makeEvaluator,
 
-		unloader:       unloader,
+		unloader:    unloader,
+		unloadGauge: routerModelUnloadGauge.WithLabelValues(routerName),
+
 		outputConfig:   rtCfg.Output,
 		hasGlobalModel: rtCfg.Global.Exists,
 
@@ -156,9 +165,13 @@ func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]UnloadSer
 		routerInputFieldName: rtCfg.InputName,
 
 		forceBatchSize1: rtCfg.ForceBatchSize1,
+
 		workerSemaphore: make(chan struct{}, rtCfg.Workers),
 		maxQueueSize:    uint64(rtCfg.MaxQueueSize),
 		queued:          &atomic.Uint64{},
+
+		queueDurationObserver: routerQueueDurationMicrosSummary.WithLabelValues(routerName),
+		droppedCounter:        routerPredictDroppedCounter.WithLabelValues(routerName),
 	}
 
 	return r, nil
@@ -167,7 +180,7 @@ func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]UnloadSer
 // modelBatch holds accumulated rows destined for a single model evaluator
 type modelBatch struct {
 	evaluator    platform.PlatformEvaluator // need Signature() for input reordering
-	isFixedEval  bool                       // true if using fixedEvaluator (no reordering needed)
+	isFixedEval  bool                       // true skips input reordering
 	modelName    string
 	inputsByName map[string]interface{} // keyed by input name - accumulated batched inputs
 	rowOffsets   []int                  // original positions in the incoming batch
@@ -263,7 +276,7 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 			isFixedEval := false
 			if !ok {
 				if hasFixedEvaluator {
-					// No global model, use fixed evaluator (returns constant values)
+					// No global model, use fixed evaluator
 					routingValueString = noModelName
 					isFixedEval = true
 				} else {
@@ -331,8 +344,8 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 	// early queue size check
 	currentQ := r.queued.Load()
 	if uint64(len(batches))+currentQ > r.maxQueueSize {
-		routerPredictDroppedCounter.WithLabelValues(r.routerName).Inc()
-		return nil, fmt.Errorf("too many batches (%d) exceeds max queue size (%d)", len(batches), r.maxQueueSize)
+		r.droppedCounter.Inc()
+		return nil, fmt.Errorf(queueSizeExceededError)
 	}
 
 	// Phase 2: Execute predictions in parallel with bounded concurrency
@@ -344,10 +357,12 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 		// this must be decremented if queue is full and once no longer in queue
 		nowQueued := r.queued.Add(1)
+		startQueueTime := time.Now()
 
 		if nowQueued > r.maxQueueSize {
 			r.queued.Add(^uint64(0))
-			return nil, fmt.Errorf("queue size exceeded")
+			r.droppedCounter.Inc()
+			return nil, fmt.Errorf(queueSizeExceededError)
 		}
 
 		go func(b *modelBatch) {
@@ -355,7 +370,9 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 
 			// Acquire semaphore slot
 			r.workerSemaphore <- struct{}{}
+
 			r.queued.Add(^uint64(0))
+			r.queueDurationObserver.Observe(float64(time.Since(startQueueTime).Microseconds()))
 
 			defer func() {
 				<-r.workerSemaphore

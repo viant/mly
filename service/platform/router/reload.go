@@ -35,6 +35,7 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 		} else {
 			mode = "checks"
 		}
+
 		routerReloadDurationMicrosSummary.WithLabelValues(r.routerName, mode).Observe(float64(time.Since(start).Microseconds()))
 	}()
 
@@ -414,9 +415,17 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 			}
 		}
 
-		// check that the new signature has all expected inputs except for the routing input
+		// check that the new signature has all expected inputs except for the routing and auxiliary inputs
 		for expectedInput := range sigInputMap {
-			if _, ok := thisSignatureInputMap[expectedInput]; !ok && expectedInput != r.routerInputFieldName {
+			if sigInputMap[expectedInput].Auxiliary {
+				continue
+			}
+
+			if expectedInput == r.routerInputFieldName {
+				continue
+			}
+
+			if _, ok := thisSignatureInputMap[expectedInput]; !ok {
 				return fmt.Errorf("signature input %s for was not found in model %s signature", expectedInput, dsmi.name)
 			}
 		}
@@ -464,12 +473,12 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 	}()
 
 	for model := range modelsToUnload {
-		routerModelUnloadGauge.WithLabelValues(r.routerName).Inc()
+		r.unloadGauge.Inc()
 
 		go func(modelName string) {
-			defer routerModelUnloadGauge.WithLabelValues(r.routerName).Dec()
+			defer r.unloadGauge.Dec()
 
-			ctxTo, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctxTo, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			r.debugLogf("request to unload model: %s", modelName)
 

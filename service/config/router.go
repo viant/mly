@@ -66,6 +66,10 @@ func (o *RouterConfig) Init() {
 	if o.MaxQueueSize == 0 {
 		o.MaxQueueSize = 1000
 	}
+
+	if o.Output.NoModelID == "" {
+		o.Output.NoModelID = "none"
+	}
 }
 
 func (o *RouterConfig) Validate() error {
@@ -87,10 +91,6 @@ func (o *RouterConfig) Validate() error {
 
 	if !o.Global.Exists && len(o.Global.PredictionReplacements) == 0 {
 		return fmt.Errorf("global model does not exist but no prediction replacements were provided")
-	}
-
-	if o.Output.NoModelID == "" {
-		o.Output.NoModelID = "none"
 	}
 
 	return nil

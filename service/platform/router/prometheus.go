@@ -38,6 +38,16 @@ var (
 		[]string{"router"},
 	)
 
+	routerQueueDurationMicrosSummary = prometheus.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Namespace: "mly",
+			Subsystem: "router",
+			Name:      "queue_duration_summary_us",
+			Help:      "Duration of router queueing.",
+		},
+		[]string{"router"},
+	)
+
 	routerModelUnloadGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "mly",
@@ -53,5 +63,6 @@ func init() {
 	prometheus.MustRegister(routerPredictDurationMicrosSummary)
 	prometheus.MustRegister(routerReloadDurationMicrosSummary)
 	prometheus.MustRegister(routerModelUnloadGauge)
+	prometheus.MustRegister(routerQueueDurationMicrosSummary)
 	prometheus.MustRegister(routerPredictDroppedCounter)
 }
