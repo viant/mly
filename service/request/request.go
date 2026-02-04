@@ -27,7 +27,8 @@ type Request struct {
 
 	supplied map[string]struct{} // used to check if the required inputs were provided
 
-	Input *transfer.Input // cache metadata
+	// Input is primarily used with Transformer.
+	Input *transfer.Input
 
 	// type metadata from service/tfservice.Service.inputs
 	// see service/tfmodel.(*Service).reconcileIOFromSignature

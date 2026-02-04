@@ -19,7 +19,3 @@ func Get(name string) (domain.Transformer, error) {
 	// otherwise return default transformer
 	return domain.Transform, nil
 }
-
-func ExecuteTransform() interface{} {
-	return nil
-}

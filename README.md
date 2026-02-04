@@ -60,9 +60,9 @@ By default, the client will configure itself using the web service cache setting
 This enables the `mly` client to handle key generation without additional configuration or code.
 
 The library supports 3 types of caching:
-- in-(process) memory
-- external Aerospike cache
-- hybrid
+- in-(process) memory using [scache](https://github.com/viant/scache)
+- external Aerospike cache (supports L1/L2 tiered caching for larger key spaces)
+- hybrid (in-memory + external)
 
 The in-memory cache uses [scache](https://github.com/viant/scache)'s most-recently-used implementation.
 
@@ -76,6 +76,7 @@ In this scenario, the L2 cache can be a very large SSD-backed Aerospike instance
 
 In this case, when we look for a cached value, first the in-memory cache is checked, followed by L1, then L2.
 Then with a cache miss, the value is calculated then copied to L2 - then from L2 to L1 and L1 to local memory.
+
 
 **Example of `config.yaml` with both an in-memory and an Aerospike cache**
 

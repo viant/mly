@@ -45,7 +45,7 @@ type Service struct {
 	// continueOnRecover if false, will re-panic on recover
 	continueOnRecover bool
 
-	// TODO how does this interact with Service.inputs
+	// inputProvider is used in transformer.Transform()
 	inputProvider *gtly.Provider
 
 	// health status for centralized health reporting
