@@ -51,7 +51,7 @@ There are currently 3 Evaluators:
 2. Triton - this Evaluator supports sending prediction requests to a single Triton server via HTTP or gRPC.
 3. Router - this Evaluator does not generate any prediction but enables rows in a prediction request to be sent to other Evaluators based on the input.
 
-*Design issue*: Evaluator overloading and over-abstraction - the Router operates on the same interface as the TensorFlow and Triton evaluators, but vary in their behavioral labels.
+*Potential design issue*: Evaluator overloading and over-abstraction - the Router operates on the same interface as the TensorFlow and Triton evaluators, but vary in their behavioral labels.
 
 ### 2.2 Caching Support
 
@@ -101,7 +101,7 @@ The `UnmarshalJSONObject()` method implements `gojay.UnmarshalerJSONObject` for 
 
 The interaction with *Model inference* involves the `Feeds` field.
 
-*Quirk*: client batching payload - mly provides a convenience / payload reduction feature that permits payloads to have both inputs with a list of 1 values as well as inputs with a list of batch size of values. The server will expand the payload to fit the expected batch size times inputs matrix for the Evaluators.
+*Quirk*: client batching payload reduction - mly provides a convenience / payload reduction feature that permits payloads to have both inputs with a list of 1 values as well as inputs with a list of batch size of values. The server will expand the payload to fit the expected batch size times inputs matrix for the Evaluators.
 
 *Quirk*: payload reading order - the JSON payload must have the `batch_size` key existing before other input keys, as that is required to know if the parser should be expecting a list of values or scalar values.
 
