@@ -294,6 +294,8 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 	}
 
 	sigInputMap := make(map[string]*domain.Input)
+
+	// sigOutputMap is for validating output consistency
 	sigOutputMap := make(map[string]*domain.Output)
 
 	// we only create ioState on the first reload
@@ -313,6 +315,8 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 		// accept first available signature as the final signature
 		if finalSignature == nil {
 			srcSig := dsmi.signature
+
+			// copy signature from downstream
 			finalSignature = &domain.Signature{
 				Inputs:  make([]domain.Input, len(srcSig.Inputs), len(srcSig.Inputs)+1),
 				Outputs: make([]domain.Output, len(srcSig.Outputs)),
@@ -320,8 +324,8 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 			copy(finalSignature.Inputs, srcSig.Inputs)
 			copy(finalSignature.Outputs, srcSig.Outputs)
 
+			// add router input
 			inputOffset := len(finalSignature.Inputs)
-
 			routerInput := domain.Input{
 				Name:  r.routerInputFieldName,
 				Type:  reflect.TypeOf(int64(0)),
@@ -332,6 +336,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 
 			finalSignature.Inputs = append(finalSignature.Inputs, routerInput)
 
+			// sigInputMap is for Request validation
 			for _, input := range finalSignature.Inputs {
 				sigInputMap[input.Name] = &input
 			}
@@ -435,7 +440,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 		// TODO this is actually an acceptable case, we can simply ignore fixed evaluator fields that aren't applicable
 		for field := range r.fixedEvaluatorFields {
 			if _, ok := sigOutputMap[field]; !ok {
-				return fmt.Errorf("fixed evaluator field: %s was not found in the signature outputs", field)
+				return fmt.Errorf("fixed evaluator field: %s was not found in any model outputs", field)
 			}
 		}
 

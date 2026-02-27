@@ -3,6 +3,8 @@
 .DS_Cache
 .DS_Store
 
+__debug_bin*
+
 /devdata
 /vendor
 
