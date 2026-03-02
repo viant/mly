@@ -451,33 +451,36 @@ func (s *Service) GetHealth() int32 {
 
 func (s *Service) pollModelReload() {
 	for range s.reloadPollTicker.C {
-		ctx, cancel := context.WithTimeout(context.Background(), s.reloadTimeout)
-		defer cancel()
-
-		stats := sstat.NewValues()
-		if s.reloadMetric != nil {
-			onDone := s.reloadMetric.Begin(time.Now())
-			defer func() {
-				onDone(time.Now(), stats.Values()...)
-			}()
-		}
-
-		var reloadOK int32
-		err := s.evaluator.ReloadIfNeeded(ctx)
-		if err != nil {
-			stats.AppendError(err)
-			log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
-
-			reloadOK = 0
-		} else {
-			reloadOK = 1
-		}
-
-		atomic.StoreInt32(&s.ReloadOK, reloadOK)
 
 		if atomic.LoadInt32(&s.closed) != 0 {
 			log.Printf("[%s reload] shutting down, stopping reload loop", s.config.ID)
 			return
 		}
+
+		func() {
+			ctx, cancel := context.WithTimeout(context.Background(), s.reloadTimeout)
+			defer cancel()
+
+			stats := sstat.NewValues()
+			if s.reloadMetric != nil {
+				onDone := s.reloadMetric.Begin(time.Now())
+				defer func() {
+					onDone(time.Now(), stats.Values()...)
+				}()
+			}
+
+			var reloadOK int32
+			err := s.evaluator.ReloadIfNeeded(ctx)
+			if err != nil {
+				stats.AppendError(err)
+				log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
+
+				reloadOK = 0
+			} else {
+				reloadOK = 1
+			}
+
+			atomic.StoreInt32(&s.ReloadOK, reloadOK)
+		}()
 	}
 }
