@@ -577,7 +577,7 @@ func (s *Service) discoverConfig(host *Host, URL string) (*config.Remote, error)
 	cfg := &config.Remote{}
 	err = json.Unmarshal(data, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse load %v, config:   %s, %v", URL, data, err)
+		return nil, fmt.Errorf("failed to parse load %v, config: %s, %v", URL, data, err)
 	}
 
 	if s.Config.Debug {

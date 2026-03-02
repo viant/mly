@@ -38,8 +38,8 @@ type (
 	MetaInput struct {
 		Inputs []*Field
 
-		// This is used to order inputs and provide extra caching information to the client.
-		// All inputs from the model will automatically be added here.
+		// KeyFields is a method of forcing inputs to be part of the key even if not part of the model input.
+		// The primary use case of this is when there is a Transformer that depends on an Auxiliary input.
 		KeyFields []string `json:",omitempty" yaml:",omitempty"`
 
 		// Deprecated: use Field.Auxiliary

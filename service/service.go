@@ -93,6 +93,7 @@ func (s *Service) Config() *config.Model {
 }
 
 // Signature is invoked after at least 1 successful ReloadIfNeeded().
+// Considered hot path.
 func (s *Service) Signature() *domain.Signature {
 	return s.evaluator.Signature()
 }
