@@ -76,7 +76,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 			defer func() { onDone(time.Now(), stats.Values()...) }()
 
 			if err != nil {
-				stats.Append(sstat.ReadError{err})
+				stats.Append(sstat.ReadError{Error: err})
 				if isDebug {
 					log.Printf("[%v http] read error: %v\n", h.service.config.ID, err)
 				}

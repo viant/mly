@@ -84,16 +84,26 @@ func Build(
 		Namespace: "mly",
 		Subsystem: "model",
 		Name:      "idletime",
-
-		Help: "measured time between requests in nanoseconds",
-
-		Buckets: buckets,
+		Help:      "measured time between requests in nanoseconds",
+		Buckets:   buckets,
 	}, []string{"model"})
 
 	var err error
 	err = promReg.Register(obsv)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to register idletime histogram: %w", err)
+	}
+
+	healthGauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "mly",
+		Subsystem: "model",
+		Name:      "reload_success",
+		Help:      "successfully reloaded model",
+	}, []string{"model"})
+
+	err = promReg.Register(healthGauge)
+	if err != nil {
+		return fmt.Errorf("failed to register health gauge: %w", err)
 	}
 
 	serviceOpts := make([]service.Option, 0)
@@ -129,7 +139,13 @@ func Build(
 				var modelSrv *service.Service
 				var err error
 
-				modelSrv, err = service.New(context.Background(), model, fs, metrics, datastores, tritonServices, sema, cfge.MaxEvaluatorWait, serviceOpts...)
+				modelSrv, err = service.NewV2(context.Background(), model, fs, metrics, service.NewArgs{
+					Datastores:       datastores,
+					TritonServices:   tritonServices,
+					Semaphore:        sema,
+					MaxEvaluatorWait: cfge.MaxEvaluatorWait,
+					HealthGauge:      healthGauge,
+				}, serviceOpts...)
 
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)
