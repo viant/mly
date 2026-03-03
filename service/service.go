@@ -307,6 +307,9 @@ func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs a
 	}
 
 	atomic.StoreInt32(&s.ReloadOK, 1)
+	if s.healthGauge != nil {
+		s.healthGauge.Set(1)
+	}
 
 	signature := s.Signature()
 	if signature == nil {
