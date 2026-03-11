@@ -105,10 +105,11 @@ See [WORKFLOW.md](WORKFLOW.md) for Mermaid diagrams explaining the Client and mo
 ## Dictionary hash code
 
 In caching mode, in order to manage cache and client/server consistency every time a model/dictionary gets re/loaded, `mly` computes a dictionary hash code.
-This hash code gets stored in the cache along with model prediction and is passed to the client in every response.
-Once a client detects a change in dictionary hash code, it automatically initiates a dictionary reload and invalidates cache entries.
+This hash code gets stored in the cache along with model prediction and is passed to the client in every non-cached response.
+Once a client detects a change in the dictionary hash code, it will initiate a dictionary reload and, if `client.WithHashValidation(true)` was an option on client initialization, reject any cache entry with a non-zero, different hash code.
 
-Note: The dictionary hash code is stored under a special key in Aerospike defined in `shared/common.HashBin`. To prevent conflicts, do not use that same key name for storing your own model predictions.
+**Note** The dictionary hash code is stored under a bin in Aerospike defined in `shared/common.HashBin`.
+To prevent conflicts, do not use that same bin name for storing your own model predictions.
 
 # Configuration
 

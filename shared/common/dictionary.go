@@ -28,9 +28,8 @@ type (
 	}
 )
 
-// TODO this should use a fixed size integer?
 // UpdateHash will memoize dictionary hashing.
-// Since wildcard fields don't provide an actual dictionary, we use the modification time information to generate a hash based on the file, passed in as fsHash.
+// fsHash provides a base hash value, used for cases when a particular model doesn't have a vocabulary to be hashed.
 func (d *Dictionary) UpdateHash(fsHash int64) int {
 	d.Hash = int(fsHash)
 

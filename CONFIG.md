@@ -19,10 +19,10 @@ Properties:
   * to use GCS, set environment variable `GOOGLE_APPLICATION_CREDENTIALS=true`
 - `Location`: `string` - optional - where a copy of the models will be stored when loading the model. Defaults to the system temporary directory.
 - `Dir`: `string` - optional - any further path elements in `Location`. Mainly used if using a ZIP file with additional directories.
-- `DataStore`: `string` - optional - name of Datastore to cache, should match `Datastores[].ID`.
+- `DataStore`: `string` - optional - name of Datastore to use for caching, should match `Datastores[].ID`. Server-side datastore writes are enabled only when `UseDict` is `true` or unset.
 - `Transformer`: `string` - optional - name of model output transformer. See [#Transformer](#Transformer).
 - `Batch`: optional - enables or overrides server-side batching configuration. See [`service/tfmodel/batcher/config/config.go`](service/tfmodel/batcher/config/config.go).
-- `UseDict`: `bool` - optional - if true, enables capabilities designed to shrink the cache key space by replacing out-of-vocabulary inputs from cache keys with a special token.
+- `UseDict`: `bool` - optional - if true or unset, enables dictionary-based cache behavior, including replacing out-of-vocabulary inputs in cache keys with a special token and allowing the server to generate datastore cache entries when `DataStore` is configured. If false, the server will not generate new datastore cache entries for the model.
 - `Inputs`: used to further provide or define inputs, a list of `shared.Field`. For TensorFlow models, this is automatically populated, but further caching configurations need to be specified.
   * `Name`: `string` - required - input name, only required if an entry is provided.
   * `Index`: `int` - optional - used to maintain cache key ordering.
@@ -73,7 +73,7 @@ Can be empty - represent a list of caching data stores.
 
 Properties:
 
-- `ID`: `string` - required - datastore ID (to be matched with `Models[].DataStores[].ID`)
+- `ID`: `string` - required - datastore ID (to be matched with `Models[].DataStore`)
 - `Connection`: `string` - optional - connection ID
 - `Namespace`: `string` - optional - Aerospike namespace
 - `Dataset`: `string` - optional - Aerospike dataset
@@ -109,9 +109,10 @@ mly := client.New("$modelID", []*client.Host{client.NewHost("mlServiceHost", mlS
 ```
 
 Where optional `options` can be of, but not limited to, the following:
-  * `NewCacheSize(sizeOption)`
-  * `NewCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)`
-  * `NewGmetric()` - custom instance of `gmetric` service
+  * `WithCacheSize(sizeOption)`
+  * `WithCacheScope(CacheScopeLocal|CacheScopeL1|CacheScopeL2)`
+  * `WithGmetrics()` - custom instance of `gmetric` service
+  * `WithHashValidation(true)` - enables client-side rejection of cached entries with a non-zero hash that differs from the client's current dictionary hash
 
 See [`shared/client/option.go`](shared/client/option.go) for more options.
 
