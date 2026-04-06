@@ -48,6 +48,11 @@ type Options struct {
 	// Will generate a final JSON object as its only output to stdout.
 	// stderr may have other output if Debug is true or there are other errors.
 	Report bool `long:"report"`
+
+	// OutputFile redirects result output to a file instead of stdout.
+	// When set, all model output, reports, metrics, and error history
+	// are written to this file path.
+	OutputFile string `short:"o" long:"output" description:"write results to file instead of stdout"`
 }
 
 type C uint8

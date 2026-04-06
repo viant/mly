@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"sync"
@@ -21,6 +22,14 @@ import (
 // Use CustomMakerRegistry with --maker to use a specific entity for Response.Data.
 var CustomMakerRegistry *customMakerRegistry = new(customMakerRegistry)
 
+func dumpTo(w io.Writer, data interface{}) {
+	text, err := toolbox.AsJSONText(data)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(w, "%v\n", text)
+}
+
 func RunWithOptions(runOpts *Options) error {
 	runOpts.Init()
 	if err := runOpts.Validate(); err != nil {
@@ -29,6 +38,16 @@ func RunWithOptions(runOpts *Options) error {
 
 	if runOpts.Model == "" {
 		return fmt.Errorf("could not determine model")
+	}
+
+	output := io.Writer(os.Stdout)
+	if runOpts.OutputFile != "" {
+		f, err := os.Create(runOpts.OutputFile)
+		if err != nil {
+			return fmt.Errorf("failed to open output file %s: %w", runOpts.OutputFile, err)
+		}
+		defer f.Close()
+		output = f
 	}
 
 	payloads, err := runOpts.Payloads()
@@ -135,7 +154,7 @@ func RunWithOptions(runOpts *Options) error {
 		for i, pload := range payloads {
 			rs.WPayloads[i] = WorkerPayload{Payload: pload}
 			rd := &rs.WPayloads[i]
-			payloadedRunner := makePayloadRunner(cli, pload, runOpts, dataSetter)
+			payloadedRunner := makePayloadRunner(cli, pload, runOpts, dataSetter, output)
 
 			fchan <- runContext{
 				WP: rd,
@@ -183,13 +202,13 @@ func RunWithOptions(runOpts *Options) error {
 	report.Metrics = opcs
 
 	if runOpts.Metrics {
-		toolbox.Dump(opcs)
+		dumpTo(output, opcs)
 	}
 
 	if runOpts.ErrorHistory {
 		tops := cli.ErrorHistory.TopK()
 		for _, t := range tops {
-			fmt.Printf("%d %s\n", t.Count, string(t.Data))
+			fmt.Fprintf(output, "%d %s\n", t.Count, string(t.Data))
 		}
 	}
 
@@ -199,7 +218,7 @@ func RunWithOptions(runOpts *Options) error {
 			return fmt.Errorf("failed to gather prometheus metrics: %w", err)
 		}
 
-		encoder := expfmt.NewEncoder(os.Stdout, expfmt.FmtText)
+		encoder := expfmt.NewEncoder(output, expfmt.FmtText)
 		for _, mf := range mfs {
 			if err := encoder.Encode(mf); err != nil {
 				return fmt.Errorf("failed to encode metric family %s: %w", mf.GetName(), err)
@@ -208,7 +227,7 @@ func RunWithOptions(runOpts *Options) error {
 	}
 
 	if runOpts.Report {
-		toolbox.Dump(report)
+		dumpTo(output, report)
 	}
 
 	return err
@@ -254,7 +273,7 @@ func worker(worker int, echan chan error, fchan chan runContext, closed chan str
 }
 
 func makePayloadRunner(cli *client.Service, pl *CliPayload, runOpts *Options,
-	builder func(int) func() interface{}) func() (*client.Response, error) {
+	builder func(int) func() interface{}, output io.Writer) func() (*client.Response, error) {
 
 	maker := builder(pl.Batch)
 
@@ -284,7 +303,7 @@ func makePayloadRunner(cli *client.Service, pl *CliPayload, runOpts *Options,
 		}
 
 		if !runOpts.NoOutput {
-			toolbox.Dump(response)
+			dumpTo(output, response)
 		}
 
 		return response, nil
