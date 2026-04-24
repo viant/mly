@@ -189,13 +189,23 @@ func (h *Handler) handleAppRequest(ctx context.Context, writer io.Writer, reques
 }
 
 func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
-	appResponse.ServiceTimeMcs = int(time.Now().Sub(appResponse.started).Microseconds())
+	appResponse.ServiceTimeMcs = int(time.Since(appResponse.started).Microseconds())
 	data, err := gojay.Marshal(appResponse)
 	if h.service.config.Debug {
 		log.Printf("[%v write] output:%s", h.service.config.ID, data)
 	}
+
+	if err != nil {
+		return fmt.Errorf("failed to marshal: %w", err)
+	}
+
 	_, err = writer.Write(data)
-	return err
+
+	if err != nil {
+		return fmt.Errorf("failed to write: %w", err)
+	}
+
+	return nil
 }
 
 func (h *Handler) trackIdle() {
