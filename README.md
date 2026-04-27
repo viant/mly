@@ -226,6 +226,7 @@ In all these, `%s` is `Model[].ID` (i.e. from `config.yaml`)
 - `/v1/api/metric/operation/%sDictMeta` - Records metrics to client dictionary fetch.
 - `/v1/api/metric/operation/%sCfgMeta` - Records metrics to client configuration fetch.
 - `/v1/api/metric/operation/%sMetaHandler` - Records server-side metrics to client set up.
+- `/v1/api/metric/operation/%sHTTPHandler` - Records per-request HTTP handler metrics. Includes `responseMarshalError` (response struct could not be marshaled; server returned 500) and `responseCommittedError` (body write failed after status was committed; client sees `200 OK` with a body shorter than `Content-Length`).
 
 ## `/v1/api/debug`
 
@@ -238,7 +239,7 @@ Model operations.
 
 In all these, `%s` is `Model[].ID` (i.e. from `config.yaml`)
 
-- `/v1/api/model/%s/eval` - runs `GET` / `POST` model prediction.
+- `/v1/api/model/%s/eval` - runs `GET` / `POST` model prediction. Successful responses set `Content-Type: application/json` and an explicit `Content-Length`; a short read against the declared length indicates a transport failure, not an empty payload.
 - `/v1/api/model/%s/meta/config` - provides configuration for client related to model
 - `/v1/api/model/%s/meta/dictionary` - provides current dictionary
 
