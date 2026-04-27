@@ -664,6 +664,14 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 					response.StatusCode, string(data), response.Body == nil, err)
 			}
 
+			if err != nil {
+				// 200 OK with a partial / aborted body read is not a success.
+				// Surfacing this prevents callers from silently unmarshaling an empty body
+				// (observed downstream as "Invalid JSON, wrong char ' ' found at position 0").
+				return nil, fmt.Errorf("HTTP Code:%d, partial body read: %w (got %d bytes)",
+					response.StatusCode, err, len(data))
+			}
+
 			return data, nil
 		}()
 
