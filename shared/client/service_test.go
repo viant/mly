@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/viant/bintly"
 	"github.com/viant/mly/shared"
 	cconfig "github.com/viant/mly/shared/client/config"
@@ -226,5 +227,120 @@ func TestService_Run(t *testing.T) {
 				assert.EqualValues(t, expectStatus, response.Status, fmt.Sprintf("%s - status", caseDesc))
 			}()
 		}
+	}
+}
+
+// TestService_Run_ParsesErrorBody verifies that when the server returns
+// a non-2xx response with a JSON-encoded Response body (the v0.20.0+
+// error-response contract), Run() does a best-effort unmarshal of the
+// body so the caller's response struct has Status="error" and Error
+// populated -- in addition to receiving a non-nil err return value.
+//
+// Backward-compatibility: when the server returns a plain-text body
+// (older mly versions, or any non-JSON body), the unmarshal silently
+// fails and the response struct stays untouched. The non-nil err
+// return remains the source-of-truth signal in either case.
+func TestService_Run_ParsesErrorBody(t *testing.T) {
+	baseURL := toolbox.CallerDirectory(3)
+
+	selectPort := 8088
+	server := faker.Server{URL: path.Join(baseURL, "testdata"), Port: selectPort, Debug: true}
+	server.Start()
+	defer server.Stop()
+
+	metaInput := shared.MetaInput{
+		Inputs: []*shared.Field{
+			{Name: "i1"},
+			{Name: "i2", Wildcard: true},
+		},
+	}
+	dictionary := NewDictionary(&common.Dictionary{
+		Layers: []common.Layer{{Name: "i1", Strings: []string{"v1", "v2"}}},
+		Hash:   123,
+	}, metaInput.Inputs)
+	hosts := []*Host{NewHost("localhost", selectPort)}
+	options := []Option{
+		WithRemoteConfig(&cconfig.Remote{
+			Datastore: config.Datastore{
+				Cache: &scache.Config{SizeMb: 64, Shards: 10, EntrySize: 1024},
+			},
+			MetaInput: metaInput,
+		}),
+		WithCacheScope(CacheScopeLocal),
+		WithDictionary(dictionary),
+		WithDataStorer(mock.New()),
+		WithDebug(true),
+	}
+
+	cases := []struct {
+		description     string
+		bodyContentType string
+		body            string
+		statusCode      int
+		expectErrorMsg  string // non-empty if response.Error should be populated
+		expectStatus    string // non-empty if response.Status should be populated
+	}{
+		{
+			description:     "v0.20.0 server: 400 JSON error body populates response.Error",
+			bodyContentType: "application/json",
+			body:            `{"status":"error","error":"invalid input shape","serviceTimeMcs":150}`,
+			statusCode:      http.StatusBadRequest,
+			expectErrorMsg:  "invalid input shape",
+			expectStatus:    common.StatusError,
+		},
+		{
+			description:     "v0.20.0 server: 500 JSON error body populates response.Error",
+			bodyContentType: "application/json",
+			body:            `{"status":"error","error":"upstream blew up","serviceTimeMcs":2200}`,
+			statusCode:      http.StatusInternalServerError,
+			expectErrorMsg:  "upstream blew up",
+			expectStatus:    common.StatusError,
+		},
+		{
+			description:     "older server: 400 plain-text body leaves response.Error empty",
+			bodyContentType: "text/plain",
+			body:            "bad request\n",
+			statusCode:      http.StatusBadRequest,
+			expectErrorMsg:  "",
+			expectStatus:    "", // gojay.Unmarshal silently fails on non-JSON; struct untouched
+		},
+		{
+			description:     "older server: 500 plain-text body leaves response.Error empty",
+			bodyContentType: "text/plain",
+			body:            "server error\n",
+			statusCode:      http.StatusInternalServerError,
+			expectErrorMsg:  "",
+			expectStatus:    "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.description, func(t *testing.T) {
+			body := tc.body
+			contentType := tc.bodyContentType
+			statusCode := tc.statusCode
+			server.Handler.Then(func(d []byte, w http.ResponseWriter) {
+				w.Header().Set("Content-Type", contentType)
+				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+				w.WriteHeader(statusCode)
+				_, _ = w.Write([]byte(body))
+			})
+
+			srv, err := New("error_body_case", hosts, options...)
+			require.NoError(t, err)
+
+			msg := srv.NewMessage()
+			msg.StringKey("i1", "v1")
+			msg.StringKey("i2", "v10")
+
+			response := &Response{Data: &TestOutput{}}
+			err = srv.Run(context.Background(), msg, response)
+
+			assert.Error(t, err, "non-2xx must always surface as a non-nil err return")
+			assert.Equal(t, tc.expectErrorMsg, response.Error,
+				"response.Error population (best-effort JSON unmarshal of error body)")
+			assert.Equal(t, tc.expectStatus, response.Status,
+				"response.Status population (best-effort JSON unmarshal of error body)")
+		})
 	}
 }

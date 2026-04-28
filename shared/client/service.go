@@ -164,6 +164,17 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 	}()
 
 	if err != nil {
+		// Best-effort: parse the body as a Response struct so callers
+		// that check response.Error see the server-side error message
+		// (v0.20.0+ servers emit a structured JSON error body alongside
+		// the HTTP 4xx/5xx; older servers emit plain text and the
+		// unmarshal silently fails, leaving response untouched).
+		// The returned err remains the source-of-truth signal; this is
+		// purely additive population of the response struct.
+		if len(body) > 0 {
+			_ = gojay.Unmarshal(body, response)
+		}
+
 		stats.AppendError(err)
 		if ctx.Err() == nil && s.ErrorHistory != nil {
 			go s.ErrorHistory.AddBytes([]byte(err.Error()))
@@ -625,6 +636,13 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 	evalUrl := host.evalURL(s.Model)
 	var terminate bool
 	var postErr error
+	// postBody captures the response body across retry iterations so that
+	// non-2xx terminal errors can return the JSON error body alongside the
+	// error. Run() does a best-effort unmarshal of this body to populate
+	// response.Error and response.Status from a v0.20.0+ server's structured
+	// error response. Older servers return plain-text bodies; the best-effort
+	// unmarshal silently fails on those, leaving response untouched.
+	var postBody []byte
 	for i := 0; i < s.MaxRetry; i++ {
 		data, err := func() ([]byte, error) {
 			onDone := s.httpCliCounter.Begin(time.Now())
@@ -660,7 +678,11 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 				// as long as this func is run synchronously,
 				// this is safe
 				terminate = true
-				return nil, fmt.Errorf("HTTP Code:%d, Body:\"%s\" (read nil:%v error:%v)",
+				// Return the body so the caller can parse the JSON error response
+				// (v0.20.0+ servers emit a Response struct here; older servers emit
+				// plain text). The error keeps the same wrapping format for backward
+				// compatibility with consumers that string-match on it.
+				return data, fmt.Errorf("HTTP Code:%d, Body:\"%s\" (read nil:%v error:%v)",
 					response.StatusCode, string(data), response.Body == nil, err)
 			}
 
@@ -677,6 +699,11 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 
 		if err != nil {
 			postErr = err
+			// Capture body for terminal errors so the caller can parse it.
+			// On retryable errors data is nil, so this is a no-op there.
+			if data != nil {
+				postBody = data
+			}
 		}
 
 		if terminate || ctx.Err() != nil {
@@ -684,12 +711,12 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 			break
 		}
 
-		if data != nil {
+		if data != nil && err == nil {
 			return data, nil
 		}
 	}
 
-	return nil, postErr
+	return postBody, postErr
 }
 
 func (s *Service) getHost() (*Host, error) {
