@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/viant/mly/service/config"
+	sstat "github.com/viant/mly/service/stat"
+	"github.com/viant/mly/shared/stat"
 )
 
 // writeFailingResponseWriter wraps httptest.ResponseRecorder so that
@@ -82,7 +84,7 @@ func TestWriteResponse_Success(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	err := h.writeResponse(rec, resp)
+	err := h.writeResponse(rec, resp, http.StatusOK)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -117,7 +119,7 @@ func TestWriteResponse_WriteFailureReturnsCommittedError(t *testing.T) {
 	resp := &Response{Status: "ok", started: time.Now()}
 
 	rec := newWriteFailingResponseWriter(0)
-	err := h.writeResponse(rec, resp)
+	err := h.writeResponse(rec, resp, http.StatusOK)
 
 	require.Error(t, err)
 
@@ -145,7 +147,7 @@ func TestWriteResponse_PartialWriteReturnsCommittedError(t *testing.T) {
 	resp := &Response{Status: "ok", started: time.Now()}
 
 	rec := newWriteFailingResponseWriter(5)
-	err := h.writeResponse(rec, resp)
+	err := h.writeResponse(rec, resp, http.StatusOK)
 
 	require.Error(t, err)
 	var committed *responseCommittedError
@@ -180,7 +182,7 @@ func TestWriteResponse_HasContentLengthMatchingBody(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			require.NoError(t, h.writeResponse(rec, tc.resp))
+			require.NoError(t, h.writeResponse(rec, tc.resp, http.StatusOK))
 
 			cl, atoiErr := strconv.Atoi(rec.Header().Get("Content-Length"))
 			require.NoError(t, atoiErr)
@@ -214,4 +216,93 @@ func TestResponseMarshalError_Unwrap(t *testing.T) {
 	var target *responseMarshalError
 	assert.True(t, errors.As(wrapped, &target))
 	assert.True(t, errors.Is(wrapped, inner))
+}
+
+// TestWriteResponse_HonorsStatusParam verifies that writeResponse
+// commits the supplied status code rather than always 200. This is the
+// foundation for the unified error-response wire format: writeError
+// uses writeResponse with 4xx/5xx so success and error responses share
+// shape (Content-Type, Content-Length, JSON body) and only differ in
+// status line + populated fields.
+func TestWriteResponse_HonorsStatusParam(t *testing.T) {
+	h := newTestHandler("test", false)
+	cases := []int{
+		http.StatusOK,
+		http.StatusBadRequest,
+		http.StatusRequestEntityTooLarge,
+		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+	}
+	for _, status := range cases {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			resp := &Response{Status: "ok", started: time.Now()}
+			rec := httptest.NewRecorder()
+			require.NoError(t, h.writeResponse(rec, resp, status))
+			assert.Equal(t, status, rec.Code)
+			assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+			assert.NotEmpty(t, rec.Header().Get("Content-Length"))
+		})
+	}
+}
+
+// TestWriteError_EmitsJSONErrorWithStatus locks in the wire shape
+// promised to clients on the error path: 4xx/5xx + JSON Response body
+// with status="error", populated error message, and serviceTimeMcs.
+// This is what makes a defensive consumer-side check
+// (e.g. mediator's `if response.Error != "" { ... }`) actually fire on
+// real predict-time errors instead of silently no-op'ing.
+func TestWriteError_EmitsJSONErrorWithStatus(t *testing.T) {
+	h := newTestHandler("test", false)
+	resp := &Response{Status: "ok", started: time.Now(), Data: "leftover-data"}
+	rec := httptest.NewRecorder()
+	hStats := stat.NewValues()
+
+	h.writeError(rec, resp, hStats, http.StatusInternalServerError, errors.New("upstream blew up"))
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code,
+		"error status must reach the wire")
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+	cl, atoiErr := strconv.Atoi(rec.Header().Get("Content-Length"))
+	require.NoError(t, atoiErr)
+	assert.Equal(t, rec.Body.Len(), cl)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `"status":"error"`,
+		"writeError must populate response.Status as error")
+	assert.Contains(t, body, `"error":"upstream blew up"`,
+		"writeError must populate response.Error from the supplied error")
+	assert.NotContains(t, body, "leftover-data",
+		"writeError must clear response.Data so the original Data does not leak into the error body")
+}
+
+// TestWriteError_FallsBackToHTTPErrorOnCommittedFailure verifies that
+// when the error response's body Write fails after status commit, the
+// fallback path appends a metric and returns without panic. The status
+// is already on the wire so http.Error inside the fallback is a no-op,
+// but the metric attribution and log line are what matter for
+// diagnosing the cliff scenario where both the success and error
+// responses fail to flush.
+func TestWriteError_FallsBackToHTTPErrorOnCommittedFailure(t *testing.T) {
+	h := newTestHandler("test", false)
+	resp := &Response{Status: "ok", started: time.Now()}
+	rec := newWriteFailingResponseWriter(0)
+	hStats := stat.NewValues()
+
+	h.writeError(rec, resp, hStats, http.StatusInternalServerError, errors.New("upstream blew up"))
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code,
+		"status was committed before the body write failed")
+	assert.NotEmpty(t, hStats.Values(),
+		"hStats must record the post-commit failure for metric attribution")
+
+	var sawCommitted bool
+	for _, v := range hStats.Values() {
+		if _, ok := v.(sstat.ResponseCommittedError); ok {
+			sawCommitted = true
+			break
+		}
+	}
+	assert.True(t, sawCommitted,
+		"hStats must include a sstat.ResponseCommittedError marker")
 }

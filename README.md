@@ -285,7 +285,11 @@ A short read against the declared `Content-Length` indicates a transport failure
 
 ### Error response
 
-Errors return a non-2xx HTTP status code:
+Errors return a non-2xx HTTP status code with the same `Content-Type: application/json` and explicit `Content-Length` as the success response. The body is the same `Response` JSON object with `status` set to `"error"`, the `error` field populated, and `data` omitted:
+
+```json
+{"status": "error", "error": "<message>", "serviceTimeMcs": 1100}
+```
 
 | status | cause |
 | ------ | ----- |
@@ -294,7 +298,7 @@ Errors return a non-2xx HTTP status code:
 | `429 Too Many Requests` | server is overloaded (evaluator queue rejected the request) |
 | `500 Internal Server Error` | prediction failure, server-side encoding failure, or any other server-side error |
 
-The error body is currently a plain-text message (Go `http.Error` format). Future versions are expected to align the error response with the success response shape; this section will be updated when that lands.
+Clients can therefore parse the response body the same way regardless of HTTP status — the only differences are the status code and which fields are populated. As a fallback for the rare case where the server cannot encode an error response, a plain-text body may be returned with the same status code.
 
 ### Example
 
