@@ -340,6 +340,7 @@ all compatible with Apache License, Version 2. Please see individual files for d
 
 # Versioning Notes
 
+- `v0.20.0` - error responses from `/v1/api/model/%s/eval` are now JSON-encoded `Response` objects (same `Content-Type` / `Content-Length` contract as success responses) instead of plain text; HTTP status codes are unchanged. The client populates `response.Error` from the parsed body, so consumers can rely on either the `err` return value or `response.Error` as the error signal.
 - `v0.14.1` last support for go 1.17
 - `v0.8.0` - numeric features are supported. 
 
