@@ -20,6 +20,7 @@ import (
 
 	"github.com/francoispqt/gojay"
 	"github.com/viant/gmetric"
+	"github.com/viant/mly/shared/circut"
 	"github.com/viant/mly/shared/client/config"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
@@ -322,6 +323,8 @@ func (s *Service) init() error {
 	if s.Config.MaxRetry == 0 {
 		s.Config.MaxRetry = 3
 	}
+
+	s.initLatencyBreakers()
 
 	err := s.initHTTPClient()
 	if err != nil {
@@ -629,7 +632,12 @@ func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values
 
 	var output []byte
 
+	start := time.Now()
 	output, err = s.httpPost(ctx, data, host)
+	// Feed the latency observation to the latency breaker (if one is
+	// configured on this host). Observe is nil-safe.
+	host.LatencyBreaker.Observe(time.Since(start))
+
 	if common.IsConnectionError(err) {
 		if s.Config.Debug {
 			log.Printf("[%s postRequest] connection error:%s", s.Config.Model, err)
@@ -639,6 +647,28 @@ func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values
 	}
 
 	return output, err
+}
+
+// initLatencyBreakers attaches a circut.LatencyBreaker to each
+// configured host when the Config has at least one non-zero threshold.
+// Both thresholds zero -> no breaker constructed (backward-compatible
+// no-op).
+func (s *Service) initLatencyBreakers() {
+	if s.Config.LatencyBreakerLatestThreshold == 0 && s.Config.LatencyBreakerRollingThreshold == 0 {
+		return
+	}
+	for _, h := range s.Config.Hosts {
+		if h == nil || h.LatencyBreaker != nil {
+			continue
+		}
+		h.LatencyBreaker = circut.NewLatencyBreaker(
+			s.Config.LatencyBreakerLatestThreshold,
+			s.Config.LatencyBreakerRollingThreshold,
+			s.Config.LatencyBreakerRollingWindow,
+			s.Config.LatencyBreakerKConsecutive,
+			s.Config.LatencyBreakerPassThroughFraction,
+		)
+	}
 }
 
 func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte, error) {
