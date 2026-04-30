@@ -1,8 +1,6 @@
 module github.com/viant/mly
 
-go 1.22
-
-toolchain go1.23.3
+go 1.23.6
 
 require (
 	github.com/aerospike/aerospike-client-go v4.5.2+incompatible
@@ -29,8 +27,11 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+replace github.com/tensorflow/tensorflow => ./third_party/go-tensorflow
+
 require (
 	github.com/cyningsun/heavy-hitters v0.0.0-20230601160639-238b21a6ddce
+	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/migotom/heavykeeper v0.0.0-20230118182531-d6958b4bb326
 	github.com/prometheus/client_golang v1.16.0
 	golang.org/x/sync v0.8.0

@@ -6,31 +6,42 @@ import (
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 )
 
-//ModelList represents model
+// ModelList represents model
 type ModelList struct {
 	Models []*Model
 }
 
-//Init initialises model list
+// Init initialises model list
 func (l *ModelList) Init(bc *config.BatcherConfig) {
 	if len(l.Models) == 0 {
 		return
 	}
 
-	for i := range l.Models {
-		l.Models[i].Init(bc)
+	for _, model := range l.Models {
+		model.Init(bc)
 	}
 }
 
-//Validate validates model list
+// Validate validates model list
 func (l *ModelList) Validate() error {
 	if len(l.Models) == 0 {
 		return fmt.Errorf("models were empty")
 	}
+
 	for _, model := range l.Models {
 		if err := model.Validate(); err != nil {
-			return err
+			return fmt.Errorf("failed to validate model: %s, err: %w", model.ID, err)
 		}
 	}
+	return nil
+}
+
+func (l *ModelList) ConfigCheck(validDatastoreIDs map[string]struct{}, validTransformerIDs map[string]struct{}) error {
+	for _, model := range l.Models {
+		if err := model.ConfigCheck(validDatastoreIDs, validTransformerIDs); err != nil {
+			return fmt.Errorf("failed to validate model: %s, err: %w", model.ID, err)
+		}
+	}
+
 	return nil
 }

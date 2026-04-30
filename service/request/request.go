@@ -20,8 +20,7 @@ type Request struct {
 	Body []byte // usually the POST JSON content
 
 	// Passed through to Evaluator.
-	// This is expected to be [numInputs][1][batchSize]T.
-	// TODO consider scenario when the second slice does not have length 1.
+	// This is expected to be [numInputs]([batchSize][1]T).
 	Feeds []interface{}
 
 	supplied map[string]struct{} // used to check if the required inputs were provided
@@ -159,6 +158,7 @@ func (r *Request) UnmarshalJSONObject(dec *gojay.Decoder, key string) error {
 			return nil
 		}
 
+		// non-batch mode
 		outerr := func() error {
 			switch input.Type.Kind() {
 			case reflect.String:

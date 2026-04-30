@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"sync"
 	"time"
 
@@ -50,23 +51,43 @@ func RunAppWithConfigWaitError(version string, args []string, cp configProvider,
 	if err != nil {
 		return err
 	}
+
 	if IsHelpOption(args) {
 		return nil
 	}
+
 	if options.Version {
-		log.Printf("Mly: Version: %v\n", version)
+		log.Printf("mly version: %v\n", version)
 		return nil
 	}
+
 	config, err := cp(options)
 	if err != nil {
 		return err
 	}
-	return runApp(config, wg)
+
+	return runApp(config, wg, options.ConfigTestOnly)
 }
 
-func runApp(config *Config, wg *sync.WaitGroup) error {
+func runApp(config *Config, wg *sync.WaitGroup, configTestOnly bool) error {
 	if err := config.Validate(); err != nil {
 		return err
+	}
+
+	if err := config.ConfigCheck(); err != nil {
+		return err
+	}
+
+	if configTestOnly {
+		log.Printf("config OK")
+		return nil
+	}
+
+	if config.ProfilerPort > 0 {
+		go func() {
+			log.Printf("!!! starting profile server on port %d !!!\n", config.ProfilerPort)
+			log.Println(http.ListenAndServe(fmt.Sprintf("localhost:%d", config.ProfilerPort), nil))
+		}()
 	}
 
 	start := time.Now()

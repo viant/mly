@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/viant/afs/file"
+	"github.com/viant/mly/service/domain/transformer"
 	batchconfig "github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/shared"
 	"github.com/viant/tapper/config"
@@ -17,17 +18,29 @@ type Model struct {
 	ID    string
 	Debug bool
 
-	// Platform specifies the model platform (tensorflow, triton)
-	// Defaults to "tensorflow" for backward compatibility
+	// Mode overrides the endpoint behavior from inference to routing.
+	// This primarily is used to confirm that the mode should be a router.
+	// Can be one of "inference" or "router".
+	// Defaults to "inference".
+	Mode string `json:",omitempty" yaml:",omitempty"`
+
+	// Platform specifies where inference occurs.
+	// Can be one of "tensorflow" or "triton".
+	// Defaults to "tensorflow".
 	Platform string `json:",omitempty" yaml:",omitempty"`
 
 	// Location is the path the model will be copied to.
 	Location string `json:",omitempty" yaml:",omitempty"`
 
 	// Dir is used to build a Location if Location is not provided.
-	// The build Location will use Dir directory after os.TempDir() and ID.
+	// The built Location will use Dir directory after os.TempDir() and ID.
 	Dir string
 
+	// URL is the location of the model.
+	// If Platform is "triton", this is the HTTP prefix of the Triton server, and is deprecated.
+	// It is preferred to use service/endpoint.Config.TritonServers and Triton.ServerID instead.
+	// This will create a new connection per instance URL is used for a Triton server.
+	// Additionally, it is assumed that explicit model control is not enabled for that HTTP URL.
 	URL string
 
 	Batch *BatcherConfigFile `json:",omitempty" yaml:",omitempty"`
@@ -40,17 +53,22 @@ type Model struct {
 	// If UseDict is nil, defaults to true.
 	UseDict *bool `json:",omitempty" yaml:",omitempty"`
 
-	DictURL string // Deprecated: we usually extract the dictionary/vocabulary from TF graph
+	// Deprecated: we usually extract the dictionary/vocabulary from TF graph
+	DictURL string
 
 	shared.MetaInput `json:",omitempty" yaml:",inline"`
 
 	// Deprecated: we can infer output types from TF graph, and there may be more than one output
 	OutputType string `json:",omitempty" yaml:",omitempty"`
 
+	// Transformer is the name of the model output transformer.
 	Transformer string `json:",omitempty" yaml:",omitempty"`
 
-	// caching
+	// DataStore is the name of the datastore to use for caching.
 	DataStore string `json:",omitempty" yaml:",omitempty"`
+
+	// Router must be provided if Mode is "router".
+	Router *RouterConfig `json:",omitempty" yaml:",omitempty"`
 
 	// Stream is a github.com/viant/tapper configuration.
 	// All requests are eligible to be logged.
@@ -62,8 +80,17 @@ type Model struct {
 	// Modified shows the state of the model files.
 	Modified *Modified `json:",omitempty" yaml:",omitempty"`
 
+	// ReloadPollIntervalSeconds is the interval at which the model will be polled for reloads.
+	// Defaults to 60 seconds.
+	ReloadPollIntervalSeconds int `json:",omitempty" yaml:",omitempty"`
+
+	// ReloadTimeoutSeconds is the timeout for reloads.
+	// Defaults to 300 seconds.
+	ReloadTimeoutSeconds int `json:",omitempty" yaml:",omitempty"`
+
 	DictMeta DictionaryMeta
 
+	// Test is used to test the model on startup.
 	Test TestPayload `json:",omitempty" yaml:",omitempty"`
 }
 
@@ -96,6 +123,14 @@ func (m *Model) Init(globalBatchConfig *batchconfig.BatcherConfig) {
 		m.Location = path.Join(os.TempDir(), m.ID+m.Dir)
 	}
 
+	if m.ReloadPollIntervalSeconds == 0 {
+		m.ReloadPollIntervalSeconds = 60
+	}
+
+	if m.ReloadTimeoutSeconds == 0 {
+		m.ReloadTimeoutSeconds = 300
+	}
+
 	_ = os.MkdirAll(m.Location, file.DefaultDirOsMode)
 
 	m.Modified = &Modified{}
@@ -121,11 +156,23 @@ func (m *Model) Init(globalBatchConfig *batchconfig.BatcherConfig) {
 			BatcherConfig: *globalBatchConfig,
 		}
 	}
+
+	if m.Router != nil {
+		m.Router.Init()
+	}
 }
 
 func (m *Model) Validate() error {
 	if m.ID == "" {
 		return fmt.Errorf("model.ID was empty")
+	}
+
+	if m.ReloadPollIntervalSeconds <= 0 {
+		return fmt.Errorf("model.ReloadPollIntervalSeconds must be greater than 0")
+	}
+
+	if m.ReloadTimeoutSeconds <= 0 {
+		return fmt.Errorf("model.ReloadTimeoutSeconds must be greater than 0")
 	}
 
 	// Platform-specific validation
@@ -135,44 +182,115 @@ func (m *Model) Validate() error {
 		if m.URL == "" {
 			return fmt.Errorf("tensorflow model %s requires URL", m.ID)
 		}
+
+		if m.Mode == "router" {
+			return fmt.Errorf("tensorflow model %s is not supported in router mode", m.ID)
+		}
 	case "triton":
-		// Triton models require Triton configuration
 		if m.Triton == nil {
 			return fmt.Errorf("triton model %s requires Triton configuration", m.ID)
 		}
-		if m.URL == "" {
-			return fmt.Errorf("triton model %s requires URL (Triton server endpoint)", m.ID)
-		}
-		if err := m.Triton.Validate(); err != nil {
+
+		if err := m.Triton.Validate(m.Mode == "router", m.URL != ""); err != nil {
 			return fmt.Errorf("triton model %s config invalid: %w", m.ID, err)
 		}
 	default:
 		return fmt.Errorf("unsupported platform '%s' for model %s (supported: tensorflow, triton)", platform, m.ID)
 	}
 
+	if m.Mode == "router" {
+		if m.Router == nil {
+			return fmt.Errorf("router model %s requires Router configuration", m.ID)
+		}
+
+		if err := m.Router.Validate(); err != nil {
+			return fmt.Errorf("router model %s config invalid: %w", m.ID, err)
+		}
+	}
+
 	return nil
 }
 
-// TritonConfig represents Triton Inference Server specific configuration
-type TritonConfig struct {
-	ModelName string `json:",omitempty" yaml:",omitempty"` // Model name in Triton
-	Timeout   int    `json:",omitempty" yaml:",omitempty"` // HTTP timeout in milliseconds
+// ConfigCheck is a path to validate relationships with other config entities.
+func (m *Model) ConfigCheck(validDatastoreIDs map[string]struct{}, validTritonServerIDs map[string]struct{}) error {
+	if m.DataStore != "" {
+		_, ok := validDatastoreIDs[m.DataStore]
+		if !ok {
+			return fmt.Errorf("datastore %s is not valid", m.DataStore)
+		}
+	}
+
+	if m.Transformer != "" {
+		_, err := transformer.Singleton().Lookup(m.Transformer)
+		if err != nil {
+			return fmt.Errorf("transformer %s is not valid: %w", m.Transformer, err)
+		}
+	}
+
+	if m.Platform == "triton" {
+		if m.Triton == nil {
+			return fmt.Errorf("triton model %s requires Triton configuration", m.ID)
+		}
+
+		if err := m.Triton.CheckConfig(validTritonServerIDs); err != nil {
+			return fmt.Errorf("triton model %s config invalid: %w", m.ID, err)
+		}
+	}
+
+	return nil
 }
 
-func (t *TritonConfig) Validate() error {
-	if t.ModelName == "" {
-		return fmt.Errorf("Triton ModelName is required")
-	}
-	if t.Timeout <= 0 {
+// TritonConfig represents Triton Inference Server specific configuration.
+type TritonConfig struct {
+	// Model name in Triton.
+	// Optional if Model.Mode is "router".
+	ModelName string `json:",omitempty" yaml:",omitempty"`
+
+	// ServerID is the ID of the Triton server.
+	ServerID string `json:",omitempty" yaml:",omitempty"`
+
+	// RepositoryExplicit should be true if the Model Repository is in EXPLICIT mode.
+	// In the case of URL-based Triton configuration, the default is to assume POLL mode.
+	// See https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/user_guide/model_management.html
+	RepositoryExplicit bool `json:",omitempty" yaml:",omitempty"`
+
+	// Maximum request timeout in milliseconds.
+	// Defaults to 100 milliseconds.
+	Timeout int `json:",omitempty" yaml:",omitempty"`
+}
+
+func (t *TritonConfig) Init() {
+	if t.Timeout == 0 {
 		t.Timeout = 100
 	}
+}
+
+func (t *TritonConfig) Validate(isRouter bool, urlPresent bool) error {
+	if !isRouter && t.ModelName == "" {
+		return fmt.Errorf("triton ModelName is required")
+	}
+
+	if t.ServerID == "" && !urlPresent {
+		return fmt.Errorf("triton ServerID or Model.URL is required")
+	}
+
+	return nil
+}
+
+func (m *TritonConfig) CheckConfig(validServerIDs map[string]struct{}) error {
+	_, ok := validServerIDs[m.ServerID]
+	if m.ServerID != "" && !ok {
+		return fmt.Errorf("triton server ID %s is not valid", m.ServerID)
+	}
+
 	return nil
 }
 
 // GetPlatform returns the platform with default to "tensorflow" for backward compatibility
 func (m *Model) GetPlatform() string {
 	if m.Platform == "" {
-		return "tensorflow"
+		m.Platform = "tensorflow"
 	}
+
 	return m.Platform
 }

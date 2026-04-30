@@ -25,6 +25,8 @@ type Config struct {
 	config.ModelList      `json:",omitempty" yaml:",inline"`
 	sconfig.DatastoreList `json:",omitempty" yaml:",inline"`
 
+	TritonServers []config.TritonServer `json:",omitempty" yaml:",omitempty"`
+
 	// GlobalBatching provides a default batching configuration if
 	// models do not provide their own.
 	// If GlobalBatching is provided but a model should not be batching,
@@ -39,8 +41,13 @@ type Config struct {
 
 	Endpoint econfig.Endpoint
 
+	// Deprecated, use ProfilerPort instead
 	EnableMemProf bool
+
+	// Deprecated, use ProfilerPort instead
 	EnableCPUProf bool
+
+	ProfilerPort int
 
 	TLS *TLSConfig
 
@@ -56,6 +63,9 @@ func (c *Config) Init() {
 	c.ModelList.Init(c.GlobalBatching)
 	c.DatastoreList.Init()
 	c.Endpoint.Init()
+	for i := range c.TritonServers {
+		c.TritonServers[i].Init()
+	}
 }
 
 // Validate validates config
@@ -63,9 +73,45 @@ func (c *Config) Validate() error {
 	if err := c.ModelList.Validate(); err != nil {
 		return err
 	}
+
 	if err := c.DatastoreList.Validate(); err != nil {
 		return err
 	}
+
+	for i, tritonServer := range c.TritonServers {
+		if err := tritonServer.Validate(); err != nil {
+			return errors.Wrapf(err, "triton server number %d validation failed", i)
+		}
+	}
+
+	return nil
+}
+
+// ConfigCheck validates relationships with other config entities
+func (c *Config) ConfigCheck() error {
+	connectionIDs := make(map[string]struct{})
+	for _, connection := range c.DatastoreList.Connections {
+		connectionIDs[connection.ID] = struct{}{}
+	}
+
+	validDatastoreIDs := make(map[string]struct{})
+	for _, datastore := range c.DatastoreList.Datastores {
+		if err := datastore.ConfigCheck(connectionIDs); err != nil {
+			return err
+		}
+
+		validDatastoreIDs[datastore.ID] = struct{}{}
+	}
+
+	validTritonServerIDs := make(map[string]struct{})
+	for _, tritonServer := range c.TritonServers {
+		validTritonServerIDs[tritonServer.ID] = struct{}{}
+	}
+
+	if err := c.ModelList.ConfigCheck(validDatastoreIDs, validTritonServerIDs); err != nil {
+		return err
+	}
+
 	return nil
 }
 

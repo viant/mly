@@ -11,7 +11,8 @@ import (
 	"github.com/viant/mly/shared/common/storable"
 )
 
-func RunApp(Version string, args []string) {
+// RunApp shows an example of how to register a Transformer
+func RunApp(Version string, args []string) error {
 	ctx := context.Background()
 
 	storableSrv := storable.Singleton()
@@ -19,7 +20,7 @@ func RunApp(Version string, args []string) {
 		return new(slfmodel.Segmented)
 	})
 
-	endpoint.RunAppWithConfig(Version, args, func(options *endpoint.Options) (*endpoint.Config, error) {
+	err := endpoint.RunAppWithConfigError(Version, args, func(options *endpoint.Options) (*endpoint.Config, error) {
 		config, err := NewConfigFromURL(ctx, options.ConfigURL)
 		if err != nil {
 			return nil, err
@@ -29,4 +30,6 @@ func RunApp(Version string, args []string) {
 
 		return &config.Config, err
 	})
+
+	return err
 }

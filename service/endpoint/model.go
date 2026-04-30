@@ -16,6 +16,7 @@ import (
 	"github.com/viant/mly/service/config"
 	serviceConfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/endpoint/meta"
+	"github.com/viant/mly/service/triton"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
 	"golang.org/x/sync/semaphore"
@@ -47,8 +48,15 @@ type Hook interface {
 	Hook(*config.Model, *service.Service)
 }
 
-func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.Service,
-	hooks []Hook, metrics *gmetric.Service, promReg *prometheus.Registry) error {
+func Build(
+	mux *http.ServeMux,
+	config *Config,
+	datastores map[string]*datastore.Service,
+	tritonClients map[string]triton.TritonClient,
+	hooks []Hook,
+	metrics *gmetric.Service,
+	promReg prometheus.Registerer,
+) error {
 
 	cfge := config.Endpoint
 	pool := buffer.New(cfge.PoolMaxSize, cfge.BufferSize)
@@ -77,7 +85,7 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 		Subsystem: "model",
 		Name:      "idletime",
 
-		Help: "measured time between requests",
+		Help: "measured time between requests in nanoseconds",
 
 		Buckets: buckets,
 	}, []string{"model"})
@@ -104,9 +112,9 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 
 			mstart := time.Now()
 
-			log.Printf("[%s] model loading", model.ID)
+			log.Printf("[%s] Model loading", model.ID)
 
-			// Validate model configuration first
+			// Validate model configuration first - this is redundant
 			if validateErr := model.Validate(); validateErr != nil {
 				log.Printf("[%s] ERROR: Model validation failed: %v", model.ID, validateErr)
 				lock.Lock()
@@ -114,17 +122,14 @@ func Build(mux *http.ServeMux, config *Config, datastores map[string]*datastore.
 				lock.Unlock()
 				return
 			}
+
 			log.Printf("[%s] Model configuration validated successfully", model.ID)
 
 			e := func() error {
 				var modelSrv *service.Service
 				var err error
 
-				if model.Platform == "" {
-					// Default to TensorFlow for models without explicit platform
-					model.Platform = "tensorflow"
-				}
-				modelSrv, err = service.NewWithPlatform(context.Background(), model, fs, metrics, datastores, sema, cfge.MaxEvaluatorWait, serviceOpts...)
+				modelSrv, err = service.New(context.Background(), model, fs, metrics, datastores, tritonClients, sema, cfge.MaxEvaluatorWait, serviceOpts...)
 
 				if err != nil {
 					return fmt.Errorf("failed to create service for model:%v, err:%w", model.ID, err)

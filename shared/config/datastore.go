@@ -8,7 +8,7 @@ import (
 	"github.com/viant/scache"
 )
 
-//Datastore represents datastore
+// Datastore represents datastore
 type Datastore struct {
 	ID                   string
 	Cache                *scache.Config
@@ -20,7 +20,7 @@ type Datastore struct {
 	Debug                bool `json:",omitempty" yaml:",omitempty"`
 }
 
-//Init initialises datastore
+// Init initialises datastore
 func (d *Datastore) Init() {
 	if d.Reference == nil {
 		d.Reference = &datastore.Reference{}
@@ -28,7 +28,7 @@ func (d *Datastore) Init() {
 	d.Reference.Init()
 }
 
-//FieldsDescriptor sets field descriptors
+// FieldsDescriptor sets field descriptors
 func (d *Datastore) FieldsDescriptor(fields []*storable.Field) error {
 	d.Fields = fields
 	for _, field := range d.Fields {
@@ -36,14 +36,16 @@ func (d *Datastore) FieldsDescriptor(fields []*storable.Field) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
-//Validate checks if datastore settings are valid
+// Validate checks if datastore settings are valid
 func (d *Datastore) Validate() error {
 	if d.ID == "" {
 		return fmt.Errorf("datastore ID was empty")
 	}
+
 	if d.Reference.Connection != "" {
 		if d.Dataset == "" {
 			return fmt.Errorf("datastore Dataset was empty")
@@ -52,9 +54,22 @@ func (d *Datastore) Validate() error {
 			return fmt.Errorf("datastore Namespace was empty")
 		}
 	}
+
 	if d.Storable != "" {
 		if _, err := storable.Singleton().Lookup(d.Storable); err != nil {
 			return fmt.Errorf("unknown storable: %v, on datastore: %v", d.Storable, d.ID)
+		}
+	}
+
+	return nil
+}
+
+// ConfigCheck validates relationships with other config entities
+func (d *Datastore) ConfigCheck(validConnectionIDs map[string]struct{}) error {
+	if d.Reference.Connection != "" {
+		_, ok := validConnectionIDs[d.Reference.Connection]
+		if !ok {
+			return fmt.Errorf("connection %s is not valid", d.Reference.Connection)
 		}
 	}
 	return nil

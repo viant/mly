@@ -11,5 +11,8 @@ var Version = "dev"
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	server.RunApp(Version, os.Args[1:])
+	err := server.RunApp(Version, os.Args[1:])
+	if err != nil {
+		log.Fatal(err)
+	}
 }

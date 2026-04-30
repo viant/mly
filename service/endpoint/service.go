@@ -13,7 +13,7 @@ import (
 	"github.com/viant/mly/service/endpoint/checker"
 	"github.com/viant/mly/service/endpoint/health"
 	promh "github.com/viant/mly/service/endpoint/prometheus"
-	"github.com/viant/mly/shared"
+	"github.com/viant/mly/service/triton"
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/datastore"
@@ -111,7 +111,7 @@ func (s *Service) SelfTest() error {
 	}()
 
 	for _, m := range s.config.ModelList.Models {
-		go func(modelID string, transformer string, inputs []*shared.Field, tp srvConfig.TestPayload, outputs []*shared.Field, debug bool) {
+		go func(modelID string, transformer string, tp srvConfig.TestPayload, debug bool) {
 			defer waitGroup.Done()
 			// for backwards compatibility, skip tests if not specified
 			if !tp.Test && !tp.SingleBatch && len(tp.Single) == 0 && len(tp.Batch) == 0 {
@@ -120,14 +120,14 @@ func (s *Service) SelfTest() error {
 			}
 
 			start := time.Now()
-			err := checker.SelfTest(hosts, timeout, modelID, transformer != "", inputs, tp, outputs, debug)
+			err := checker.SelfTest(hosts, timeout, modelID, transformer != "", tp, debug)
 			if err != nil {
 				errHandler <- err
 				return
 			}
 
 			log.Printf("tested %s %s", modelID, time.Now().Sub(start))
-		}(m.ID, m.Transformer, m.Inputs, m.Test, m.Outputs, m.Debug)
+		}(m.ID, m.Transformer, m.Test, m.Debug)
 	}
 
 	waitGroup.Wait()
@@ -196,19 +196,41 @@ func New(cfg *Config) (*Service, error) {
 	metricHandler := gmetric.NewHandler(common.MetricURI, metrics)
 	mux.Handle(common.MetricURI, metricHandler)
 
-	promReg := prometheus.NewRegistry()
-	mux.Handle("/v1/prometheus", promh.Handler(promReg))
+	// We use the default Prometheus registry here because go-grpc-prometheus seems to force us to use it.
+	promReg := prometheus.DefaultRegisterer
+
+	registerPrometheusMetrics(promReg)
+	mux.Handle("/v1/prometheus", promh.Handler(prometheus.DefaultGatherer))
 
 	datastores, err := datastore.NewStoresV2(&cfg.DatastoreList, metrics, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create datastores: %w", err)
 	}
 
+	tritonClients := make(map[string]triton.TritonClient)
+	for _, server := range cfg.TritonServers {
+		tritonClient, err := triton.NewClient(server)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create triton client for server %s: %w", server.ID, err)
+		}
+
+		log.Printf("checking triton server %s health\n", server.ID)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(server.StartupTimeoutSeconds)*time.Second)
+
+		err = tritonClient.ServerReady(ctx)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("failed to check triton server %s health: %w", server.ID, err)
+		}
+
+		tritonClients[server.ID] = tritonClient
+	}
+
 	hooks := []Hook{
 		healthHandler,
 	}
 
-	err = Build(mux, cfg, datastores, hooks, metrics, promReg)
+	err = Build(mux, cfg, datastores, tritonClients, hooks, metrics, promReg)
 	if err != nil {
 		return nil, err
 	}

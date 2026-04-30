@@ -9,12 +9,11 @@ import (
 	"time"
 
 	"github.com/viant/mly/service/config"
-	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/client"
 	"github.com/viant/toolbox"
 )
 
-func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTransformer bool, inputs_ []*shared.Field, tp config.TestPayload, outputs []*shared.Field, debug bool) error {
+func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTransformer bool, tp config.TestPayload, debug bool) error {
 	cli, err := client.New(modelID, host, client.WithDebug(true))
 	if err != nil {
 		return fmt.Errorf("%s:%w", modelID, err)
@@ -27,9 +26,66 @@ func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 	var testData map[string]interface{}
 	var batchSize int
 	if len(tp.Batch) > 0 {
-		for k, v := range tp.Batch {
-			testData[k] = v
-			batchSize = len(v)
+		testData = make(map[string]interface{})
+		for _, field := range inputs {
+			fn := field.Name
+			v := tp.Batch[fn]
+
+			for _, vv := range v {
+				tv := vv
+				switch field.DataType {
+				case "int", "int32", "int64":
+					var v int
+					switch atv := tv.(type) {
+					case int:
+						v = atv
+					case int32:
+					case int64:
+						v = int(atv)
+					default:
+						return fmt.Errorf("test data malformed: %s expected int-like, found %T", fn, tv)
+					}
+
+					if testData[fn] == nil {
+						testData[fn] = []int{v}
+					} else {
+						testData[fn] = append(testData[fn].([]int), v)
+					}
+
+				case "float", "float32", "float64":
+					var v float32
+					switch atv := tv.(type) {
+					case float32:
+						v = atv
+					case float64:
+						v = float32(atv)
+					default:
+						return fmt.Errorf("test data malformed: %s expected float32-like, found %T", fn, tv)
+					}
+
+					if testData[fn] == nil {
+						testData[fn] = []float32{v}
+					} else {
+						testData[fn] = append(testData[fn].([]float32), v)
+					}
+
+				default:
+					switch atv := tv.(type) {
+					case string:
+						if testData[fn] == nil {
+							testData[fn] = []string{atv}
+						} else {
+							testData[fn] = append(testData[fn].([]string), atv)
+						}
+					default:
+						return fmt.Errorf("test data malformed: %s expected string-like, found %T", fn, tv)
+					}
+				}
+			}
+
+			if len(v) > batchSize {
+				batchSize = len(v)
+			}
 		}
 	} else {
 		if len(tp.Single) > 0 {
@@ -76,6 +132,7 @@ func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 			}
 		}
 
+		// testData has a single set of inputs
 		if tp.SingleBatch {
 			for _, field := range inputs {
 				fn := field.Name
@@ -93,8 +150,7 @@ func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 						return fmt.Errorf("test data malformed: %s expected int-like, found %T", fn, tv)
 					}
 
-					b := [1]int{v}
-					testData[fn] = b[:]
+					testData[fn] = []int{v}
 				case "float", "float32", "float64":
 					var v float32
 					switch atv := tv.(type) {
@@ -106,13 +162,11 @@ func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 						return fmt.Errorf("test data malformed: %s expected float32-like, found %T", fn, tv)
 					}
 
-					b := [1]float32{v}
-					testData[fn] = b[:]
+					testData[fn] = []float32{v}
 				default:
 					switch atv := tv.(type) {
 					case string:
-						b := [1]string{atv}
-						testData[fn] = b[:]
+						testData[fn] = []string{atv}
 					default:
 						return fmt.Errorf("test data malformed: %s expected string-like, found %T", fn, tv)
 					}
@@ -145,6 +199,7 @@ func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 				rat[i] = float32(v)
 			}
 			msg.FloatsKey(k, rat)
+
 		case float32:
 			msg.FloatKey(k, at)
 		case float64:
@@ -183,9 +238,10 @@ func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTr
 	}
 
 	resp := new(client.Response)
+
 	// see if there is a transform
 	// if there is, trigger the transform with mock data?
-	resp.Data = Generated(outputs, batchSize, usesTransformer)()
+	resp.Data = Generated(cli.Datastore.MetaInput.Outputs, batchSize, usesTransformer)()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

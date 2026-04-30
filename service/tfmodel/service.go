@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	tf "github.com/tensorflow/tensorflow/tensorflow/go"
@@ -36,6 +35,7 @@ import (
 // model runs.
 // It manages loading and reloading the model files, as well as providing
 // metadata based off the model and configuration.
+// Implements platform.PlatformEvaluator.
 type Service struct {
 	// Modifies this object to be used by config endpoints.
 	config *config.Model
@@ -60,9 +60,6 @@ type Service struct {
 	dictionary *common.Dictionary
 
 	fs afs.Service
-
-	// Should point to service.Service.ReloadOK
-	ReloadOK *int32
 }
 
 func (s *Service) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
@@ -97,13 +94,12 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	}
 
 	if !s.isModified(snapshot) {
-		atomic.StoreInt32(s.ReloadOK, 1)
 		return nil
 	}
 
 	model, err := s.loadModel(ctx, err)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load model:%w", err)
 	}
 
 	signature, err := signature.Signature(model)
@@ -207,7 +203,6 @@ func (s *Service) ReloadIfNeeded(ctx context.Context) error {
 	s.signature = signature
 	s.inputs = modelInputsByName
 
-	atomic.StoreInt32(s.ReloadOK, 1)
 	return nil
 }
 
@@ -431,8 +426,13 @@ func (s *Service) Close() error {
 
 // NewService creates an unprepared Service.
 // This service isn't ready until ReloadIfNeeded() is called.
-func NewService(cfg *config.Model, fs afs.Service, metrics *gmetric.Service, sema *semaphore.Weighted,
-	maxEvaluatorWait time.Duration) *Service {
+func NewService(
+	cfg *config.Model,
+	fs afs.Service,
+	metrics *gmetric.Service,
+	sema *semaphore.Weighted,
+	maxEvaluatorWait time.Duration,
+) *Service {
 
 	location := reflect.TypeOf(evaluator.Service{}).PkgPath()
 	id := cfg.ID

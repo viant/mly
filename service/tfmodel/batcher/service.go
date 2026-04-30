@@ -11,6 +11,7 @@ import (
 	"github.com/viant/gmetric"
 	"github.com/viant/mly/service/errors"
 	"github.com/viant/mly/service/evaluator"
+	"github.com/viant/mly/service/request/shape"
 	"github.com/viant/mly/service/tfmodel/batcher/adjust"
 	"github.com/viant/mly/service/tfmodel/batcher/config"
 	"github.com/viant/mly/shared/stat"
@@ -186,7 +187,7 @@ func (s *Service) Evaluate(ctx context.Context, inputs []interface{}) ([]interfa
 		return nil, err
 	}
 
-	return nil, fmt.Errorf("unhandled select")
+	panic("unhandled select")
 }
 
 func (s *Service) setShedding(shedding bool) {
@@ -217,35 +218,6 @@ func (s *Service) checkShedding() error {
 	return nil
 }
 
-func determineBatchSize(inputs []interface{}) (int, error) {
-	var batchSize int
-	for _, iSlice := range inputs {
-		switch typedSlice := iSlice.(type) {
-		case [][]int32:
-			batchSize = len(typedSlice)
-		case [][]int64:
-			batchSize = len(typedSlice)
-		case [][]float32:
-			batchSize = len(typedSlice)
-		case [][]float64:
-			batchSize = len(typedSlice)
-		case [][]string:
-			batchSize = len(typedSlice)
-		default:
-			continue
-		}
-
-		break
-	}
-
-	var err error
-	if batchSize == 0 {
-		err = fmt.Errorf("could not determine batch size")
-	}
-
-	return batchSize, err
-}
-
 // queue for requests i.e. input batch
 func (s *Service) queue(ctx context.Context, inputs []interface{}) (*subBatch, error) {
 	if s.closed {
@@ -259,7 +231,7 @@ func (s *Service) queue(ctx context.Context, inputs []interface{}) (*subBatch, e
 
 	s.Verbose.DebugFn("Queue", func() string { return fmt.Sprintf("inputs:%v", inputs) }, s.Verbose.InputEnabled())
 
-	batchSize, err := determineBatchSize(inputs)
+	batchSize, err := shape.DetermineBatchSize(inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -453,6 +425,7 @@ func (s *Service) run(batch predictionBatch) {
 				batchResult[resOffset] = typedSlice[o:r]
 			case [][]string:
 				batchResult[resOffset] = typedSlice[o:r]
+
 			case []int32:
 				batchResult[resOffset] = typedSlice[o:r]
 			case []int64:

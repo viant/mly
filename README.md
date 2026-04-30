@@ -7,15 +7,15 @@ This library is compatible with Go 1.22+
 
 # Introduction
 
-The goal of this library to provide a deep-learning model prediction HTTP service which can speed up end to end execution by leveraging a caching system. 
+The goal of this library & service to provide a deep-learning model prediction HTTP service which can speed up end to end execution by leveraging a caching system.
 
 **Supported Backends:**
 - **TensorFlow** (native integration)
 - **Triton Inference Server** (via gRPC)
 
-The client cares of any dictionary-based key generation and model changes automatically. 
+The client handles dictionary-based key generation and model changes automatically.
 
-In practice this library can provide substantial (100x) E2E execution improvement from the client side perspective, with the input space of billions of distinct keys. 
+In practice this library can provide substantial (100x) E2E execution improvement from the client side perspective, with the input space of billions of distinct keys.
 
 Each model provides both TensorFlow and cache-level performance metrics via HTTP REST API.
 
@@ -56,7 +56,7 @@ In order to leverage caching, the model has to use categorical features with a f
 Categorical features can be cached, and out-of-dictionary values will be cached using the `UNK` token.
 Numerical features can be cached limiting decimal precision, otherwise it is not recommended to leverage the cache for models with numerical features.
 
-By default, the client will configure itself using the web service cache settings.  
+By default, the client will configure itself using the web service cache settings.
 This enables the `mly` client to handle key generation without additional configuration or code.
 
 The library supports 3 types of caching:
@@ -66,15 +66,15 @@ The library supports 3 types of caching:
 
 The in-memory cache uses [scache](https://github.com/viant/scache)'s most-recently-used implementation.
 
-When an external cache is used, the client will first check the external cache that is shared with web service; if data is found, it's copied to local in-memory cache. 
+When an external cache is used, the client will first check the external cache that is shared with web service; if data is found, it's copied to local in-memory cache.
 
 To deal with larger key spaces, an external cache can be further configured using a tiered caching strategy.
 Any cached value will propagate upwards once found.
 
 For example, we can have a 2 tier caching strategy, where we will call the tiers L1 and L2.
-In this scenario, the L2 cache can be a very large SSD-backed Aerospike instance and L1 cache could be a smaller memory-based instance. 
+In this scenario, the L2 cache can be a very large SSD-backed Aerospike instance and L1 cache could be a smaller memory-based instance.
 
-In this case, when we look for a cached value, first the in-memory cache is checked, followed by L1, then L2. 
+In this case, when we look for a cached value, first the in-memory cache is checked, followed by L1, then L2.
 Then with a cache miss, the value is calculated then copied to L2 - then from L2 to L1 and L1 to local memory.
 
 **Example of `config.yaml` with both an in-memory and an Aerospike cache**
@@ -104,7 +104,7 @@ See [WORKFLOW.md](WORKFLOW.md) for Mermaid diagrams explaining the Client and mo
 ## Dictionary hash code
 
 In caching mode, in order to manage cache and client/server consistency every time a model/dictionary gets re/loaded, `mly` computes a dictionary hash code.
-This hash code gets stored in the cache along with model prediction and is passed to the client in every response. 
+This hash code gets stored in the cache along with model prediction and is passed to the client in every response.
 Once a client detects a change in dictionary hash code, it automatically initiates a dictionary reload and invalidates cache entries.
 
 Note: The dictionary hash code is stored under a special key in Aerospike defined in `shared/common.HashBin`. To prevent conflicts, do not use that same key name for storing your own model predictions.
@@ -203,114 +203,13 @@ Models:
         DataType: int64
 ```
 
-**Configuration Fields:**
-- `Platform`: Set to `"triton"` to enable Triton backend
-- `URL`: Triton server HTTP endpoint (will be converted to gRPC port 8001)
-- `ModelName`: Name of the model in Triton's model repository
-- `Timeout`: Request timeout (default: 30s)
-- `Inputs`/`Outputs`: Model signature (must match Triton model config)
-
-**URL Format:** 
-- HTTP URL is automatically converted to gRPC endpoint
-- `http://localhost:8000` → `localhost:8001` (gRPC)
-- `https://triton.example.com:8000` → `triton.example.com:8001` (gRPC)
+[See `CONFIG.md`](CONFIG.md), for more details.
 
 ## Triton gRPC Proto Files
 
-The Triton integration uses protocol buffers for gRPC communication. Generated proto files are **committed to the repository** for build reliability.
+[See `TRITON.md`](TRITON.md), for instructions on how and when to recreate the protocol buffer files for Triton's gRPC API.
 
-### When to Regenerate Proto Files
-
-Regenerate only when:
-- Modifying `proto/triton/grpc_service.proto`
-- Upgrading to a new Triton API version
-- Upgrading protobuf/gRPC to a new major version
-
-### Prerequisites
-
-Install `protoc` (Protocol Buffer Compiler):
-
-```bash
-# macOS
-brew install protobuf
-
-# Linux (Debian/Ubuntu)
-apt-get install -y protobuf-compiler
-
-# Verify installation
-protoc --version  # Should be 3.x or higher
-```
-
-Install Go protoc plugins:
-
-```bash
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-
-# Ensure GOPATH/bin is in PATH
-export PATH="$PATH:$(go env GOPATH)/bin"
-
-# Verify installation
-which protoc-gen-go
-which protoc-gen-go-grpc
-```
-
-### Regeneration Steps
-
-```bash
-# 1. Navigate to repo root
-cd /path/to/viant/mly
-
-# 2. Delete old generated files (ensures clean regeneration)
-rm -f proto/triton/grpc_service.pb.go
-rm -f proto/triton/grpc_service_grpc.pb.go
-
-# 3. Regenerate
-protoc \
-  --go_out=. \
-  --go_opt=paths=source_relative \
-  --go-grpc_out=. \
-  --go-grpc_opt=paths=source_relative \
-  proto/triton/grpc_service.proto
-
-# 4. Verify generation succeeded
-ls -lh proto/triton/*.pb.go
-```
-
-### Verification
-
-After regeneration:
-
-```bash
-# Ensure code compiles
-go build ./...
-
-# Run tests
-go test ./service/platform/...
-
-# Review changes
-git diff proto/triton/
-```
-
-### Troubleshooting
-
-**Error: `protoc: command not found`**
-- Install protoc using package manager (see Prerequisites)
-
-**Error: `protoc-gen-go: program not found`**
-- Ensure `$GOPATH/bin` is in your `$PATH`
-- Run: `export PATH="$PATH:$(go env GOPATH)/bin"`
-
-**Error: `Import "..." was not found`**
-- Run protoc from the repository root directory
-- Verify proto file imports are correct
-
-**Notes:**
-- Generated files are ~30KB and should be committed
-- Proto definitions are based on [Triton's official protocol](https://github.com/triton-inference-server/common/blob/main/protobuf/grpc_service.proto)
-- Triton uses `raw_output_contents` for performance (binary format vs. structured)
-
-# Transformer 
+# Transformer
 
 By default, the model signature outputs the layer names alongside the model prediction to produce cachable output.
 
@@ -318,11 +217,11 @@ See [`TRANSFORMER.md`](TRANSFORMER.md) for more details.
 
 # Server Endpoints
 
-##  `/v1/api/config` 
+##  `/v1/api/config`
 
 Shows the loaded and processed configuration.
 
-## `/v1/api/health` 
+## `/v1/api/health`
 
 Shows if any models are failing to reload.
 Payload is a JSON object whose keys are each model ID as specified in the `config.yaml`, with values a number, where 0 indicates a failure to reload and 1 indicates that the last attempted reload was successful.
@@ -350,7 +249,7 @@ The `/v1/api/health` endpoint will provide a response like:
 }
 ```
 
-## `/v1/api/metric/operations` 
+## `/v1/api/metric/operations`
 
 TODO - Add more metrics added from server-side batching.
 
@@ -367,7 +266,7 @@ In all these, `%s` is `Model[].ID` (i.e. from `config.yaml`)
 
 ## `/v1/api/debug`
 
-Requires `EnableMemProf` and / or `EnableCPUProf` to be enabled. 
+Requires `EnableMemProf` and / or `EnableCPUProf` to be enabled.
 See [`service/endpoint/prof.go`](service/endpoint/prof.go) for details - otherwise, refer to `pprof` documentation.
 
 ## `/v1/api/model`
@@ -401,7 +300,7 @@ all compatible with Apache License, Version 2. Please see individual files for d
 # Versioning Notes
 
 - `v0.14.1` last support for go 1.17
-- `v0.8.0` - numeric features are supported. 
+- `v0.8.0` - numeric features are supported.
 
 Until `v0.8.0`, only `StringLookup` and `IntegerLookup` layers are supported for caching.
 
