@@ -25,8 +25,28 @@ type Host struct {
 	mux sync.RWMutex
 	*circut.Breaker
 
+	// LatencyBreaker is an optional latency-driven shed mechanism that
+	// runs in parallel to the connection-failure-based Breaker. When
+	// configured (non-nil), getHost() requires both Breaker.IsUp() and
+	// LatencyBreaker.IsUp() to return true before letting a request
+	// through. nil = disabled (acts as permanently up).
+	LatencyBreaker *circut.LatencyBreaker
+
 	// memoization
 	prefix string
+}
+
+// IsUp combines the connection-failure Breaker and the (optional)
+// LatencyBreaker. Both must say up for the host to be considered up.
+// Shadows the embedded Breaker.IsUp().
+func (h *Host) IsUp() bool {
+	if h.Breaker != nil && !h.Breaker.IsUp() {
+		return false
+	}
+	if !h.LatencyBreaker.IsUp() {
+		return false
+	}
+	return true
 }
 
 func isSecurePort(port int) bool {

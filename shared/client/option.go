@@ -1,6 +1,8 @@
 package client
 
 import (
+	"time"
+
 	"github.com/viant/gmetric"
 	cconfig "github.com/viant/mly/shared/client/config"
 	"github.com/viant/mly/shared/datastore"
@@ -145,4 +147,40 @@ func (o *clientOptionsOption) Apply(c *Service) {
 // WithClientOptions adds shared/datastore/client.Option options.
 func WithClientOptions(clientOptions ...dscli.Option) Option {
 	return &clientOptionsOption{clientOptions: clientOptions}
+}
+
+type latencyBreakerOpt struct {
+	latest, rolling, window time.Duration
+	k                       int
+	fraction                float64
+}
+
+func (o *latencyBreakerOpt) Apply(c *Service) {
+	c.Config.LatencyBreakerLatestThreshold = o.latest
+	c.Config.LatencyBreakerRollingThreshold = o.rolling
+	c.Config.LatencyBreakerRollingWindow = o.window
+	c.Config.LatencyBreakerKConsecutive = o.k
+	c.Config.LatencyBreakerPassThroughFraction = o.fraction
+}
+
+// WithLatencyBreaker enables the latency-aware breaker on each host
+// constructed for this Service. Pass-through fraction defaults to 0.01
+// when fraction <= 0; rolling window defaults to 1s; KConsecutive
+// defaults to 3.
+//
+// Setting both latest and rolling to zero leaves the breaker disabled
+// (backward compatible). Both thresholds are taken as raw durations;
+// the caller is responsible for sizing them appropriately for the
+// model's traffic profile and the caller's request timeout.
+func WithLatencyBreaker(latest, rolling, window time.Duration, k int, fraction float64) Option {
+	if fraction <= 0 {
+		fraction = 0.01
+	}
+	if window <= 0 {
+		window = time.Second
+	}
+	if k < 1 {
+		k = 3
+	}
+	return &latencyBreakerOpt{latest: latest, rolling: rolling, window: window, k: k, fraction: fraction}
 }
