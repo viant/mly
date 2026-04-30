@@ -6,6 +6,42 @@ import "github.com/viant/gmetric/counter"
 type http struct{}
 
 const (
+	// Pending is the column for the in-flight gauge maintained by the
+	// metric.EnterThenExit Inc/Dec pattern. The exporter publishes:
+	//   - <op>_pending     -- the current-in-flight counter (defective; see below)
+	//   - <op>_pending_Max -- per-bucket peak from the Occupancy CustomCounter
+	//
+	// Known defects in the underlying mechanism:
+	//
+	//   1. Bucket-mismatch on Exit. EnterThenExit captures the recent-bucket
+	//      index at Enter time and decrements that same bucket on Exit. If
+	//      the bucket has rotated between Enter and Exit, the wrong bucket
+	//      is decremented -- the previous bucket's value goes negative
+	//      while the current bucket's value drifts high.
+	//
+	//   2. Mutex serialization on Inc/Dec. The Dir typed value is not a
+	//      string, so MultiCounter.incrementValueBy takes c.locker.Lock()
+	//      on every Enter and Exit. Under high QPS this is a real
+	//      serialization point.
+	//
+	// Defect #1 inflates both _pending (current) and _pending_Max (per-bucket
+	// peak); the inflation is in the conservative direction (over-estimation),
+	// so the metrics are still operationally useful in different regimes:
+	//
+	//   - _pending_Max grouped per reporting dimension (e.g. by
+	//     availability_zone, environment, op): for high-QPS operations
+	//     the per-group peak rises substantially above baseline noise
+	//     during fleet-wide saturation events, making this the cleaner
+	//     saturation signal for those operations.
+	//
+	//   - _pending summed across reporting instances: exhibits dramatic
+	//     spikes during saturation for any QPS profile, partially
+	//     amplified by defect #1. For low-QPS operations where the
+	//     per-group _pending_Max signal is lost in baseline noise, the
+	//     fleet sum is the more visible saturation signal.
+	//
+	// _pending_Max is the cleaner peak-concurrency signal for capacity
+	// sizing; pick per-operation based on QPS profile.
 	Pending = "pending"
 	// Shed marks a request that the client did NOT send because the host's
 	// circuit breaker was already in the down state when getHost() was
