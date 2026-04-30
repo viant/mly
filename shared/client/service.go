@@ -114,7 +114,9 @@ func (s *Service) Run(ctx context.Context, input interface{}, response *Response
 
 	if ctx.Err() != nil {
 		stats.Append(stat.EarlyCtxError)
-		s.prometheusMetrics.runErrorEarlyCtxCounter.Inc()
+		if s.prometheusMetrics.runErrorEarlyCtxCounter != nil {
+			s.prometheusMetrics.runErrorEarlyCtxCounter.Inc()
+		}
 	}
 
 	if response.Data == nil {
@@ -701,7 +703,9 @@ func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values
 		}
 
 		mvt.Append(stat.Down)
-		s.prometheusMetrics.httpDownCounter.Inc()
+		if s.prometheusMetrics.httpDownCounter != nil {
+			s.prometheusMetrics.httpDownCounter.Inc()
+		}
 
 		host.FlagDown()
 	}

@@ -89,6 +89,7 @@ func TestService_Run(t *testing.T) {
 			WithDictionary(dictionary),
 			WithDataStorer(mock.New()),
 			WithDebug(true),
+			WithPrometheusMetrics(false),
 		}
 	}
 

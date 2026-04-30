@@ -76,28 +76,36 @@ type prometheusMetrics struct {
 }
 
 func (m prometheusMetrics) observeRunDuration(duration float64) {
-	m.runDurationHistogram.Observe(duration)
+	if m.runDurationHistogram != nil {
+		m.runDurationHistogram.Observe(duration)
+	}
 	if m.runDurationSummary != nil {
 		m.runDurationSummary.Observe(duration)
 	}
 }
 
 func (m prometheusMetrics) observeBatchSize(batchSize float64) {
-	m.batchSizeHistogram.Observe(batchSize)
+	if m.batchSizeHistogram != nil {
+		m.batchSizeHistogram.Observe(batchSize)
+	}
 	if m.batchSizeSummary != nil {
 		m.batchSizeSummary.Observe(batchSize)
 	}
 }
 
 func (m prometheusMetrics) observeHttpDuration(duration float64) {
-	m.httpDurationHistogram.Observe(duration)
+	if m.httpDurationHistogram != nil {
+		m.httpDurationHistogram.Observe(duration)
+	}
 	if m.httpDurationSummary != nil {
 		m.httpDurationSummary.Observe(duration)
 	}
 }
 
 func (m prometheusMetrics) observeHttpClientDuration(duration float64) {
-	m.httpClientDurationHistogram.Observe(duration)
+	if m.httpClientDurationHistogram != nil {
+		m.httpClientDurationHistogram.Observe(duration)
+	}
 	if m.httpClientDurationSummary != nil {
 		m.httpClientDurationSummary.Observe(duration)
 	}
