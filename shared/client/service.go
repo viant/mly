@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -615,6 +616,14 @@ func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values
 	// TODO per-host counters
 	host, err := s.getHost()
 	if err != nil {
+		// getHost returns ErrNodeDown when the host's breaker IsUp() is
+		// false. Mark the request as shed so the operator can distinguish
+		// requests rejected pre-flight by the breaker from requests that
+		// reached httpPost and failed there. Without this, every shed
+		// request was conflated into the generic _error counter.
+		if errors.Is(err, common.ErrNodeDown) {
+			mvt.Append(stat.Shed)
+		}
 		return nil, err
 	}
 

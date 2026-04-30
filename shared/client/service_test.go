@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -11,12 +12,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/viant/bintly"
+	"github.com/viant/gmetric"
 	"github.com/viant/mly/shared"
 	cconfig "github.com/viant/mly/shared/client/config"
 	"github.com/viant/mly/shared/client/faker"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/config"
 	"github.com/viant/mly/shared/datastore/mock"
+	"github.com/viant/mly/shared/stat"
 	"github.com/viant/scache"
 	"github.com/viant/toolbox"
 )
@@ -228,6 +231,84 @@ func TestService_Run(t *testing.T) {
 			}()
 		}
 	}
+}
+
+// TestService_Run_ShedIncrementsBreakerShedMetric verifies that when the
+// host's circuit breaker is in the down state at request time, Run()
+// increments the new ClientHTTP_shed marker on the http counter (and does
+// NOT increment _down, which is reserved for the trip event itself).
+//
+// Before this fix, shed requests were conflated into the generic _error
+// counter, leaving operators unable to distinguish "request rejected
+// pre-flight by the breaker" from "request reached httpPost and failed
+// there." See shared/client/service.go postRequest.
+func TestService_Run_ShedIncrementsBreakerShedMetric(t *testing.T) {
+	baseURL := toolbox.CallerDirectory(3)
+
+	selectPort := 8089
+	server := faker.Server{URL: path.Join(baseURL, "testdata"), Port: selectPort, Debug: true}
+	server.Start()
+	defer server.Stop()
+
+	metaInput := shared.MetaInput{
+		Inputs: []*shared.Field{
+			{Name: "i1"},
+			{Name: "i2", Wildcard: true},
+		},
+	}
+	dictionary := NewDictionary(&common.Dictionary{
+		Layers: []common.Layer{{Name: "i1", Strings: []string{"v1", "v2"}}},
+		Hash:   123,
+	}, metaInput.Inputs)
+	hosts := []*Host{NewHost("localhost", selectPort)}
+
+	gmetrics := gmetric.New()
+	const modelID = "shed_metric_case"
+	options := []Option{
+		WithGmetrics(gmetrics),
+		WithRemoteConfig(&cconfig.Remote{
+			Datastore: config.Datastore{
+				Cache: &scache.Config{SizeMb: 64, Shards: 10, EntrySize: 1024},
+			},
+			MetaInput: metaInput,
+		}),
+		WithCacheScope(CacheScopeLocal),
+		WithDictionary(dictionary),
+		WithDataStorer(mock.New()),
+		WithDebug(true),
+	}
+	srv, err := New(modelID, hosts, options...)
+	require.NoError(t, err)
+
+	// Force the host's breaker into the down state so getHost() will
+	// return ErrNodeDown without ever calling httpPost.
+	hosts[0].FlagDown()
+	require.False(t, hosts[0].IsUp(), "host must be flagged down for the shed path")
+
+	msg := srv.NewMessage()
+	msg.StringKey("i1", "v1")
+	msg.StringKey("i2", "v10")
+
+	response := &Response{Data: &TestOutput{}}
+	err = srv.Run(context.Background(), msg, response)
+
+	require.Error(t, err, "shed request must surface as a non-nil err")
+	assert.True(t, errors.Is(err, common.ErrNodeDown), "shed err must wrap ErrNodeDown, got %v", err)
+
+	// Inspect the cumulative counter values for <model>ClientHTTP. The
+	// new Shed marker must increment by 1; the existing Down marker must
+	// stay at 0 (no FlagDown was called by this request -- the breaker
+	// was already down before getHost was called).
+	shedCount := gmetrics.LookupOperationCumulativeMetric(modelID+"ClientHTTP", stat.Shed)
+	downCount := gmetrics.LookupOperationCumulativeMetric(modelID+"ClientHTTP", stat.Down)
+	errorCount := gmetrics.LookupOperationCumulativeMetric(modelID+"ClientHTTP", stat.ErrorKey)
+
+	assert.EqualValues(t, 1, shedCount, "ClientHTTP_shed must increment on shed")
+	assert.EqualValues(t, 0, downCount, "ClientHTTP_down must NOT increment on shed (only on trip)")
+	// _error still increments because Run()'s AppendError fires for the
+	// non-context ErrNodeDown -- this is the historical behavior that
+	// the new _shed marker disambiguates without changing.
+	assert.EqualValues(t, 1, errorCount, "ClientHTTP_error continues to increment as before")
 }
 
 // TestService_Run_ParsesErrorBody verifies that when the server returns

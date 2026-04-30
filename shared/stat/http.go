@@ -5,15 +5,27 @@ import "github.com/viant/gmetric/counter"
 // TODO move to shared/client
 type http struct{}
 
-const Pending = "pending"
+const (
+	Pending = "pending"
+	// Shed marks a request that the client did NOT send because the host's
+	// circuit breaker was already in the down state when getHost() was
+	// called. Distinct from Down, which marks the trip event itself
+	// (the request that observed the connection error and called
+	// FlagDown). Shed is the count of subsequent requests that the
+	// breaker rejected before recovery.
+	Shed = "shed"
+)
 
 func (p http) Keys() []string {
+	// New keys must be appended at the end so existing column indices
+	// remain stable for downstream consumers (Mimir queries, dashboards).
 	return []string{
 		ErrorKey,
 		Pending,
 		Down,
 		Canceled,
 		DeadlineExceeded,
+		Shed,
 	}
 }
 
@@ -35,6 +47,8 @@ func (p http) Map(value interface{}) int {
 			return 3
 		case DeadlineExceeded:
 			return 4
+		case Shed:
+			return 5
 		}
 	case Dir:
 		return 1
