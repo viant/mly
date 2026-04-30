@@ -78,6 +78,12 @@ type Service struct {
 	// See https://prometheus.io/docs/practices/histograms for guidance.
 	noPrometheusSummaries bool
 
+	// noPrometheusMetrics disables native Prometheus metric registration.
+	// This is useful for short-lived helper clients (for example server
+	// startup self-tests) that should not leave zero-valued model series in
+	// the process-wide registry after the helper has finished.
+	noPrometheusMetrics bool
+
 	prometheusMetrics prometheusMetrics
 
 	ErrorHistory tracker.Tracker
@@ -340,6 +346,9 @@ func (s *Service) dictionary() *Dictionary {
 }
 
 func (s *Service) registerPrometheusMetrics() error {
+	if s.noPrometheusMetrics {
+		return nil
+	}
 	pr := prometheus.DefaultRegisterer
 	if s.PrometheusRegisterer != nil {
 		pr = s.PrometheusRegisterer

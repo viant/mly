@@ -41,6 +41,21 @@ func WithGmetrics(gmetrics *gmetric.Service) Option {
 	return &gmetricsOpt{gmetrics: gmetrics}
 }
 
+type prometheusMetricsOpt struct {
+	enable bool
+}
+
+func (o *prometheusMetricsOpt) Apply(c *Service) {
+	c.noPrometheusMetrics = !o.enable
+}
+
+// WithPrometheusMetrics enables or disables native Prometheus client
+// metrics. Metrics are enabled by default; disable them for short-lived
+// helper clients that should not register long-lived model series.
+func WithPrometheusMetrics(enable bool) Option {
+	return &prometheusMetricsOpt{enable: enable}
+}
+
 type dictHashValidationOpt struct {
 	enable bool
 }
