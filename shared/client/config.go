@@ -1,12 +1,25 @@
 package client
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/viant/mly/shared/client/config"
 )
 
-//Config represents a client config
+const (
+	defaultLatencyBreakerRollingWindow       = time.Second
+	defaultLatencyBreakerKConsecutive        = 3
+	defaultLatencyBreakerPassThroughFraction = 0.01
+)
+
+type latencyBreakerSettings struct {
+	latest, rolling, window time.Duration
+	k                       int
+	fraction                float64
+}
+
+// Config represents a client config
 type Config struct {
 	Hosts []*Host
 	Model string
@@ -55,11 +68,55 @@ type Config struct {
 	// PassThroughFraction is the probability that a request is allowed
 	// through while the breaker is ON, to drive recovery sensing.
 	// Default 0.01 (1%). Set higher for low-QPS models that need more
-	// observations to recover, or 0 to fully shed without recovery.
+	// observations to recover. Valid range: [0, 1]. A zero value means
+	// use the default.
 	LatencyBreakerPassThroughFraction float64
 }
 
-//CacheSize returns cache size
+func (c *Config) latencyBreakerSettings() (latencyBreakerSettings, bool, error) {
+	settings := latencyBreakerSettings{
+		latest:   c.LatencyBreakerLatestThreshold,
+		rolling:  c.LatencyBreakerRollingThreshold,
+		window:   c.LatencyBreakerRollingWindow,
+		k:        c.LatencyBreakerKConsecutive,
+		fraction: c.LatencyBreakerPassThroughFraction,
+	}
+
+	if settings.latest < 0 {
+		return settings, false, fmt.Errorf("LatencyBreakerLatestThreshold must be >= 0, got %s", settings.latest)
+	}
+	if settings.rolling < 0 {
+		return settings, false, fmt.Errorf("LatencyBreakerRollingThreshold must be >= 0, got %s", settings.rolling)
+	}
+	if settings.window < 0 {
+		return settings, false, fmt.Errorf("LatencyBreakerRollingWindow must be >= 0, got %s", settings.window)
+	}
+	if settings.k < 0 {
+		return settings, false, fmt.Errorf("LatencyBreakerKConsecutive must be >= 0, got %d", settings.k)
+	}
+	if settings.fraction < 0 || settings.fraction > 1 {
+		return settings, false, fmt.Errorf("LatencyBreakerPassThroughFraction must be in [0, 1], got %v", settings.fraction)
+	}
+
+	enabled := settings.latest > 0 || settings.rolling > 0
+	if !enabled {
+		return settings, false, nil
+	}
+
+	if settings.window == 0 {
+		settings.window = defaultLatencyBreakerRollingWindow
+	}
+	if settings.k == 0 {
+		settings.k = defaultLatencyBreakerKConsecutive
+	}
+	if settings.fraction == 0 {
+		settings.fraction = defaultLatencyBreakerPassThroughFraction
+	}
+
+	return settings, true, nil
+}
+
+// CacheSize returns cache size
 func (c *Config) CacheSize() int {
 	if c.CacheSizeMb == 0 {
 		return 0

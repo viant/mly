@@ -383,35 +383,39 @@ func (s *Service) init() error {
 		s.Config.MaxRetry = 3
 	}
 
-	s.initLatencyBreakers()
+	if err := s.initLatencyBreakers(); err != nil {
+		return fmt.Errorf("failed to initialize latency breakers: %w", err)
+	}
 
 	err = s.initHTTPClient()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to initialize HTTP client: %w", err)
 	}
 
 	if s.Config.Datastore == nil {
 		if err := s.loadModelConfig(); err != nil {
-			return err
+			return fmt.Errorf("failed to load model config: %w", err)
 		}
 	}
 
 	if s.dict == nil {
 		if err := s.loadModelDictionary(); err != nil {
-			return err
+			return fmt.Errorf("failed to load model dictionary: %w", err)
 		}
 	}
 
 	if ds := s.Config.Datastore; ds != nil {
 		ds.Init()
 		if err = ds.Validate(); err != nil {
-			return err
+			return fmt.Errorf("failed to validate datastore config: %w", err)
 		}
 	}
 
 	if s.datastore == nil {
 		err := s.initDatastore()
-		return err
+		if err != nil {
+			return fmt.Errorf("failed to initialize datastore: %w", err)
+		}
 	}
 
 	s.messages = NewMessages(s.dictionary)
@@ -424,7 +428,7 @@ func (s *Service) initHTTPClient() error {
 	if host != nil && host.IsSecurePort() {
 		cert, err := getCertPool()
 		if err != nil {
-			return fmt.Errorf("failed to create certificate: %v", err)
+			return fmt.Errorf("failed to create certificate: %w", err)
 		}
 
 		tslConfig = &tls.Config{
@@ -717,22 +721,27 @@ func (s *Service) postRequest(ctx context.Context, data []byte, mvt *stat.Values
 // configured host when the Config has at least one non-zero threshold.
 // Both thresholds zero -> no breaker constructed (backward-compatible
 // no-op).
-func (s *Service) initLatencyBreakers() {
-	if s.Config.LatencyBreakerLatestThreshold == 0 && s.Config.LatencyBreakerRollingThreshold == 0 {
-		return
+func (s *Service) initLatencyBreakers() error {
+	settings, enabled, err := s.Config.latencyBreakerSettings()
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
 	}
 	for _, h := range s.Config.Hosts {
 		if h == nil || h.LatencyBreaker != nil {
 			continue
 		}
 		h.LatencyBreaker = circut.NewLatencyBreaker(
-			s.Config.LatencyBreakerLatestThreshold,
-			s.Config.LatencyBreakerRollingThreshold,
-			s.Config.LatencyBreakerRollingWindow,
-			s.Config.LatencyBreakerKConsecutive,
-			s.Config.LatencyBreakerPassThroughFraction,
+			settings.latest,
+			settings.rolling,
+			settings.window,
+			settings.k,
+			settings.fraction,
 		)
 	}
+	return nil
 }
 
 func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte, error) {
