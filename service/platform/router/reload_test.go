@@ -14,6 +14,7 @@ import (
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/platform"
 	"github.com/viant/mly/service/triton"
+	"github.com/viant/mly/shared"
 	sharedrouter "github.com/viant/mly/shared/config/router"
 )
 
@@ -336,6 +337,300 @@ func TestRouter_applyRouterConfig_signature(t *testing.T) {
 	}
 
 	assert.Equal(t, 2, len(results))
+}
+
+func TestRouter_applyRouterConfig_multiOutputSignature(t *testing.T) {
+	ctx := context.Background()
+	mockClient := &mockUnloader{
+		tritonServer: &mockTritonServer{},
+	}
+
+	makeSig := func() *domain.Signature {
+		return &domain.Signature{
+			Inputs: []domain.Input{
+				{Name: "text", Index: 0, Type: reflect.TypeOf("")},
+			},
+			Outputs: []domain.Output{
+				{Name: "score", Index: 0, DataType: "float32"},
+				{Name: "calibration", Index: 1, DataType: "float32"},
+			},
+		}
+	}
+
+	cfg := &config.Model{
+		ID:       "test_multi_output_signature",
+		Debug:    true,
+		Mode:     "router",
+		Platform: "triton",
+		Router: &config.RouterConfig{
+			ConfigURL: "memory://router-config",
+			InputName: "router_id",
+			Global: config.GlobalModelConfig{
+				PredictionReplacements: []config.PredictionReplacement{
+					{Name: "score", Type: "float32", Value: 0.0},
+					{Name: "calibration", Type: "float32", Value: 0.0},
+				},
+			},
+			Output: config.OutputConfig{
+				FieldName: "model_id",
+			},
+		},
+		Triton: &config.TritonConfig{
+			ServerID: "test_server",
+		},
+	}
+
+	cfg.Init(nil)
+
+	router, err := newRouter(cfg, nil, map[string]UnloadService{
+		"test_server": &triton.Service{Unloader: mockClient},
+	}, func(modelName string) (platform.PlatformEvaluator, error) {
+		return &mockEvaluator{signature: makeSig}, nil
+	})
+	if err != nil {
+		t.Fatalf("NewRouter error: %v", err)
+	}
+
+	newConfig := &sharedrouter.RoutingConfig{
+		EntityMapping: []sharedrouter.EntityKV{
+			{EntityID: 1, ModelName: "model1"},
+			{EntityID: 2, ModelName: "model2"},
+		},
+	}
+
+	if err := router.applyRouterConfig(ctx, newConfig); err != nil {
+		t.Fatalf("applyRouterConfig returned error: %v", err)
+	}
+
+	outputNames := make([]string, 0, len(router.ioState.signature.Outputs))
+	for _, output := range router.ioState.signature.Outputs {
+		outputNames = append(outputNames, output.Name)
+	}
+
+	assert.Equal(t, []string{"score", "calibration", "model_id"}, outputNames)
+	assert.Equal(t, 1, router.ioState.routerInputOffset)
+}
+
+func TestRouter_applyRouterConfig_configuredOutputOrder(t *testing.T) {
+	ctx := context.Background()
+	mockClient := &mockUnloader{
+		tritonServer: &mockTritonServer{},
+	}
+
+	model1Sig := func() *domain.Signature {
+		return &domain.Signature{
+			Inputs: []domain.Input{
+				{Name: "text", Index: 0, Type: reflect.TypeOf("")},
+			},
+			Outputs: []domain.Output{
+				{Name: "score", Index: 0, DataType: "float32"},
+				{Name: "calibration", Index: 1, DataType: "float32"},
+			},
+		}
+	}
+
+	model2Sig := func() *domain.Signature {
+		return &domain.Signature{
+			Inputs: []domain.Input{
+				{Name: "text", Index: 0, Type: reflect.TypeOf("")},
+			},
+			Outputs: []domain.Output{
+				{Name: "calibration", Index: 0, DataType: "float32"},
+				{Name: "score", Index: 1, DataType: "float32"},
+			},
+		}
+	}
+
+	predictValues := func(valuesByName map[string]float32) func([]interface{}, *domain.Signature) ([]interface{}, error) {
+		return func(params []interface{}, signature *domain.Signature) ([]interface{}, error) {
+			batchSize := len(params[0].([][]string))
+			outputs := make([]interface{}, len(signature.Outputs))
+			for i, output := range signature.Outputs {
+				value := valuesByName[output.Name]
+				batch := make([][]float32, batchSize)
+				for j := range batch {
+					batch[j] = []float32{value}
+				}
+				outputs[i] = batch
+			}
+			return outputs, nil
+		}
+	}
+
+	cfg := &config.Model{
+		ID:       "test_configured_output_order",
+		Debug:    true,
+		Mode:     "router",
+		Platform: "triton",
+		Router: &config.RouterConfig{
+			ConfigURL: "memory://router-config",
+			InputName: "router_id",
+			Global: config.GlobalModelConfig{
+				PredictionReplacements: []config.PredictionReplacement{
+					{Name: "score", Type: "float32", Value: 0.0},
+					{Name: "calibration", Type: "float32", Value: 0.0},
+				},
+			},
+			Output: config.OutputConfig{
+				FieldName: "model_id",
+			},
+		},
+		MetaInput: shared.MetaInput{
+			Outputs: []*shared.Field{
+				{Name: "calibration", DataType: "float32"},
+				{Name: "model_id", DataType: "string"},
+				{Name: "score", DataType: "float32"},
+			},
+		},
+		Triton: &config.TritonConfig{
+			ServerID: "test_server",
+		},
+	}
+
+	cfg.Init(nil)
+
+	router, err := newRouter(cfg, nil, map[string]UnloadService{
+		"test_server": &triton.Service{Unloader: mockClient},
+	}, func(modelName string) (platform.PlatformEvaluator, error) {
+		switch modelName {
+		case "model1":
+			return &mockEvaluator{
+				modelName:    modelName,
+				signature:    model1Sig,
+				predictor:    predictValues(map[string]float32{"score": 1, "calibration": 2}),
+				tritonServer: mockClient.tritonServer,
+			}, nil
+		case "model2":
+			return &mockEvaluator{
+				modelName:    modelName,
+				signature:    model2Sig,
+				predictor:    predictValues(map[string]float32{"score": 10, "calibration": 20}),
+				tritonServer: mockClient.tritonServer,
+			}, nil
+		default:
+			return nil, errors.New("unexpected model")
+		}
+	})
+	if err != nil {
+		t.Fatalf("NewRouter error: %v", err)
+	}
+
+	if err := router.applyRouterConfig(ctx, &sharedrouter.RoutingConfig{
+		EntityMapping: []sharedrouter.EntityKV{
+			{EntityID: 1, ModelName: "model1"},
+			{EntityID: 2, ModelName: "model2"},
+		},
+	}); err != nil {
+		t.Fatalf("applyRouterConfig returned error: %v", err)
+	}
+
+	outputNames := make([]string, 0, len(router.ioState.signature.Outputs))
+	for _, output := range router.ioState.signature.Outputs {
+		outputNames = append(outputNames, output.Name)
+	}
+	assert.Equal(t, []string{"calibration", "model_id", "score"}, outputNames)
+
+	results, err := router.Predict(ctx, []interface{}{
+		[][]string{{"a"}, {"b"}},
+		[][]int64{{1}, {2}},
+	})
+	if err != nil {
+		t.Fatalf("Predict error: %v", err)
+	}
+
+	assert.Equal(t, [][]float32{{2}, {20}}, results[0])
+	assert.Equal(t, [][]string{{"model1"}, {"model2"}}, results[1])
+	assert.Equal(t, [][]float32{{1}, {10}}, results[2])
+}
+
+func TestRouter_applyRouterConfig_configuredOutputValidation(t *testing.T) {
+	tests := []struct {
+		name              string
+		configuredOutputs []*shared.Field
+		expectedErr       string
+	}{
+		{
+			name: "missing configured output",
+			configuredOutputs: []*shared.Field{
+				{Name: "missing", DataType: "float32"},
+			},
+			expectedErr: "configured output missing was not found in model outputs",
+		},
+		{
+			name: "unconfigured downstream output",
+			configuredOutputs: []*shared.Field{
+				{Name: "score", DataType: "float32"},
+			},
+			expectedErr: "model outputs not present in configured outputs: calibration",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			mockClient := &mockUnloader{
+				tritonServer: &mockTritonServer{},
+			}
+
+			cfg := &config.Model{
+				ID:       "test_configured_output_validation",
+				Debug:    true,
+				Mode:     "router",
+				Platform: "triton",
+				Router: &config.RouterConfig{
+					ConfigURL: "memory://router-config",
+					InputName: "router_id",
+					Global: config.GlobalModelConfig{
+						PredictionReplacements: []config.PredictionReplacement{
+							{Name: "score", Type: "float32", Value: 0.0},
+							{Name: "calibration", Type: "float32", Value: 0.0},
+						},
+					},
+				},
+				MetaInput: shared.MetaInput{
+					Outputs: test.configuredOutputs,
+				},
+				Triton: &config.TritonConfig{
+					ServerID: "test_server",
+				},
+			}
+
+			cfg.Init(nil)
+
+			router, err := newRouter(cfg, nil, map[string]UnloadService{
+				"test_server": &triton.Service{Unloader: mockClient},
+			}, func(modelName string) (platform.PlatformEvaluator, error) {
+				return &mockEvaluator{
+					modelName:    modelName,
+					tritonServer: mockClient.tritonServer,
+					signature: func() *domain.Signature {
+						return &domain.Signature{
+							Inputs: []domain.Input{
+								{Name: "text", Index: 0, Type: reflect.TypeOf("")},
+							},
+							Outputs: []domain.Output{
+								{Name: "score", Index: 0, DataType: "float32"},
+								{Name: "calibration", Index: 1, DataType: "float32"},
+							},
+						}
+					},
+				}, nil
+			})
+			if err != nil {
+				t.Fatalf("NewRouter error: %v", err)
+			}
+
+			err = router.applyRouterConfig(ctx, &sharedrouter.RoutingConfig{
+				EntityMapping: []sharedrouter.EntityKV{
+					{EntityID: 1, ModelName: "model1"},
+				},
+			})
+			if err == nil {
+				t.Fatalf("expected error but got nil")
+			}
+			assert.Contains(t, err.Error(), test.expectedErr)
+		})
+	}
 }
 
 func TestRouter_applyRouterConfig_sharedTritonServer(t *testing.T) {

@@ -79,8 +79,9 @@ type Router struct {
 	unloader    UnloadService
 	unloadGauge prometheus.Gauge
 
-	configuredInputs []*shared.Field
-	ioState          *IOState
+	configuredInputs  []*shared.Field
+	configuredOutputs []*shared.Field
+	ioState           *IOState
 
 	// forceBatchSize1 when true uses legacy per-sample dispatch; when false (default) uses batched dispatch
 	forceBatchSize1 bool
@@ -162,6 +163,7 @@ func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]UnloadSer
 		fixedEvaluatorFields: fixedEvaluatorFields,
 
 		configuredInputs:     cfg.Inputs,
+		configuredOutputs:    cfg.Outputs,
 		routerInputFieldName: rtCfg.InputName,
 
 		forceBatchSize1: rtCfg.ForceBatchSize1,

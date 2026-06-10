@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -316,13 +317,17 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 		if finalSignature == nil {
 			srcSig := dsmi.signature
 
+			finalOutputs, err := r.buildFinalOutputs(srcSig)
+			if err != nil {
+				return fmt.Errorf("failed to build router output signature for model %s: %w", dsmi.name, err)
+			}
+
 			// copy signature from downstream
 			finalSignature = &domain.Signature{
 				Inputs:  make([]domain.Input, len(srcSig.Inputs), len(srcSig.Inputs)+1),
-				Outputs: make([]domain.Output, len(srcSig.Outputs)),
+				Outputs: finalOutputs,
 			}
 			copy(finalSignature.Inputs, srcSig.Inputs)
-			copy(finalSignature.Outputs, srcSig.Outputs)
 
 			// add router input
 			inputOffset := len(finalSignature.Inputs)
@@ -359,17 +364,6 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 					Type:      input.RawType(),
 					Auxiliary: input.Auxiliary,
 				}
-			}
-
-			if r.modelOutputName != "" {
-				// add the selected model output
-				modelOutput := domain.Output{
-					Name:     r.modelOutputName,
-					Index:    len(finalSignature.Outputs),
-					DataType: "string",
-				}
-
-				finalSignature.Outputs = append(finalSignature.Outputs, modelOutput)
 			}
 
 			for _, output := range finalSignature.Outputs {
@@ -500,6 +494,66 @@ func (r *Router) debugLogf(format string, args ...interface{}) {
 	if r.debug {
 		prefix := "[%s Router] "
 		log.Printf(prefix+format, append([]interface{}{r.routerName}, args...)...)
+	}
+}
+
+func (r *Router) buildFinalOutputs(srcSig *domain.Signature) ([]domain.Output, error) {
+	if len(r.configuredOutputs) == 0 {
+		outputs := make([]domain.Output, len(srcSig.Outputs), len(srcSig.Outputs)+1)
+		copy(outputs, srcSig.Outputs)
+		if r.modelOutputName != "" {
+			outputs = append(outputs, r.routerModelOutput(len(outputs)))
+		}
+		return outputs, nil
+	}
+
+	outputsByName := make(map[string]domain.Output, len(srcSig.Outputs))
+	unconfiguredOutputs := make(map[string]struct{}, len(srcSig.Outputs))
+	for _, output := range srcSig.Outputs {
+		outputsByName[output.Name] = output
+		unconfiguredOutputs[output.Name] = struct{}{}
+	}
+
+	outputs := make([]domain.Output, 0, len(r.configuredOutputs)+1)
+	hasModelOutput := false
+	for _, configured := range r.configuredOutputs {
+		if configured.Name == r.modelOutputName && r.modelOutputName != "" {
+			outputs = append(outputs, r.routerModelOutput(len(outputs)))
+			hasModelOutput = true
+			continue
+		}
+
+		output, ok := outputsByName[configured.Name]
+		if !ok {
+			return nil, fmt.Errorf("configured output %s was not found in model outputs", configured.Name)
+		}
+
+		output.Index = len(outputs)
+		outputs = append(outputs, output)
+		delete(unconfiguredOutputs, output.Name)
+	}
+
+	if len(unconfiguredOutputs) > 0 {
+		names := make([]string, 0, len(unconfiguredOutputs))
+		for name := range unconfiguredOutputs {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return nil, fmt.Errorf("model outputs not present in configured outputs: %s", strings.Join(names, ", "))
+	}
+
+	if r.modelOutputName != "" && !hasModelOutput {
+		outputs = append(outputs, r.routerModelOutput(len(outputs)))
+	}
+
+	return outputs, nil
+}
+
+func (r *Router) routerModelOutput(index int) domain.Output {
+	return domain.Output{
+		Name:     r.modelOutputName,
+		Index:    index,
+		DataType: "string",
 	}
 }
 
