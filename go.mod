@@ -34,6 +34,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/migotom/heavykeeper v0.0.0-20230118182531-d6958b4bb326
 	github.com/prometheus/client_golang v1.16.0
+	github.com/prometheus/common v0.42.0
 	golang.org/x/sync v0.8.0
 	google.golang.org/grpc v1.68.1
 	google.golang.org/protobuf v1.34.2
@@ -59,7 +60,6 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
-	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.10.1 // indirect
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
