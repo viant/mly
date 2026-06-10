@@ -1,0 +1,21 @@
+init:
+  parentPath: $parent.path
+
+pipeline:
+  test:
+    action: exec:run
+    target: $target
+    checkError: true
+    commands:
+      - /tmp/e2e/mlyc -m sli_router_global -a 'routing_id|int:1;sa:a;sl:a;aux:global-1'
+      - /tmp/e2e/mlyc -m sli_router_global -a 'routing_id|int:99;sa:a;sl:a;aux:global-2'
+
+  assertMapped:
+    action: validator:assert
+    actual: $AsJSON($test.Cmd[0].Stdout)
+    expect: $LoadJSON('${parentPath}/expect-mapped.json')
+
+  assertGlobal:
+    action: validator:assert
+    actual: $AsJSON($test.Cmd[1].Stdout)
+    expect: $LoadJSON('${parentPath}/expect-global.json')
