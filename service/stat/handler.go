@@ -30,7 +30,15 @@ const (
 type ResponseMarshalError struct{ Error error }
 
 // String implements fmt.Stringer (used by gmetric top-K error sampling).
-func (r ResponseMarshalError) String() string { return r.Error.Error() }
+// Guards a nil Error: String is now reachable on the sampling path
+// (counter.(*MultiCounter).incrementValueBy -> TopK.Aggregate), so a
+// zero-value marker must not nil-dereference here.
+func (r ResponseMarshalError) String() string {
+	if r.Error == nil {
+		return ""
+	}
+	return r.Error.Error()
+}
 
 // Aggregate implements github.com/viant/gmetric/counter.CustomCounter.
 func (r ResponseMarshalError) Aggregate(interface{}) {}
@@ -40,7 +48,12 @@ func (r ResponseMarshalError) Aggregate(interface{}) {}
 // significance.
 type ResponseCommittedError struct{ Error error }
 
-func (r ResponseCommittedError) String() string         { return r.Error.Error() }
+func (r ResponseCommittedError) String() string {
+	if r.Error == nil {
+		return ""
+	}
+	return r.Error.Error()
+}
 func (r ResponseCommittedError) Aggregate(interface{}) {}
 
 // handler is the gmetric counter.Provider for service.Handler.ServeHTTP.
@@ -51,6 +64,21 @@ func (r ResponseCommittedError) Aggregate(interface{}) {}
 // response-write failure classes introduced by the explicit-commit
 // refactor of writeResponse.
 type handler struct{}
+
+// Compile-time contract guards. ResponseMarshalError and
+// ResponseCommittedError satisfy counter.CustomCounter (they declare
+// Aggregate), so the provider that emits them MUST also satisfy
+// counter.CustomProvider. Otherwise counter.NewOperation leaves every
+// Value.Custom nil and counter.(*MultiCounter).incrementValueBy
+// nil-dereferences when it invokes Aggregate on a non-string CustomCounter
+// value (see counter/multi.go). These assertions break the build if either
+// half of that contract is removed.
+var (
+	_ counter.Provider       = handler{}
+	_ counter.CustomProvider = handler{}
+	_ counter.CustomCounter  = ResponseMarshalError{}
+	_ counter.CustomCounter  = ResponseCommittedError{}
+)
 
 // Keys returns the stat key labels in stable index order. Order matters:
 // gmetric's counter buckets are addressed by index, and changing the
@@ -97,6 +125,16 @@ func (h handler) Map(value interface{}) int {
 	}
 
 	return -1
+}
+
+// NewCounter implements github.com/viant/gmetric/counter.CustomProvider.
+// It mirrors the http provider: every bucket is allocated a top-K error
+// sampler so the embedded error retained by the CustomCounter stat markers
+// (ResponseMarshalError, ResponseCommittedError) can be sampled. Providing
+// this method is what makes handler a CustomProvider; without it gmetric
+// allocates nil Value.Custom counters and panics on Aggregate.
+func (h handler) NewCounter() counter.CustomCounter {
+	return stat.NewTopK(5, 0)
 }
 
 // NewHandler returns the counter.Provider used by Handler.ServeHTTP's
