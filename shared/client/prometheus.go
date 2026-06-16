@@ -314,7 +314,7 @@ func (m *prometheusMetrics) registerPrometheusMetrics(registerer prometheus.Regi
 	if err != nil {
 		return err
 	}
-	mkBECs(&m.httpClientBaseErrorCounters, runErrorCounter)
+	mkBECs(&m.httpClientBaseErrorCounters, httpClientErrorCounter)
 
 	return nil
 }
