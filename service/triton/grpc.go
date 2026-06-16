@@ -155,7 +155,7 @@ func toGRPCRequest(modelName string, params []interface{}, indexToName map[int]s
 			}
 		case [][]int:
 			if len(v) > 0 {
-				batchSize := len(v)
+				batchSize = len(v)
 				datatype = "INT32"
 
 				inputContents.IntContents = make([]int32, batchSize)
@@ -165,7 +165,7 @@ func toGRPCRequest(modelName string, params []interface{}, indexToName map[int]s
 			}
 		case [][]int32:
 			if len(v) > 0 {
-				batchSize := len(v)
+				batchSize = len(v)
 				datatype = "INT32"
 
 				inputContents.IntContents = make([]int32, batchSize)
@@ -176,7 +176,7 @@ func toGRPCRequest(modelName string, params []interface{}, indexToName map[int]s
 			}
 		case [][]int64:
 			if len(v) > 0 {
-				batchSize := len(v)
+				batchSize = len(v)
 				datatype = "INT64"
 
 				inputContents.Int64Contents = make([]int64, batchSize)
@@ -187,7 +187,7 @@ func toGRPCRequest(modelName string, params []interface{}, indexToName map[int]s
 			}
 		case [][]float32:
 			if len(v) > 0 {
-				batchSize := len(v)
+				batchSize = len(v)
 				datatype = "FP32"
 
 				inputContents.Fp32Contents = make([]float32, batchSize)
@@ -197,7 +197,7 @@ func toGRPCRequest(modelName string, params []interface{}, indexToName map[int]s
 			}
 		case [][]float64:
 			if len(v) > 0 {
-				batchSize := len(v)
+				batchSize = len(v)
 				datatype = "FP64"
 
 				inputContents.Fp64Contents = make([]float64, batchSize)
