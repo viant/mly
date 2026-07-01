@@ -104,8 +104,6 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 	r.configLock.Lock()
 	defer r.configLock.Unlock()
 
-	r.configModified = snapshot
-
 	// load router configuration file
 	rawReader, err := r.fs.OpenURL(ctx, r.configURL)
 	if err != nil {
@@ -139,6 +137,12 @@ func (r *Router) ReloadIfNeeded(ctx context.Context) error {
 	if err := r.applyRouterConfig(ctx, newConfig); err != nil {
 		return err
 	}
+
+	// Record the snapshot only after the configuration has been fully applied.
+	// Recording it before applyRouterConfig would mark a failed reload as the
+	// current state, so isModified() would report no change and the new config
+	// would never be retried until the file changed again.
+	r.configModified = snapshot
 
 	return nil
 }

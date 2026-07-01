@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/viant/afs"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
 	"github.com/viant/mly/service/platform"
@@ -246,6 +248,120 @@ func TestRouter_applyRouterConfig_LoadError(t *testing.T) {
 	if router.routingTable != nil {
 		t.Fatalf("routingTable should not be replaced on error")
 	}
+}
+
+// TestRouter_ReloadIfNeeded_RetriesAfterFailedConfigReload drives the full
+// ReloadIfNeeded() path and guards a regression: when a changed router config
+// fails to apply, the recorded modification snapshot must not advance, so the
+// same (still-changed) config file is retried on the next reload tick rather
+// than being silently treated as already-current.
+func TestRouter_ReloadIfNeeded_RetriesAfterFailedConfigReload(t *testing.T) {
+	ctx := context.Background()
+
+	fs := afs.New()
+	configURL := "mem://localhost/router_reload_retry/router-config.json"
+
+	writeConfig := func(modelName string, modTime time.Time) {
+		payload := fmt.Sprintf(`{"entityMapping":[{"entityID":1,"modelName":%q}],"globalModelName":"global"}`, modelName)
+		if err := fs.Upload(ctx, configURL, 0644, strings.NewReader(payload), modTime); err != nil {
+			t.Fatalf("failed to upload router config: %v", err)
+		}
+	}
+
+	makeSig := func() *domain.Signature {
+		return &domain.Signature{
+			Inputs: []domain.Input{
+				{Name: "text", Index: 0, Type: reflect.TypeOf("")},
+			},
+			Outputs: []domain.Output{
+				{Name: "score", Index: 0, DataType: "float32"},
+			},
+		}
+	}
+
+	// tritonServer controls whether a downstream model "reload" (load) succeeds.
+	tritonServer := &mockTritonServer{
+		modelLoadErr: map[string]error{},
+	}
+
+	setLoadErr := func(modelName string, e error) {
+		tritonServer.mu.Lock()
+		defer tritonServer.mu.Unlock()
+		if e == nil {
+			delete(tritonServer.modelLoadErr, modelName)
+		} else {
+			tritonServer.modelLoadErr[modelName] = e
+		}
+	}
+
+	cfg := &config.Model{
+		ID:       "reload_retry",
+		Debug:    true,
+		Mode:     "router",
+		Platform: "triton",
+		Router: &config.RouterConfig{
+			ConfigURL: configURL,
+			InputName: "router_id",
+			Global: config.GlobalModelConfig{
+				Exists: true,
+			},
+			Output: config.OutputConfig{
+				FieldName: "model_id",
+			},
+		},
+		Triton: &config.TritonConfig{
+			ServerID: "test_server",
+		},
+	}
+	cfg.Init(nil)
+
+	router, err := newRouter(cfg, fs, map[string]UnloadService{
+		"test_server": &triton.Service{},
+	}, func(modelName string) (platform.PlatformEvaluator, error) {
+		return &mockEvaluator{
+			modelName:    modelName,
+			signature:    makeSig,
+			tritonServer: tritonServer,
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("newRouter error: %v", err)
+	}
+
+	t1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Hour)
+
+	// 1) initial successful reload installs modelA
+	writeConfig("modelA", t1)
+	if err := router.ReloadIfNeeded(ctx); err != nil {
+		t.Fatalf("initial ReloadIfNeeded error: %v", err)
+	}
+	assert.Equal(t, map[int]string{1: "modelA"}, router.routingMap)
+	modifiedAfterSuccess := *router.configModified
+
+	// 2) config changes to modelB, but modelB fails to load -> reload must fail
+	setLoadErr("modelB", errors.New("boom"))
+	writeConfig("modelB", t2)
+	err = router.ReloadIfNeeded(ctx)
+	if err == nil {
+		t.Fatalf("expected ReloadIfNeeded to fail while modelB load errors")
+	}
+	assert.Contains(t, err.Error(), "modelB")
+
+	// the failed reload must NOT advance the recorded snapshot, otherwise the
+	// changed config could never be retried
+	assert.Equal(t, modifiedAfterSuccess, *router.configModified,
+		"configModified must not advance when applyRouterConfig fails")
+	assert.Equal(t, map[int]string{1: "modelA"}, router.routingMap,
+		"routing table must remain on the previous config after a failed reload")
+
+	// 3) modelB recovers; the SAME (unchanged) config file must be retried
+	setLoadErr("modelB", nil)
+	if err := router.ReloadIfNeeded(ctx); err != nil {
+		t.Fatalf("retry ReloadIfNeeded error: %v", err)
+	}
+	assert.Equal(t, map[int]string{1: "modelB"}, router.routingMap,
+		"router must re-attempt and apply the previously-failed config")
 }
 
 func TestRouter_applyRouterConfig_signature(t *testing.T) {
