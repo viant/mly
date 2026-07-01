@@ -248,11 +248,33 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 	signatureCh := make(chan modelSignature, numWorkers)
 
 	if globalEvaluator != nil {
+		// With an empty entity routing table (a global-only config), no entity
+		// model contributes a signature, so the global model must seed the
+		// router's IO signature; otherwise the router would have no signature
+		// and fail (nil signature, or a fixed-evaluator field check against no
+		// outputs). When entity models exist, they seed the signature instead.
+		globalSeedsSignature := len(newRoutingTable) == 0
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := globalEvaluator.ReloadIfNeeded(ctx); err != nil {
 				errCh <- fmt.Errorf("failed to reload global model %s: %w", globalModelName, err)
+				return
+			}
+
+			if !globalSeedsSignature {
+				return
+			}
+
+			evalSig := globalEvaluator.Signature()
+			if evalSig == nil {
+				errCh <- fmt.Errorf("global model %s signature is nil", globalModelName)
+				return
+			}
+
+			signatureCh <- modelSignature{
+				name:      globalModelName,
+				signature: evalSig,
 			}
 		}()
 	}
