@@ -268,6 +268,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 			if err := modelEvaluator.ReloadIfNeeded(ctx); err != nil {
 				r.debugLogf("failed to reload model: %s: %v", model, err)
 				errCh <- fmt.Errorf("failed to reload model %s: %w", model, err)
+				return
 			}
 
 			evalSig := modelEvaluator.Signature()

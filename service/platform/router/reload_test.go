@@ -250,6 +250,67 @@ func TestRouter_applyRouterConfig_LoadError(t *testing.T) {
 	}
 }
 
+// TestRouter_applyRouterConfig_NoDeadlockOnMassLoadFailure guards a regression:
+// each reload worker could enqueue two errors onto errCh (the reload failure and
+// then a nil-signature error), but errCh is only sized numWorkers. When a config
+// change adds several new models that all fail to load -- so each also has a nil
+// signature -- the second sends overflow errCh. errCh is drained only after
+// wg.Wait, so the blocked sends never complete: the reload deadlocks forever
+// while holding r.configLock, freezing the model's health. This asserts the
+// reload returns an error promptly instead of hanging.
+func TestRouter_applyRouterConfig_NoDeadlockOnMassLoadFailure(t *testing.T) {
+	ctx := context.Background()
+
+	loadErr := errors.New("triton overloaded")
+
+	tritonServer := &mockTritonServer{
+		modelLoadErr: map[string]error{},
+	}
+
+	// several brand-new models that all fail to load, and therefore never obtain
+	// a signature (Signature() == nil) -- the exact double-send trigger.
+	newModels := []string{"modelA", "modelB", "modelC", "modelD", "modelE"}
+	for _, m := range newModels {
+		tritonServer.modelLoadErr[m] = loadErr
+	}
+
+	router := &Router{
+		debug:      true,
+		routerName: "mass_load_failure",
+		unloader:   &triton.Service{Unloader: &mockUnloader{}},
+		makeRoutedEvaluator: func(modelName string) (platform.PlatformEvaluator, error) {
+			return &mockEvaluator{
+				modelName:    modelName,
+				tritonServer: tritonServer,
+				// never loaded -> nil signature
+				signature: func() *domain.Signature { return nil },
+			}, nil
+		},
+		unloadGauge: routerModelUnloadGauge.WithLabelValues("mass_load_failure"),
+	}
+
+	entityMapping := make([]sharedrouter.EntityKV, len(newModels))
+	for i, m := range newModels {
+		entityMapping[i] = sharedrouter.EntityKV{EntityID: i + 1, ModelName: m}
+	}
+	newConfig := &sharedrouter.RoutingConfig{EntityMapping: entityMapping}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- router.applyRouterConfig(ctx, newConfig)
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatalf("expected a reload error on mass load failure, got nil")
+		}
+		assert.Contains(t, err.Error(), "one or more model reloading errors")
+	case <-time.After(5 * time.Second):
+		t.Fatalf("applyRouterConfig deadlocked on mass model load failure")
+	}
+}
+
 // TestRouter_ReloadIfNeeded_RetriesAfterFailedConfigReload drives the full
 // ReloadIfNeeded() path and guards a regression: when a changed router config
 // fails to apply, the recorded modification snapshot must not advance, so the
