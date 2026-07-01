@@ -242,7 +242,13 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		routerInputOffset := r.ioState.routerInputOffset
 
 		hasFixedEvaluator := r.fixedEvaluator != nil
+		// Prefer the global model name from the live router config (router.yaml)
+		// so the reported inference_model_id reflects the actual global model
+		// artifact. Falls back to the static Output.GlobalModelOverride.
 		reportedGlobalModelName := r.outputConfig.GlobalModelOverride
+		if r.routingConfig != nil && r.routingConfig.GlobalModelName != "" {
+			reportedGlobalModelName = r.routingConfig.GlobalModelName
+		}
 		noModelName := r.outputConfig.NoModelID
 
 		numInputs := len(params)

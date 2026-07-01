@@ -175,6 +175,68 @@ func TestRouter_applyRouterConfig_LoadsAndSwaps(t *testing.T) {
 	}
 }
 
+// TestRouter_applyRouterConfig_GlobalOnly guards support for a global-only
+// routing config (an empty entityMapping with only a globalModelName). Without
+// the global model seeding the router signature, applyRouterConfig leaves a nil
+// IO signature, which later causes runtime panics (nil signature deref) or
+// fails the fixed-evaluator field check against no collected outputs.
+func TestRouter_applyRouterConfig_GlobalOnly(t *testing.T) {
+	ctx := context.Background()
+
+	makeSig := func() *domain.Signature {
+		return &domain.Signature{
+			Inputs: []domain.Input{
+				{Name: "text", Index: 0, Type: reflect.TypeOf("")},
+			},
+			Outputs: []domain.Output{
+				{Name: "score", Index: 0, DataType: "float32"},
+			},
+		}
+	}
+
+	router := &Router{
+		debug:                true,
+		routerName:           "global_only",
+		routerInputFieldName: "entity_id",
+		unloader:             &triton.Service{Unloader: &mockUnloader{}, Repository: triton.NewRepository()},
+		routingConfig:        &sharedrouter.RoutingConfig{},
+		makeRoutedEvaluator: func(modelName string) (platform.PlatformEvaluator, error) {
+			return &mockEvaluator{signature: makeSig, modelName: modelName}, nil
+		},
+		unloadGauge: routerModelUnloadGauge.WithLabelValues("global_only"),
+	}
+
+	newConfig := &sharedrouter.RoutingConfig{
+		GlobalModelName: "global-only-model",
+	}
+
+	if err := router.applyRouterConfig(ctx, newConfig); err != nil {
+		t.Fatalf("applyRouterConfig returned error: %v", err)
+	}
+
+	if router.globalModel == nil {
+		t.Fatalf("globalModel was not set")
+	}
+
+	if _, ok := router.routingTable["global-only-model"]; !ok {
+		t.Fatalf("routingTable missing global model")
+	}
+
+	if router.ioState == nil || router.ioState.signature == nil {
+		t.Fatalf("router IO signature was not seeded from the global model")
+	}
+
+	var hasScore bool
+	for _, out := range router.ioState.signature.Outputs {
+		if out.Name == "score" {
+			hasScore = true
+		}
+	}
+	if !hasScore {
+		t.Fatalf("router signature missing global model output 'score', got %#v", router.ioState.signature.Outputs)
+	}
+}
+
 func TestRouter_applyRouterConfig_LoadError(t *testing.T) {
 	ctx := context.Background()
 

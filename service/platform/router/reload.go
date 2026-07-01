@@ -248,11 +248,28 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 	signatureCh := make(chan modelSignature, numWorkers)
 
 	if globalEvaluator != nil {
+		// The global model is a served model, so its signature always takes part
+		// in building and validating the router IO. This also covers a global-only
+		// config (empty entityMapping): without it the router would have no
+		// signature and fail on cold start (nil signature, or a fixed-evaluator
+		// field check against no collected outputs).
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := globalEvaluator.ReloadIfNeeded(ctx); err != nil {
 				errCh <- fmt.Errorf("failed to reload global model %s: %w", globalModelName, err)
+				return
+			}
+
+			evalSig := globalEvaluator.Signature()
+			if evalSig == nil {
+				errCh <- fmt.Errorf("global model %s signature is nil", globalModelName)
+				return
+			}
+
+			signatureCh <- modelSignature{
+				name:      globalModelName,
+				signature: evalSig,
 			}
 		}()
 	}
