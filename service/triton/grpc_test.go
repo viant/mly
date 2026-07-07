@@ -72,8 +72,12 @@ func startMockGRPCServer(t *testing.T, mock *mockTritonServer) (*grpc.Server, *b
 	triton.RegisterGRPCInferenceServiceServer(server, mock)
 
 	go func() {
+		// Serve returns nil once server.Stop() is called during teardown; a
+		// non-nil error means startup failed. Use Errorf, not Fatalf: Fatalf
+		// calls runtime.Goexit on this goroutine (not the test goroutine), so
+		// it cannot fail the test and can panic if it fires after completion.
 		if err := server.Serve(listener); err != nil {
-			t.Fatalf("Server exited with error: %v", err)
+			t.Errorf("Server exited with error: %v", err)
 		}
 	}()
 
