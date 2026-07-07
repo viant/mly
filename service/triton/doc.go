@@ -1,5 +1,3 @@
-package triton
-
 /*
 Package triton integrates mly with a Triton Inference Server over the
 KServe/Open-Inference v2 protocol (gRPC preferred; the HTTP client is deprecated).
@@ -31,3 +29,4 @@ assume the raw ModelInfer response order matches metadata. When outputs share a
 datatype (e.g. two FP32 scalars), a positional mismatch is otherwise silently
 undetectable: values are mislabeled with no type error.
 */
+package triton
