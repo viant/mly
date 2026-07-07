@@ -28,7 +28,7 @@ func (c *HTTPClient) ServerReady(ctx context.Context) error {
 	return err
 }
 
-func (c *HTTPClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error) {
+func (c *HTTPClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) (map[string]interface{}, error) {
 	tritonRequest, err := convertToTritonRequest(inputs, indexToName)
 	if err != nil {
 		return nil, err
@@ -368,25 +368,32 @@ func convertToTritonRequest(params []interface{}, indexToName map[int]string) (*
 	return &TritonRequest{Inputs: inputs}, nil
 }
 
-// convertFromTritonResponse converts Triton response to [numOutputs]([batchSize]D_T) - shape depends on model output.
-func convertFromTritonResponse(response *TritonResponse) ([]interface{}, error) {
-	var result []interface{}
+// convertFromTritonResponse maps the Triton response into output tensors keyed by
+// name; each value is [batchSize][1]float32. Ordering into signature order is the
+// evaluator's responsibility.
+func convertFromTritonResponse(response *TritonResponse) (map[string]interface{}, error) {
+	result := make(map[string]interface{}, len(response.Outputs))
 
 	for outputOffset, output := range response.Outputs {
-		if data, ok := output.Data.([]interface{}); ok && len(data) > 0 {
-			batchSize := len(data)
-			converted := make([][]float32, batchSize)
-			for i, v := range data {
-				if f, ok := v.(float64); ok {
-					converted[i] = []float32{float32(f)}
-				} else {
-					return nil, fmt.Errorf("unsupported output type for %s: %T, for batch item %d of output offset %d", output.Name, v, i, outputOffset)
-				}
-			}
-			result = append(result, converted)
-		} else {
+		data, ok := output.Data.([]interface{})
+		if !ok || len(data) == 0 {
 			return nil, fmt.Errorf("unsupported output type for %s: %T, for output offset %d", output.Name, output.Data, outputOffset)
 		}
+
+		batchSize := len(data)
+		converted := make([][]float32, batchSize)
+		for i, v := range data {
+			f, ok := v.(float64)
+			if !ok {
+				return nil, fmt.Errorf("unsupported output type for %s: %T, for batch item %d of output offset %d", output.Name, v, i, outputOffset)
+			}
+			converted[i] = []float32{float32(f)}
+		}
+
+		if _, dup := result[output.Name]; dup {
+			return nil, fmt.Errorf("duplicate output name %q in response", output.Name)
+		}
+		result[output.Name] = converted
 	}
 
 	return result, nil

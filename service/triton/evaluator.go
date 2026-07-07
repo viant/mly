@@ -126,10 +126,19 @@ func (t *TritonEvaluator) registerUsage() error {
 	return nil
 }
 
-// Predict performs inference via Triton Inference Server
+// Predict performs inference via Triton Inference Server.
+//
+// The client returns output tensors keyed by name. We map them into
+// signature.Outputs order so callers can rely on result[i] == signature.Outputs[i]
+// regardless of the order Triton emitted tensors in the response.
 func (t *TritonEvaluator) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
 	if len(params) == 0 {
 		return nil, fmt.Errorf("no input parameters")
+	}
+
+	sig := t.signature
+	if sig == nil {
+		return nil, fmt.Errorf("model %s: Predict called before signature was loaded", t.modelName)
 	}
 
 	requestCtx := ctx
@@ -139,7 +148,26 @@ func (t *TritonEvaluator) Predict(ctx context.Context, params []interface{}) ([]
 		defer cancel()
 	}
 
-	return t.service.Client.ModelInfer(requestCtx, t.modelName, params, t.indexToName)
+	resultsByName, err := t.service.Client.ModelInfer(requestCtx, t.modelName, params, t.indexToName)
+	if err != nil {
+		return nil, err
+	}
+
+	ordered := make([]interface{}, len(sig.Outputs))
+	for i, out := range sig.Outputs {
+		value, ok := resultsByName[out.Name]
+		if !ok {
+			return nil, fmt.Errorf("model %s response missing output %q", t.modelName, out.Name)
+		}
+		ordered[i] = value
+	}
+
+	if len(resultsByName) != len(sig.Outputs) {
+		return nil, fmt.Errorf("model %s returned %d outputs, signature expects %d",
+			t.modelName, len(resultsByName), len(sig.Outputs))
+	}
+
+	return ordered, nil
 }
 
 func (t *TritonEvaluator) Signature() *domain.Signature {
@@ -262,7 +290,7 @@ func (t *TritonEvaluator) ReloadIfNeeded(ctx context.Context) error {
 	for i, output := range metadata.Outputs {
 		o := domain.Output{
 			Name:  output.Name,
-			Index: len(outputs),
+			Index: i,
 		}
 
 		goType := TritonToGoType(output.Datatype)

@@ -18,7 +18,12 @@ type TritonClient interface {
 
 	// inputs is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds)
 	// inputs will never be empty
-	ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error)
+	//
+	// Returns the output tensors keyed by their Triton output tensor name. Callers
+	// (the evaluator) are responsible for mapping these into signature order; the
+	// map deliberately carries no positional/order information so no consumer can
+	// depend on the order Triton happens to return tensors in.
+	ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) (map[string]interface{}, error)
 
 	ModelReady(ctx context.Context, modelName string) (bool, error)
 

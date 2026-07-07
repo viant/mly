@@ -145,8 +145,8 @@ func TestGRPCClient_ModelInfer(t *testing.T) {
 	require.Len(t, results, 1)
 
 	// Verify output format
-	output, ok := results[0].([][]int64)
-	require.True(t, ok, "expected [][]int64, got %T", results[0])
+	output, ok := results["output"].([][]int64)
+	require.True(t, ok, "expected [][]int64, got %T", results["output"])
 	require.Len(t, output, 2)
 	assert.Equal(t, []int64{42}, output[0])
 	assert.Equal(t, []int64{100}, output[1])
@@ -186,8 +186,8 @@ func TestGRPCClient_ModelInferWithRawOutputContents(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
-	output, ok := results[0].([][]float32)
-	require.True(t, ok, "expected [][]float32, got %T", results[0])
+	output, ok := results["output"].([][]float32)
+	require.True(t, ok, "expected [][]float32, got %T", results["output"])
 	require.Len(t, output, 2)
 	assert.InDelta(t, 10.0, output[0][0], 0.01)
 	assert.InDelta(t, 50.0, output[1][0], 0.01)
@@ -294,7 +294,7 @@ func TestGRPCClient_ModelInferAllInputTypes(t *testing.T) {
 			results, err := client.ModelInfer(ctx, "test_model", []interface{}{tc.inputData}, map[int]string{0: "input1"})
 			require.NoError(t, err)
 			require.Len(t, results, 1)
-			assert.NotNil(t, results[0])
+			assert.NotNil(t, results["output"])
 		})
 	}
 }
@@ -332,8 +332,8 @@ func TestGRPCClient_ModelInferBytesOutput(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 
-	output, ok := results[0].([][]string)
-	require.True(t, ok, "expected [][]string, got %T", results[0])
+	output, ok := results["output"].([][]string)
+	require.True(t, ok, "expected [][]string, got %T", results["output"])
 	require.Len(t, output, 2)
 	assert.Equal(t, []string{"result1"}, output[0])
 	assert.Equal(t, []string{"result2"}, output[1])
@@ -392,8 +392,8 @@ func TestGRPCClient_ModelInferDifferentBatchSizes(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, results, 1)
 
-			output, ok := results[0].([][]int64)
-			require.True(t, ok, "expected [][]int64, got %T", results[0])
+			output, ok := results["output"].([][]int64)
+			require.True(t, ok, "expected [][]int64, got %T", results["output"])
 			assert.Len(t, output, tc.batchSize)
 		})
 	}
@@ -464,4 +464,58 @@ func TestGRPCClient_ModelInferMissingOutput(t *testing.T) {
 	_, err := client.ModelInfer(ctx, "test_model", params, map[int]string{0: "input1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing contents")
+}
+
+// TestConvertGRPCResponse_KeysByName ensures each response tensor is keyed by its
+// own wire name, so a response whose tensor order differs from the model's
+// metadata order still maps values to the correct names (no positional aliasing).
+func TestConvertGRPCResponse_KeysByName(t *testing.T) {
+	response := &triton.ModelInferResponse{
+		ModelName: "test_model",
+		Outputs: []*triton.ModelInferResponse_InferOutputTensor{
+			{
+				Name:     "calibration",
+				Datatype: "FP32",
+				Shape:    []int64{1, 1},
+				Contents: &triton.InferTensorContents{Fp32Contents: []float32{0.25}},
+			},
+			{
+				Name:     "score",
+				Datatype: "FP32",
+				Shape:    []int64{1, 1},
+				Contents: &triton.InferTensorContents{Fp32Contents: []float32{0.90}},
+			},
+		},
+	}
+
+	result, err := convertGRPCResponse(response)
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+
+	assert.Equal(t, [][]float32{{0.25}}, result["calibration"])
+	assert.Equal(t, [][]float32{{0.90}}, result["score"])
+}
+
+func TestConvertGRPCResponse_DuplicateName(t *testing.T) {
+	response := &triton.ModelInferResponse{
+		ModelName: "test_model",
+		Outputs: []*triton.ModelInferResponse_InferOutputTensor{
+			{
+				Name:     "score",
+				Datatype: "FP32",
+				Shape:    []int64{1, 1},
+				Contents: &triton.InferTensorContents{Fp32Contents: []float32{0.25}},
+			},
+			{
+				Name:     "score",
+				Datatype: "FP32",
+				Shape:    []int64{1, 1},
+				Contents: &triton.InferTensorContents{Fp32Contents: []float32{0.90}},
+			},
+		},
+	}
+
+	_, err := convertGRPCResponse(response)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate output name")
 }
