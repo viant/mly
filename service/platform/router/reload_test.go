@@ -782,6 +782,140 @@ func TestRouter_applyRouterConfig_configuredOutputOrder(t *testing.T) {
 	assert.Equal(t, [][]float32{{1}, {10}}, results[2])
 }
 
+// TestRouter_Predict_ReordersOutputsPerRowAcrossBatches exercises the full
+// Predict reassembly path: rows are interleaved across two models whose internal
+// output orders differ, and every row carries a distinct value. This catches
+// both output-name misordering and per-row/offset mixups in the batched path --
+// neither of which TestRouter_applyRouterConfig_configuredOutputOrder can detect,
+// since it returns the same value for every row of a model's batch.
+func TestRouter_Predict_ReordersOutputsPerRowAcrossBatches(t *testing.T) {
+	for _, forceBatchSize1 := range []bool{false, true} {
+		name := "batched"
+		if forceBatchSize1 {
+			name = "forceBatchSize1"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			mockClient := &mockUnloader{tritonServer: &mockTritonServer{}}
+
+			// distinct value per input token so a row mixup is detectable
+			valueOf := map[string]float32{"a": 10, "b": 20, "c": 30, "d": 40, "e": 50}
+
+			// model1 emits [score, calibration]; model2 emits [calibration, score]
+			model1Sig := func() *domain.Signature {
+				return &domain.Signature{
+					Inputs: []domain.Input{{Name: "text", Index: 0, Type: reflect.TypeOf("")}},
+					Outputs: []domain.Output{
+						{Name: "score", Index: 0, DataType: "float32"},
+						{Name: "calibration", Index: 1, DataType: "float32"},
+					},
+				}
+			}
+			model2Sig := func() *domain.Signature {
+				return &domain.Signature{
+					Inputs: []domain.Input{{Name: "text", Index: 0, Type: reflect.TypeOf("")}},
+					Outputs: []domain.Output{
+						{Name: "calibration", Index: 0, DataType: "float32"},
+						{Name: "score", Index: 1, DataType: "float32"},
+					},
+				}
+			}
+
+			// compute per-row outputs from the input token, in the evaluator's
+			// own signature output order
+			perRowPredict := func(params []interface{}, signature *domain.Signature) ([]interface{}, error) {
+				texts := params[0].([][]string)
+				bs := len(texts)
+				outputs := make([]interface{}, len(signature.Outputs))
+				for i, out := range signature.Outputs {
+					batch := make([][]float32, bs)
+					for j := range batch {
+						base := valueOf[texts[j][0]]
+						switch out.Name {
+						case "score":
+							batch[j] = []float32{base}
+						case "calibration":
+							batch[j] = []float32{base + 0.5}
+						default:
+							return nil, fmt.Errorf("unexpected output %s", out.Name)
+						}
+					}
+					outputs[i] = batch
+				}
+				return outputs, nil
+			}
+
+			cfg := &config.Model{
+				ID:       "test_reorder_perrow",
+				Debug:    true,
+				Mode:     "router",
+				Platform: "triton",
+				Router: &config.RouterConfig{
+					ConfigURL:       "memory://router-config",
+					InputName:       "router_id",
+					ForceBatchSize1: forceBatchSize1,
+					Global: config.GlobalModelConfig{
+						PredictionReplacements: []config.PredictionReplacement{
+							{Name: "score", Type: "float32", Value: 0.0},
+							{Name: "calibration", Type: "float32", Value: 0.0},
+						},
+					},
+					Output: config.OutputConfig{FieldName: "model_id"},
+				},
+				MetaInput: shared.MetaInput{
+					Outputs: []*shared.Field{
+						{Name: "calibration", DataType: "float32"},
+						{Name: "model_id", DataType: "string"},
+						{Name: "score", DataType: "float32"},
+					},
+				},
+				Triton: &config.TritonConfig{ServerID: "test_server"},
+			}
+			cfg.Init(nil)
+
+			router, err := newRouter(cfg, nil, map[string]UnloadService{
+				"test_server": &triton.Service{Unloader: mockClient},
+			}, func(modelName string) (platform.PlatformEvaluator, error) {
+				switch modelName {
+				case "model1":
+					return &mockEvaluator{modelName: modelName, signature: model1Sig, predictor: perRowPredict, tritonServer: mockClient.tritonServer}, nil
+				case "model2":
+					return &mockEvaluator{modelName: modelName, signature: model2Sig, predictor: perRowPredict, tritonServer: mockClient.tritonServer}, nil
+				default:
+					return nil, errors.New("unexpected model")
+				}
+			})
+			if err != nil {
+				t.Fatalf("newRouter error: %v", err)
+			}
+
+			if err := router.applyRouterConfig(ctx, &sharedrouter.RoutingConfig{
+				EntityMapping: []sharedrouter.EntityKV{
+					{EntityID: 1, ModelName: "model1"},
+					{EntityID: 2, ModelName: "model2"},
+				},
+			}); err != nil {
+				t.Fatalf("applyRouterConfig error: %v", err)
+			}
+
+			// rows routed model1,model2,model1,model2,model1
+			results, err := router.Predict(ctx, []interface{}{
+				[][]string{{"a"}, {"b"}, {"c"}, {"d"}, {"e"}}, // text
+				[][]int64{{1}, {2}, {1}, {2}, {1}},            // router_id
+			})
+			if err != nil {
+				t.Fatalf("Predict error: %v", err)
+			}
+
+			// configured output order is [calibration, model_id, score]
+			assert.Equal(t, [][]float32{{10.5}, {20.5}, {30.5}, {40.5}, {50.5}}, results[0], "calibration column")
+			assert.Equal(t, [][]string{{"model1"}, {"model2"}, {"model1"}, {"model2"}, {"model1"}}, results[1], "model_id column")
+			assert.Equal(t, [][]float32{{10}, {20}, {30}, {40}, {50}}, results[2], "score column")
+		})
+	}
+}
+
 func TestRouter_applyRouterConfig_configuredOutputValidation(t *testing.T) {
 	tests := []struct {
 		name              string

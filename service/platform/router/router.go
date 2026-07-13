@@ -414,6 +414,11 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 					// Rely on downstream for timeouts
 					results, err = b.evaluator.Predict(ctx, orderedInputs)
 
+					// Labeling results positionally by evalSig.Outputs is safe
+					// because the evaluator guarantees Predict returns values in
+					// signature.Outputs order (it maps the name-keyed ModelInfer
+					// response into that order). Do not assume the raw Triton
+					// response order matches metadata. See service/triton doc.go.
 					outputNames = make([]string, len(evalSig.Outputs))
 					for i, out := range evalSig.Outputs {
 						outputNames[i] = out.Name

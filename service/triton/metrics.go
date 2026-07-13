@@ -124,8 +124,8 @@ func withGatherers(fn func() error, fnObserve func(float64)) error {
 	return nil
 }
 
-func (c *MeteredTritonClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error) {
-	var result []interface{}
+func (c *MeteredTritonClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) (map[string]interface{}, error) {
+	var result map[string]interface{}
 	var err error
 
 	err = withGatherers(func() error {

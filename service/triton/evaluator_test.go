@@ -20,12 +20,16 @@ type mockTritonClient struct {
 	modelLoadErr map[string]error
 
 	metadata *ModelMetadata
+
+	// inferResult, when non-nil, is returned by ModelInfer keyed by output name.
+	inferResult map[string]interface{}
+	inferErr    error
 }
 
 func (m *mockTritonClient) ServerReady(ctx context.Context) error { return nil }
 
-func (m *mockTritonClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error) {
-	return nil, nil
+func (m *mockTritonClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) (map[string]interface{}, error) {
+	return m.inferResult, m.inferErr
 }
 
 func (m *mockTritonClient) ModelReady(ctx context.Context, modelName string) (bool, error) {
@@ -203,4 +207,75 @@ func TestTritonEvaluator_PredictEmptyBatch(t *testing.T) {
 	_, err := evaluator.Predict(context.Background(), []interface{}{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no input parameters")
+}
+
+// TestTritonEvaluator_PredictOrdersOutputsByName guards the core invariant of the
+// name-keyed ModelInfer contract: the client returns outputs keyed by name (no
+// order), and Predict must place them into signature.Outputs order. The map is
+// deliberately built so its keys do not align positionally with the signature.
+func TestTritonEvaluator_PredictOrdersOutputsByName(t *testing.T) {
+	cfg := &config.Model{
+		ID: "test_model",
+		Triton: &config.TritonConfig{
+			ModelName: "test_model",
+		},
+	}
+
+	mock := &mockTritonClient{
+		metadata: &ModelMetadata{
+			Inputs: []MetadataTensor{
+				{Name: "input1", Datatype: "FP32"},
+			},
+			// signature output order is [score, calibration]
+			Outputs: []MetadataTensor{
+				{Name: "score", Datatype: "FP32"},
+				{Name: "calibration", Datatype: "FP32"},
+			},
+		},
+		inferResult: map[string]interface{}{
+			"calibration": [][]float32{{0.25}},
+			"score":       [][]float32{{0.90}},
+		},
+	}
+
+	evaluator := newTritonEvaluator(cfg, mock)
+	defer evaluator.Close()
+
+	sig := evaluator.Signature()
+	require.NotNil(t, sig)
+	require.Equal(t, "score", sig.Outputs[0].Name)
+	require.Equal(t, "calibration", sig.Outputs[1].Name)
+
+	results, err := evaluator.Predict(context.Background(), []interface{}{[][]float32{{1.0}}})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	assert.Equal(t, [][]float32{{0.90}}, results[0], "index 0 must be score, per signature order")
+	assert.Equal(t, [][]float32{{0.25}}, results[1], "index 1 must be calibration, per signature order")
+}
+
+func TestTritonEvaluator_PredictMissingOutput(t *testing.T) {
+	cfg := &config.Model{
+		ID: "test_model",
+		Triton: &config.TritonConfig{
+			ModelName: "test_model",
+		},
+	}
+
+	mock := &mockTritonClient{
+		metadata: &ModelMetadata{
+			Inputs:  []MetadataTensor{{Name: "input1", Datatype: "FP32"}},
+			Outputs: []MetadataTensor{{Name: "score", Datatype: "FP32"}, {Name: "calibration", Datatype: "FP32"}},
+		},
+		inferResult: map[string]interface{}{
+			"score": [][]float32{{0.90}},
+		},
+	}
+
+	evaluator := newTritonEvaluator(cfg, mock)
+	defer evaluator.Close()
+
+	_, err := evaluator.Predict(context.Background(), []interface{}{[][]float32{{1.0}}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing output")
 }
