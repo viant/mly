@@ -1,0 +1,5 @@
+entityMapping:
+  - entityID: 1
+    modelName: sli_1
+  - entityID: 2
+    modelName: sli_2

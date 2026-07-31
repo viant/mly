@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +24,29 @@ import (
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/stat"
 )
+
+// responseMarshalError signals that gojay.Marshal of the Response struct
+// failed during writeResponse. The HTTP response is NOT yet committed,
+// so ServeHTTP can still emit an explicit 5xx with a meaningful body.
+// Surfaced as a typed error so it can be routed to its own metric bucket
+// (sstat.ResponseMarshalError) and distinguished from upstream errors.
+type responseMarshalError struct{ err error }
+
+func (e *responseMarshalError) Error() string { return e.err.Error() }
+func (e *responseMarshalError) Unwrap() error { return e.err }
+
+// responseCommittedError signals that the HTTP response status line and
+// headers have already been flushed to the client when the wrapped error
+// occurred. The caller MUST NOT attempt to send a different status code:
+// net/http will drop the second WriteHeader and emit a "superfluous
+// response.WriteHeader call" warning, while the client still observes the
+// original (200) status. Surfaced so ServeHTTP can log + exit instead of
+// trying to overwrite the status line, and so the failure can be routed
+// to its own metric bucket (sstat.ResponseCommittedError).
+type responseCommittedError struct{ err error }
+
+func (e *responseCommittedError) Error() string { return e.err.Error() }
+func (e *responseCommittedError) Unwrap() error { return e.err }
 
 // Handler converts a model prediction HTTP request to its internal calls.
 type Handler struct {
@@ -62,7 +85,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	if httpRequest.Method == http.MethodGet {
 		request = h.service.NewRequest()
 		if err := h.buildRequestFromQuery(httpRequest, request); err != nil {
-			http.Error(writer, err.Error(), http.StatusBadRequest)
+			h.writeError(writer, response, hStats, http.StatusBadRequest, err)
 			return
 		}
 	} else {
@@ -76,7 +99,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 			defer func() { onDone(time.Now(), stats.Values()...) }()
 
 			if err != nil {
-				stats.Append(sstat.ReadError{err})
+				stats.Append(sstat.ReadError{Error: err})
 				if isDebug {
 					log.Printf("[%v http] read error: %v\n", h.service.config.ID, err)
 				}
@@ -86,7 +109,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 					code = http.StatusRequestEntityTooLarge
 				}
 
-				http.Error(writer, err.Error(), code)
+				h.writeError(writer, response, hStats, code, err)
 				return err
 			}
 
@@ -101,14 +124,14 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 			err = gojay.Unmarshal(data[:size], request)
 			if err != nil {
 				werr := fmt.Errorf("unmarshal error: %w data: %s", err, string(data[:size]))
-				stats.Append(sstat.UnmarshalError{werr})
+				stats.Append(sstat.UnmarshalError{Error: werr})
 
 				if isDebug {
 					log.Printf("[%v http] unmarshal error: %v\n", h.service.config.ID, err)
 				}
 
-				rmsg := fmt.Sprintf("%s (are your input types correct?)", err.Error())
-				http.Error(writer, rmsg, http.StatusBadRequest)
+				displayErr := fmt.Errorf("%s (are your input types correct?)", err.Error())
+				h.writeError(writer, response, hStats, http.StatusBadRequest, displayErr)
 				return err
 			}
 
@@ -123,11 +146,17 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	if request == nil {
 		// This isn't a particularly helpful message.
 		// Currently, the only case this handles is if the request is too large.
-		http.Error(writer, "no request", http.StatusBadRequest)
+		h.writeError(writer, response, hStats, http.StatusBadRequest, errors.New("no request"))
 		return
 	}
 
-	err := h.handleAppRequest(ctx, writer, request, response)
+	err := h.service.Do(ctx, request, response)
+	if err != nil {
+		response.SetError(err)
+	} else {
+		err = h.writeResponse(writer, response, http.StatusOK)
+	}
+
 	if isDebug {
 		data, merr := json.Marshal(response.Data)
 
@@ -144,6 +173,30 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 	}
 
 	if err != nil {
+		// If the response was already committed (status + headers flushed),
+		// the wire status code is fixed at 200 and cannot be changed. Calling
+		// writeError here would log "superfluous WriteHeader" and silently
+		// drop the new status — the client still sees 200 + truncated body.
+		// Log unconditionally so this defect is visible in production, and
+		// emit a dedicated metric so it can be alerted independently of
+		// the generic ErrorKey bucket.
+		var committed *responseCommittedError
+		if errors.As(err, &committed) {
+			hStats.Append(sstat.ResponseCommittedError{Error: err})
+			log.Printf("[%v http] response committed but write failed: %v", h.service.config.ID, err)
+			return
+		}
+
+		// Marshal failure: response NOT committed; we will emit an explicit
+		// 5xx below. Track it in its own metric bucket so the operator can
+		// distinguish "we never sent anything" from "we sent something we
+		// shouldn't have". writeError clears response.Data before retrying,
+		// so the second marshal cannot fail for the same reason.
+		var marshal *responseMarshalError
+		if errors.As(err, &marshal) {
+			hStats.Append(sstat.ResponseMarshalError{Error: err})
+		}
+
 		var status int
 		if _, ok := err.(*clienterr.ClientError); ok {
 			status = http.StatusBadRequest
@@ -157,7 +210,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, httpRequest *http.Reques
 			log.Printf("[%v http] status:%d error:%v", h.service.config.ID, status, err)
 		}
 
-		http.Error(writer, err.Error(), status)
+		h.writeError(writer, response, hStats, status, err)
 	}
 }
 
@@ -175,27 +228,93 @@ func (h *Handler) buildRequestFromQuery(httpRequest *http.Request, request *requ
 	return nil
 }
 
-func (h *Handler) handleAppRequest(ctx context.Context, writer io.Writer, request *request.Request, response *Response) error {
-	if err := h.service.Do(ctx, request, response); err != nil {
-		response.SetError(err)
-		return err
+// writeResponse marshals appResponse and emits it with explicit-commit
+// semantics:
+//
+//   - Marshal first; on failure return a typed responseMarshalError -- the
+//     response is NOT yet committed and the caller can still set a different
+//     status (typically a 5xx).
+//   - Set Content-Length explicitly so a truncated body is detectable on
+//     the client side as io.ErrUnexpectedEOF (without it, the client cannot
+//     distinguish "done" from "connection broke mid-body" on a 200 OK).
+//   - Call WriteHeader(status) explicitly so the status line is committed
+//     in a known order, not as a side effect of the first Write.
+//   - On Write failure return responseCommittedError so the caller knows
+//     the status code can no longer be changed.
+//
+// status is typically http.StatusOK for success responses; the writeError
+// helper passes the appropriate 4xx/5xx for error responses so the wire
+// shape is uniform across success and failure paths.
+//
+// This addresses the silent "200 OK + empty body" failure mode where a
+// canceled connection caused the implicit auto-200 from Write to flush
+// headers while the body bytes were lost.
+func (h *Handler) writeResponse(writer http.ResponseWriter, appResponse *Response, status int) error {
+	appResponse.ServiceTimeMcs = int(time.Since(appResponse.started).Microseconds())
+
+	data, err := gojay.Marshal(appResponse)
+	if err != nil {
+		return &responseMarshalError{err: fmt.Errorf("marshal response: %w", err)}
 	}
 
-	if err := h.writeResponse(writer, response); err != nil {
-		return err
+	if h.service.config.Debug {
+		log.Printf("[%v write] output:%s", h.service.config.ID, data)
+	}
+
+	writer.Header().Set("Content-Type", "application/json")
+	writer.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	writer.WriteHeader(status)
+
+	if _, err := writer.Write(data); err != nil {
+		return &responseCommittedError{err: fmt.Errorf("write response body: %w", err)}
 	}
 
 	return nil
 }
 
-func (h *Handler) writeResponse(writer io.Writer, appResponse *Response) error {
-	appResponse.ServiceTimeMcs = int(time.Now().Sub(appResponse.started).Microseconds())
-	data, err := gojay.Marshal(appResponse)
-	if h.service.config.Debug {
-		log.Printf("[%v write] output:%s", h.service.config.ID, data)
+// writeError emits an error response with the given HTTP status code as
+// a JSON-encoded Response object (status="error", populated error
+// message). It is the error-path counterpart to writeResponse and shares
+// the same explicit-commit contract so clients always see Content-Length
+// and a parseable JSON body regardless of success or failure.
+//
+// Side-effects on the response struct:
+//
+//   - response.SetError(err) populates response.Error and sets
+//     response.Status = "error".
+//   - response.Data is cleared. This guarantees the marshal will succeed
+//     regardless of the prior state of Data, which matters when the
+//     original failure was itself a marshal error on a populated Data
+//     value.
+//
+// On a post-commit write failure (responseCommittedError) the status is
+// already on the wire; we only log + emit the dedicated metric.
+//
+// On a marshal failure of the (cleared) error response (essentially
+// impossible -- the struct now contains only string + int fields), we
+// fall back to http.Error so the client at least receives a status code.
+func (h *Handler) writeError(writer http.ResponseWriter, response *Response, hStats *stat.Values, status int, err error) {
+	response.SetError(err)
+	response.Data = nil
+
+	werr := h.writeResponse(writer, response, status)
+	if werr == nil {
+		return
 	}
-	_, err = writer.Write(data)
-	return err
+
+	var committed *responseCommittedError
+	if errors.As(werr, &committed) {
+		hStats.Append(sstat.ResponseCommittedError{Error: werr})
+		log.Printf("[%v http] error response committed but write failed: %v (original error: %v)", h.service.config.ID, werr, err)
+		return
+	}
+
+	var marshal *responseMarshalError
+	if errors.As(werr, &marshal) {
+		hStats.Append(sstat.ResponseMarshalError{Error: werr})
+	}
+	log.Printf("[%v http] failed to write error response: %v (original error: %v)", h.service.config.ID, werr, err)
+	http.Error(writer, err.Error(), status)
 }
 
 func (h *Handler) trackIdle() {
@@ -224,6 +343,6 @@ func NewHandler(service *Service, pool *buffer.Pool, maxDuration time.Duration,
 		lrObserver:  lrOV.With(prometheus.Labels{"model": modelID}),
 
 		overheadMetrics:    m.MultiOperationCounter(location, modelID+"HTTPOverhead", modelID+" server HTTP startup overhead", time.Microsecond, time.Minute, 2, sstat.NewHttp()),
-		httpContextMetrics: m.MultiOperationCounter(location, modelID+"HTTPHandler", modelID+" server HTTP handler", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly()),
+		httpContextMetrics: m.MultiOperationCounter(location, modelID+"HTTPHandler", modelID+" server HTTP handler", time.Microsecond, time.Minute, 2, sstat.NewHandler()),
 	}
 }

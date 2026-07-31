@@ -1,6 +1,6 @@
 package router
 
-type RouterConfig struct {
+type RoutingConfig struct {
 	EntityMapping []EntityKV `json:"entityMapping" yaml:"entityMapping"`
 
 	GlobalModelName string `json:"globalModelName" yaml:"globalModelName"`

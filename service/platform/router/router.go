@@ -1,236 +1,214 @@
 package router
 
 import (
-	"compress/gzip"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"reflect"
-	"strings"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/viant/afs"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
-	"github.com/viant/mly/service/files"
 	"github.com/viant/mly/service/platform"
 	"github.com/viant/mly/service/request/shape"
 	tricli "github.com/viant/mly/service/triton"
+	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/config/router"
-	"gopkg.in/yaml.v2"
 )
 
-// Router implements the PlatformEvaluator interface for router mode.
-type Router struct {
-	configURL      string
-	fs             afs.Service
-	configLock     sync.RWMutex
-	configModified *config.Modified
-	routerConfig   *router.RouterConfig
+const queueSizeExceededError = "queue size exceeded"
 
-	routingTableLock sync.RWMutex
-	routingMap       map[int]string
-	routingTable     map[string]platform.PlatformEvaluator
+type IOState struct {
+	inputs    map[string]*domain.Input
+	signature *domain.Signature
 
-	workCh chan *workRequest
-
-	globalModel     platform.PlatformEvaluator
-	fixedEvaluator  platform.Predictor
-	modelOutputName string
-
-	modelConfig  *config.Model
-	routerName   string
-	tritonClient tricli.TritonClient
-
-	signature   *domain.Signature
-	indexToName map[int]string
-	inputs      map[string]*domain.Input
-
-	// router input offset is the index of the router input in the inputs array
+	// router input offset is the index of the routing input in the inputs array
 	routerInputOffset int
 }
 
-func NewRouter(cfg *config.Model, fs afs.Service, tritonClients map[string]tricli.TritonClient) (*Router, error) {
-	if cfg.Router == nil {
+type UnloadService interface {
+	UnloadModel(ctx context.Context, mlyModelID string, tritonModelName string) error
+}
+
+// Router implements the PlatformEvaluator interface for router mode.
+type Router struct {
+	configURL string
+	fs        afs.Service
+
+	// config lock only protects the configModified field
+	configLock     sync.RWMutex
+	configModified *config.Modified
+
+	// routingTableLock protects:
+	// - routerConfig
+	// - routingMap
+	// - routingTable
+	// - globalModel
+	// - ioState
+	routingTableLock sync.RWMutex
+
+	// routingConfig contains the last loaded routing configuration
+	routingConfig *router.RoutingConfig
+
+	hasGlobalModel      bool
+	makeRoutedEvaluator func(modelName string) (platform.PlatformEvaluator, error)
+
+	routerInputFieldName string
+
+	routingMap   map[int]string
+	routingTable map[string]platform.PlatformEvaluator
+
+	// TODO see if this can be removed, may just need to map via model name
+	globalModel platform.PlatformEvaluator
+
+	// fixedEvaluator is non-nil IFF there is no global model configured
+	fixedEvaluator *fixedEvaluator
+
+	// fixedEvaluatorFields is for checking all outputs in the signature are replaced
+	fixedEvaluatorFields map[string]struct{}
+	outputConfig         config.OutputConfig
+
+	modelOutputName string
+
+	routerName  string
+	debug       bool
+	unloader    UnloadService
+	unloadGauge prometheus.Gauge
+
+	configuredInputs  []*shared.Field
+	configuredOutputs []*shared.Field
+	ioState           *IOState
+
+	// forceBatchSize1 when true uses legacy per-sample dispatch; when false (default) uses batched dispatch
+	forceBatchSize1 bool
+
+	// workerSemaphore limits concurrent model evaluations
+	workerSemaphore chan struct{}
+
+	// maxQueueSize limits queued batches before rejection
+	maxQueueSize uint64
+
+	queued                *atomic.Uint64
+	queueDurationObserver prometheus.Observer
+	droppedCounter        prometheus.Counter
+}
+
+// NewRouter creates a new Router instance.
+// cfg is expected to be Init()'d and Validate()'d before calling this function.
+// makeEvaluator is expected to register usage for every created Evaluator.
+func NewRouter(cfg *config.Model, fs afs.Service, tritonServices map[string]*tricli.Service, makeEvaluator func(modelName string) (platform.PlatformEvaluator, error)) (*Router, error) {
+	unloaders := make(map[string]UnloadService)
+	for serverID, tritonService := range tritonServices {
+		unloaders[serverID] = tritonService
+	}
+
+	return newRouter(cfg, fs, unloaders, makeEvaluator)
+}
+
+// newRouter uses a map[string]ModelUnloader, where ModelUnloader is-a triton.TritonClient, for testing.
+func newRouter(cfg *config.Model, fs afs.Service, unloaders map[string]UnloadService, makeEvaluator func(modelName string) (platform.PlatformEvaluator, error)) (*Router, error) {
+	rtCfg := cfg.Router
+	if rtCfg == nil {
 		return nil, fmt.Errorf("router configuration is required")
 	}
 
-	if err := cfg.Router.Validate(); err != nil {
-		return nil, fmt.Errorf("router configuration is invalid: %w", err)
-
-	}
-
-	tritonClient, ok := tritonClients[cfg.Triton.ServerID]
+	unloader, ok := unloaders[cfg.Triton.ServerID]
 	if !ok {
 		return nil, fmt.Errorf("triton client not found for server ID: %s", cfg.Triton.ServerID)
 	}
 
+	var fixedEvaluator *fixedEvaluator
+	var fixedEvaluatorFields map[string]struct{}
+	if !rtCfg.Global.Exists {
+		replacementsByName := make(map[string]config.PredictionReplacement)
+		for _, repl := range rtCfg.Global.PredictionReplacements {
+			replacementsByName[repl.Name] = repl
+		}
+
+		var err error
+
+		fixedEvaluator, err = newFixedEvaluator(rtCfg.Global.PredictionReplacements)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create fixed evaluator: %w", err)
+		}
+
+		fixedEvaluatorFields = make(map[string]struct{}, len(replacementsByName))
+		for name := range replacementsByName {
+			fixedEvaluatorFields[name] = struct{}{}
+		}
+	}
+
+	routerName := cfg.ID
 	r := &Router{
-		configURL:    cfg.Router.ConfigURL,
-		fs:           fs,
-		routerName:   cfg.ID,
-		modelConfig:  cfg,
-		tritonClient: tritonClient,
-	}
+		debug:      cfg.Debug,
+		routerName: routerName,
 
-	if err := r.handleIO(cfg); err != nil {
-		return nil, fmt.Errorf("failed to handle IO: %w", err)
-	}
+		configURL:           rtCfg.ConfigURL,
+		fs:                  fs,
+		makeRoutedEvaluator: makeEvaluator,
 
-	r.workCh = make(chan *workRequest, cfg.Router.MaxQueueSize)
-	for i := 0; i < cfg.Router.Workers; i++ {
-		go handleWorkRequests(r.workCh, routerWorkerChannelQueuedSummary.WithLabelValues(r.routerName))
+		unloader:    unloader,
+		unloadGauge: routerModelUnloadGauge.WithLabelValues(routerName),
+
+		outputConfig:   rtCfg.Output,
+		hasGlobalModel: rtCfg.Global.Exists,
+
+		modelOutputName: rtCfg.Output.FieldName,
+
+		fixedEvaluator:       fixedEvaluator,
+		fixedEvaluatorFields: fixedEvaluatorFields,
+
+		configuredInputs:     cfg.Inputs,
+		configuredOutputs:    cfg.Outputs,
+		routerInputFieldName: rtCfg.InputName,
+
+		forceBatchSize1: rtCfg.ForceBatchSize1,
+
+		workerSemaphore: make(chan struct{}, rtCfg.Workers),
+		maxQueueSize:    uint64(rtCfg.MaxQueueSize),
+		queued:          &atomic.Uint64{},
+
+		queueDurationObserver: routerQueueDurationMicrosSummary.WithLabelValues(routerName),
+		droppedCounter:        routerPredictDroppedCounter.WithLabelValues(routerName),
 	}
 
 	return r, nil
 }
 
-type preparedReplacement struct {
-	typ   string
-	value interface{}
+// modelBatch holds accumulated rows destined for a single model evaluator
+type modelBatch struct {
+	evaluator    platform.PlatformEvaluator // need Signature() for input reordering
+	isFixedEval  bool                       // true skips input reordering
+	modelName    string
+	inputsByName map[string]interface{} // keyed by input name - accumulated batched inputs
+	rowOffsets   []int                  // original positions in the incoming batch
 }
 
-func (t *Router) handleIO(cfg *config.Model) error {
-	io := &cfg.MetaInput
-
-	if len(io.Inputs) == 0 {
-		return fmt.Errorf("input configuration is required for a router")
-	}
-
-	if len(io.Outputs) == 0 {
-		return fmt.Errorf("output configuration is required for a router")
-	}
-
-	var inputs []domain.Input
-
-	// for declaring the router's inputs
-	mappedInputs := make(map[string]*domain.Input)
-
-	// generate backend input
-	indexToName := make(map[int]string)
-
-	i := 0
-	for _, input := range io.Inputs {
-		if !input.Auxiliary && input.Name != cfg.Router.InputName {
-			inputs = append(inputs, domain.Input{
-				Name:  input.Name,
-				Index: input.Index,
-			})
-
-			indexToName[i] = input.Name
-			i++
-		}
-
-		inputType := reflect.TypeOf("")
-		if input.DataType != "" {
-			switch input.DataType {
-			case "string":
-				inputType = reflect.TypeOf("")
-			case "int":
-				inputType = reflect.TypeOf(0)
-			case "int32":
-				inputType = reflect.TypeOf(int32(0))
-			case "int64":
-				inputType = reflect.TypeOf(int64(0))
-			case "float32", "float":
-				inputType = reflect.TypeOf(float32(0))
-			case "float64":
-				inputType = reflect.TypeOf(float64(0))
-			}
-		}
-
-		mappedInputs[input.Name] = &domain.Input{
-			Name:      input.Name,
-			Index:     len(inputs),
-			Type:      inputType,
-			Vocab:     false,
-			Auxiliary: input.Auxiliary,
-		}
-	}
-
-	var outputs []domain.Output
-	outputByName := make(map[string]domain.Output)
-
-	for i, output := range io.Outputs {
-		outputs = append(outputs, domain.Output{
-			Name:     output.Name,
-			Index:    i,
-			DataType: output.DataType,
-		})
-
-		outputByName[output.Name] = outputs[i]
-	}
-
-	modelOutputName := cfg.Router.Output.FieldName
-	hasModelOutputName := modelOutputName != ""
-
-	if !cfg.Router.Global.Exists {
-		replacementsByName := make(map[string]config.PredictionReplacement)
-		for _, repl := range cfg.Router.Global.PredictionReplacements {
-			replacementsByName[repl.Name] = repl
-		}
-
-		replacementOutputs := make([]config.PredictionReplacement, 0, len(outputs))
-		for _, output := range outputs {
-			if hasModelOutputName && output.Name == modelOutputName {
-				// model-used output field name is handled in a different way
-				continue
-			}
-
-			if _, ok := replacementsByName[output.Name]; !ok {
-				return fmt.Errorf("replacement for output %s not found", output.Name)
-			}
-
-			replacementOutputs = append(replacementOutputs, replacementsByName[output.Name])
-		}
-
-		fixedEvaluator, err := newFixedEvaluator(replacementOutputs)
-		if err != nil {
-			return fmt.Errorf("failed to create fixed evaluator: %w", err)
-		}
-
-		t.fixedEvaluator = fixedEvaluator
-	}
-
-	var modelOutputInOutputs bool = !hasModelOutputName
-	if hasModelOutputName {
-		_, modelOutputInOutputs = outputByName[modelOutputName]
-	}
-
-	if !modelOutputInOutputs {
-		outputs = append(outputs, domain.Output{
-			Name:     modelOutputName,
-			DataType: "string",
-			Index:    len(outputs),
-		})
-	}
-
-	t.modelOutputName = modelOutputName
-
-	t.indexToName = indexToName
-
-	t.signature = &domain.Signature{
-		Inputs:  inputs,
-		Outputs: outputs,
-		Output:  outputs[0],
-	}
-
-	t.inputs = mappedInputs
-
-	return nil
+// batchResult holds the result from a batched model prediction
+type batchResult struct {
+	modelName   string
+	results     []interface{}
+	offsets     []int
+	err         error
+	outputNames []string // output names in the order returned by evaluator (for reordering)
 }
 
-// Predict performs model inference with the given parameters
-// params is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds)
+// Predict performs model inference with the given parameters.
+// params is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds).
+//
+// Rows are grouped into batches based on their target model evaluator.
+// When forceBatchSize1 is true, each row forms its own batch (batch size 1).
+// When forceBatchSize1 is false (default), rows destined for the same model are batched together.
 func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
 	if len(params) == 0 {
 		return nil, fmt.Errorf("no input parameters provided")
 	}
 
+	// metricFixedOnly is true if the request is only using the fixedEvaluator
 	metricFixedOnly := true
 	start := time.Now()
 	defer func() {
@@ -240,7 +218,6 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		} else {
 			fos = "false"
 		}
-
 		routerPredictDurationMicrosSummary.WithLabelValues(r.routerName, fos).Observe(float64(time.Since(start).Microseconds()))
 	}()
 
@@ -249,130 +226,283 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 		return nil, err
 	}
 
-	numInputs := len(params)
-
 	r.routingTableLock.RLock()
 	defer r.routingTableLock.RUnlock()
 
-	globalExists := r.modelConfig.Router.Global.Exists
-	reportedGlobalModelName := r.modelConfig.Router.Output.GlobalModelOverride
-	noModelName := r.modelConfig.Router.Output.NoModelID
+	var signature *domain.Signature
+	batches := make(map[string]*modelBatch)
 
-	predictWaitGroup := sync.WaitGroup{}
-	predictWaitGroup.Add(expectedBatchSize)
+	// Phase 1: Group rows into batches by model name
+	err = func() error {
+		if r.ioState == nil {
+			return fmt.Errorf("ioState was not initialized")
+		}
 
-	errCh := make(chan error, expectedBatchSize)
-	resultsCh := make(chan offsetResults, expectedBatchSize)
+		signature = r.ioState.signature
+		routerInputOffset := r.ioState.routerInputOffset
 
-	for batchOffset := range expectedBatchSize {
-		// 1 input is reserved for the router input
-		request := make([]interface{}, numInputs-1)
+		hasFixedEvaluator := r.fixedEvaluator != nil
+		// Prefer the global model name from the live router config (router.yaml)
+		// so the reported inference_model_id reflects the actual global model
+		// artifact. Falls back to the static Output.GlobalModelOverride.
+		reportedGlobalModelName := r.outputConfig.GlobalModelOverride
+		if r.routingConfig != nil && r.routingConfig.GlobalModelName != "" {
+			reportedGlobalModelName = r.routingConfig.GlobalModelName
+		}
+		noModelName := r.outputConfig.NoModelID
 
-		var routingValueBatched interface{}
+		numInputs := len(params)
 
-		for inputOffset := range numInputs {
-			debatched, err := shape.Debatch(params[inputOffset], batchOffset)
+		routerInputBatch := params[routerInputOffset]
+		for batchOffset := range expectedBatchSize {
+			// Extract routing value for this row
+			routingValueBatched, err := shape.Debatch(routerInputBatch, batchOffset)
 			if err != nil {
-				return nil, fmt.Errorf("failed to debatch for row %d and input %d: %w", batchOffset, inputOffset, err)
+				return fmt.Errorf("failed to debatch routing value for row %d: %w", batchOffset, err)
 			}
 
-			if inputOffset < r.routerInputOffset {
-				request[inputOffset] = debatched
-			} else if inputOffset == r.routerInputOffset {
-				routingValueBatched = debatched
-			} else {
-				request[inputOffset-1] = debatched
+			routingValue, err := shape.SqueezeBatch(routingValueBatched)
+			if err != nil {
+				return fmt.Errorf("failed to extract routing value for row %d: %w", batchOffset, err)
 			}
-		}
 
-		routingValue, err := shape.SqueezeBatch(routingValueBatched)
-		if err != nil {
-			return nil, fmt.Errorf("failed to extract from batch for row %d: %w", batchOffset, err)
-		}
+			var routingValueInt int
+			switch rv := routingValue.(type) {
+			case int:
+				routingValueInt = rv
+			case int32:
+				routingValueInt = int(rv)
+			case int64:
+				routingValueInt = int(rv)
+			default:
+				return fmt.Errorf("routing value is not an int: %v, is %T, for row %d", routingValue, routingValue, batchOffset)
+			}
 
-		var ok bool = true
-		var routingValueInt int
-		switch routingValue := routingValue.(type) {
-		case int:
-			routingValueInt = routingValue
-		case int32:
-			routingValueInt = int(routingValue)
-		case int64:
-			routingValueInt = int(routingValue)
-		default:
-			ok = false
-		}
+			routingValueString, ok := r.routingMap[routingValueInt]
 
-		if !ok {
-			return nil, fmt.Errorf("routing value is not an int: %v, is %T, for row %d", routingValue, routingValue, batchOffset)
-		}
-
-		routingValueString, ok := r.routingMap[routingValueInt]
-
-		var evaluator platform.Predictor
-		if !ok {
-			if globalExists {
-				metricFixedOnly = false
-				// fallback to global model
-				evaluator = r.globalModel
-
-				// override model name
-				if reportedGlobalModelName != "" {
-					routingValueString = reportedGlobalModelName
+			var evaluator platform.PlatformEvaluator
+			isFixedEval := false
+			if !ok {
+				if hasFixedEvaluator {
+					// No global model, use fixed evaluator
+					routingValueString = noModelName
+					isFixedEval = true
+				} else {
+					metricFixedOnly = false
+					evaluator = r.globalModel
+					if reportedGlobalModelName != "" {
+						routingValueString = reportedGlobalModelName
+					}
 				}
 			} else {
-				routingValueString = noModelName
-				evaluator = r.fixedEvaluator
+				metricFixedOnly = false
+				evaluator, ok = r.routingTable[routingValueString]
+				if !ok {
+					return fmt.Errorf("no evaluator found for routing value: %v", routingValue)
+				}
 			}
-		} else {
-			metricFixedOnly = false
 
-			var ok bool
-			evaluator, ok = r.routingTable[routingValueString]
-			if !ok {
-				return nil, fmt.Errorf("no evaluator found for routing value: %v", routingValue)
+			// Determine batch key: unique per row when forceBatchSize1, otherwise by model name
+			batchKey := routingValueString
+			if r.forceBatchSize1 {
+				batchKey = strconv.Itoa(batchOffset)
 			}
+
+			batch, exists := batches[batchKey]
+			if !exists {
+				batch = &modelBatch{
+					evaluator:    evaluator,
+					isFixedEval:  isFixedEval,
+					modelName:    routingValueString,
+					inputsByName: make(map[string]interface{}),
+					rowOffsets:   make([]int, 0, 1),
+				}
+
+				batches[batchKey] = batch
+			}
+
+			// Append this row's inputs to the batch (excluding router input)
+			for paramOffset := range numInputs {
+				if paramOffset == routerInputOffset {
+					continue
+				}
+
+				inputName := signature.Inputs[paramOffset].Name
+				debatched, err := shape.Debatch(params[paramOffset], batchOffset)
+				if err != nil {
+					return fmt.Errorf("failed to debatch for row %d, input %s: %w", batchOffset, inputName, err)
+				}
+
+				batch.inputsByName[inputName], err = shape.AppendRowToBatch(batch.inputsByName[inputName], debatched)
+				if err != nil {
+					return fmt.Errorf("failed to append row %d to batch for input %s: %w", batchOffset, inputName, err)
+				}
+			}
+
+			batch.rowOffsets = append(batch.rowOffsets, batchOffset)
 		}
 
-		select {
-		case r.workCh <- &workRequest{
-			wg: &predictWaitGroup,
+		return nil
+	}()
 
-			predictor: evaluator,
-			ctx:       ctx,
-			request:   request,
-
-			queuedTime:         time.Now(),
-			offset:             batchOffset,
-			modelOutputEnabled: r.modelOutputName != "",
-			routingValueString: routingValueString,
-
-			responseCh: resultsCh,
-			errCh:      errCh,
-		}:
-
-			// continue
-		default:
-			routerPredictDroppedCounter.WithLabelValues(r.routerName).Inc()
-			return nil, fmt.Errorf("work channel is full")
-		}
-	}
-
-	predictWaitGroup.Wait()
-
-	close(errCh)
-	close(resultsCh)
-
-	for err := range errCh {
+	if err != nil {
 		return nil, err
 	}
 
-	allResults := make([][]interface{}, expectedBatchSize)
-	for results := range resultsCh {
-		allResults[results.offset] = results.results
+	// early queue size check
+	currentQ := r.queued.Load()
+	if uint64(len(batches))+currentQ > r.maxQueueSize {
+		r.droppedCounter.Inc()
+		return nil, fmt.Errorf(queueSizeExceededError)
 	}
 
-	endResults := make([]interface{}, len(r.signature.Outputs))
+	// Phase 2: Execute predictions in parallel with bounded concurrency
+	resultCh := make(chan batchResult, len(batches))
+	var wg sync.WaitGroup
+
+	for _, batch := range batches {
+		wg.Add(1)
+
+		// this must be decremented if queue is full and once no longer in queue
+		nowQueued := r.queued.Add(1)
+		startQueueTime := time.Now()
+
+		if nowQueued > r.maxQueueSize {
+			r.queued.Add(^uint64(0))
+			r.droppedCounter.Inc()
+			return nil, fmt.Errorf(queueSizeExceededError)
+		}
+
+		go func(b *modelBatch) {
+			defer wg.Done()
+
+			// Acquire semaphore slot
+			r.workerSemaphore <- struct{}{}
+
+			r.queued.Add(^uint64(0))
+			r.queueDurationObserver.Observe(float64(time.Since(startQueueTime).Microseconds()))
+
+			defer func() {
+				<-r.workerSemaphore
+			}()
+
+			// Reorder inputs to match each evaluator's expected order before calling Predict
+			var results []interface{}
+			var err error
+
+			// Capture output names for reordering in Phase 3
+			var outputNames []string
+			bs := len(b.rowOffsets)
+
+			if b.isFixedEval {
+				results, err = r.fixedEvaluator.Predict(bs)
+				outputNames = r.fixedEvaluator.OutputNames()
+			} else {
+				// Reorder inputs to match this evaluator's expected order
+				evalSig := b.evaluator.Signature()
+				orderedInputs := make([]interface{}, len(evalSig.Inputs))
+				for i, sigInput := range evalSig.Inputs {
+					inputData, exists := b.inputsByName[sigInput.Name]
+					if !exists {
+						err = fmt.Errorf("input %s not found in batch for model %s", sigInput.Name, b.modelName)
+						break
+					}
+					orderedInputs[i] = inputData
+				}
+
+				if err == nil {
+					// Rely on downstream for timeouts
+					results, err = b.evaluator.Predict(ctx, orderedInputs)
+
+					// Labeling results positionally by evalSig.Outputs is safe
+					// because the evaluator guarantees Predict returns values in
+					// signature.Outputs order (it maps the name-keyed ModelInfer
+					// response into that order). Do not assume the raw Triton
+					// response order matches metadata. See service/triton doc.go.
+					outputNames = make([]string, len(evalSig.Outputs))
+					for i, out := range evalSig.Outputs {
+						outputNames[i] = out.Name
+					}
+				}
+			}
+
+			// Append model name to results if configured
+			if r.modelOutputName != "" && err == nil {
+				modelNames := make([][]string, bs)
+				for i := range modelNames {
+					modelNames[i] = []string{b.modelName}
+				}
+
+				results = append(results, modelNames)
+				outputNames = append(outputNames, r.modelOutputName)
+			}
+
+			resultCh <- batchResult{
+				modelName:   b.modelName,
+				results:     results,
+				offsets:     b.rowOffsets,
+				err:         err,
+				outputNames: outputNames,
+			}
+		}(batch)
+	}
+
+	wg.Wait()
+	close(resultCh)
+
+	// Phase 3: Reassemble results in original order
+	// Build router output name -> index mapping for reordering
+	// TODO see if memoizing this provides material performance boosts
+	routerOutputIndex := make(map[string]int, len(signature.Outputs))
+	for i, out := range signature.Outputs {
+		routerOutputIndex[out.Name] = i
+	}
+
+	// allResults will be [expectedBatchSize][len(signature.Outputs)]
+	allResults := make([][]interface{}, expectedBatchSize)
+
+	for res := range resultCh {
+		if res.err != nil {
+			return nil, fmt.Errorf("prediction failed for model %s: %w", res.modelName, res.err)
+		}
+
+		// Extract individual rows from the batched result and place at original offsets
+		for evalOffset, originalOffset := range res.offsets {
+			rowResult := make([]interface{}, len(signature.Outputs))
+
+			// Reorder outputs to match router's expected output order
+			for evalOutputIdx, outputBatch := range res.results {
+				extracted, err := shape.ExtractRowFromBatch(outputBatch, evalOffset)
+				if err != nil {
+					return nil, fmt.Errorf("failed to extract row %d from model %s output index %d: %w",
+						evalOffset, res.modelName, evalOutputIdx, err)
+				}
+
+				// Map evaluator output index to router output index by name
+				var originalOutputIdx int
+				if res.outputNames == nil {
+					// Fallback: assume same order (shouldn't happen in normal operation)
+					originalOutputIdx = evalOutputIdx
+				} else {
+					outputName := res.outputNames[evalOutputIdx]
+
+					var exists bool
+					originalOutputIdx, exists = routerOutputIndex[outputName]
+					if !exists {
+						return nil, fmt.Errorf("output %s from model %s not found in router signature",
+							outputName, res.modelName)
+					}
+				}
+
+				rowResult[originalOutputIdx] = extracted
+			}
+
+			allResults[originalOffset] = rowResult
+		}
+	}
+
+	// Reshape all values into [outputs][batch][M]
+	endResults := make([]interface{}, len(signature.Outputs))
 	for i, results := range allResults {
 		endResults, err = shape.ConcatAxis0(endResults, results)
 		if err != nil {
@@ -384,7 +514,9 @@ func (r *Router) Predict(ctx context.Context, params []interface{}) ([]interface
 }
 
 func (r *Router) Signature() *domain.Signature {
-	return r.signature
+	r.routingTableLock.RLock()
+	defer r.routingTableLock.RUnlock()
+	return r.ioState.signature
 }
 
 func (r *Router) Dictionary() *common.Dictionary {
@@ -392,296 +524,15 @@ func (r *Router) Dictionary() *common.Dictionary {
 }
 
 func (r *Router) Inputs() map[string]*domain.Input {
-	return r.inputs
+	r.routingTableLock.RLock()
+	defer r.routingTableLock.RUnlock()
+	return r.ioState.inputs
 }
 
 func (r *Router) Stats(stats map[string]interface{}) {
-
+	// do nothing
 }
 
 func (r *Router) Close() error {
-	return nil
-}
-
-// TODO refactor with service/tfmodel/service.isModified()?
-func (r *Router) isModified(snapshot *config.Modified) bool {
-	if r.routerConfig == nil || r.configModified == nil {
-		return true
-	}
-
-	if snapshot.Max.IsZero() {
-		return false
-	}
-
-	r.configLock.RLock()
-	modified := r.configModified
-	r.configLock.RUnlock()
-
-	return !(modified.Max.Equal(snapshot.Max) && modified.Min.Equal(snapshot.Min))
-}
-
-func (r *Router) ReloadIfNeeded(ctx context.Context) error {
-	start := time.Now()
-	isFullReload := false
-	defer func() {
-		var mode string
-		if isFullReload {
-			mode = "full"
-		} else {
-			mode = "checks"
-		}
-		routerReloadDurationMicrosSummary.WithLabelValues(r.routerName, mode).Observe(float64(time.Since(start).Microseconds()))
-	}()
-
-	// fetch and check router configuration file
-	snapshot, err := files.ModifiedSnapshot(ctx, r.fs, r.configURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to check router configuration file: %w", err)
-	}
-
-	if !r.isModified(snapshot) {
-		// check health of all underlying models
-		var wg sync.WaitGroup
-
-		r.configLock.RLock()
-		errChannels := len(r.routingTable)
-		if r.globalModel != nil {
-			errChannels++
-		}
-
-		errCh := make(chan error, errChannels)
-
-		if r.globalModel != nil {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				err := r.globalModel.ReloadIfNeeded(ctx)
-				if err != nil {
-					errCh <- fmt.Errorf("failed to reload global model: %w", err)
-				}
-			}()
-		}
-
-		for m, p := range r.routingTable {
-			wg.Add(1)
-			go func(m string, p platform.PlatformEvaluator) {
-				defer wg.Done()
-				err := p.ReloadIfNeeded(ctx)
-				if err != nil {
-					errCh <- fmt.Errorf("failed to reload model %s: %w", m, err)
-				}
-			}(m, p)
-		}
-
-		wg.Wait()
-		close(errCh)
-
-		if len(errCh) > 0 {
-			var errStrings []string
-			for err := range errCh {
-				errStrings = append(errStrings, err.Error())
-			}
-
-			err = fmt.Errorf("one or more model reloading errors: %s", strings.Join(errStrings, "; "))
-		}
-
-		r.configLock.RUnlock()
-		return err
-	}
-
-	isFullReload = true
-
-	// otherwise just abandon the routing table status checks
-
-	r.configLock.Lock()
-	defer r.configLock.Unlock()
-
-	r.configModified = snapshot
-
-	// load router configuration file
-	rawReader, err := r.fs.OpenURL(ctx, r.configURL)
-	if err != nil {
-		return fmt.Errorf("failed to open router configuration file: %w", err)
-	}
-
-	defer rawReader.Close()
-	var reader io.Reader = rawReader
-	if strings.HasSuffix(r.configURL, ".gz") {
-		if reader, err = gzip.NewReader(rawReader); err != nil {
-			return fmt.Errorf("failed to create gzip reader for router configuration file: %w", err)
-		}
-	}
-
-	newConfig := new(router.RouterConfig)
-
-	// TODO move this check earlier
-	if strings.Contains(r.configURL, ".yaml") {
-		decoder := yaml.NewDecoder(reader)
-		err = decoder.Decode(newConfig)
-	} else if strings.Contains(r.configURL, ".json") {
-		err = json.NewDecoder(reader).Decode(newConfig)
-	} else {
-		return fmt.Errorf("unsupported router configuration file type: %s", r.configURL)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to decode router configuration file: %w", err)
-	}
-
-	if err := r.applyRouterConfig(ctx, newConfig); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.RouterConfig) error {
-	modelsToUnload := make(map[string]struct{})
-	reuseEvaluators := make(map[string]platform.PlatformEvaluator)
-	var reuseGlobal platform.PlatformEvaluator
-
-	oldConfig := r.routerConfig
-	if oldConfig != nil {
-		for _, entity := range oldConfig.EntityMapping {
-			modelsToUnload[entity.ModelName] = struct{}{}
-			if evaluator, ok := r.routingTable[entity.ModelName]; ok {
-				reuseEvaluators[entity.ModelName] = evaluator
-			}
-		}
-
-		if oldConfig.GlobalModelName != "" {
-			modelsToUnload[oldConfig.GlobalModelName] = struct{}{}
-			reuseGlobal = r.globalModel
-		}
-	}
-
-	newModelMapping := make(map[int]string)
-	for _, entity := range newConfig.EntityMapping {
-		newModelMapping[entity.EntityID] = entity.ModelName
-		delete(modelsToUnload, entity.ModelName)
-	}
-
-	globalModelName := newConfig.GlobalModelName
-	if globalModelName != "" {
-		delete(modelsToUnload, globalModelName)
-	}
-
-	newRoutingTable := make(map[string]platform.PlatformEvaluator)
-	for _, entity := range newConfig.EntityMapping {
-		model := entity.ModelName
-		if _, ok := newRoutingTable[model]; ok {
-			continue
-		}
-
-		if evaluator, ok := reuseEvaluators[model]; ok {
-			newRoutingTable[model] = evaluator
-			continue
-		}
-
-		evaluator, err := tricli.NewRoutedTritonEvaluator(
-			model,
-			r.tritonClient,
-			r.modelConfig.Triton.Timeout,
-			r.indexToName,
-		)
-
-		if err != nil {
-			return fmt.Errorf("failed to create Triton evaluator for model %s: %w", model, err)
-		}
-
-		newRoutingTable[model] = evaluator
-	}
-
-	var globalEvaluator platform.PlatformEvaluator
-	if globalModelName != "" {
-		if oldConfig != nil && globalModelName == oldConfig.GlobalModelName && reuseGlobal != nil {
-			globalEvaluator = reuseGlobal
-		} else if evaluator, ok := newRoutingTable[globalModelName]; ok {
-			globalEvaluator = evaluator
-		} else if evaluator, ok := reuseEvaluators[globalModelName]; ok {
-			globalEvaluator = evaluator
-		} else {
-			var err error
-			globalEvaluator, err = tricli.NewRoutedTritonEvaluator(
-				globalModelName,
-				r.tritonClient,
-				r.modelConfig.Triton.Timeout,
-				r.indexToName,
-			)
-
-			if err != nil {
-				return fmt.Errorf("failed to create Triton evaluator for global model %s: %w", globalModelName, err)
-			}
-		}
-	}
-
-	wg := sync.WaitGroup{}
-	errCh := make(chan error, 1)
-	if globalEvaluator != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := globalEvaluator.ReloadIfNeeded(ctx); err != nil {
-				errCh <- fmt.Errorf("failed to reload global model %s: %w", globalModelName, err)
-			}
-		}()
-	}
-
-	for model := range newRoutingTable {
-		wg.Add(1)
-		go func(model string) {
-			defer wg.Done()
-			if err := newRoutingTable[model].ReloadIfNeeded(ctx); err != nil {
-				errCh <- fmt.Errorf("failed to reload model %s: %w", model, err)
-			}
-		}(model)
-	}
-	wg.Wait()
-	close(errCh)
-
-	if len(errCh) > 0 {
-		var errStrings []string
-		for err := range errCh {
-			errStrings = append(errStrings, err.Error())
-		}
-		return fmt.Errorf("one or more model reloading errors: %s", strings.Join(errStrings, "; "))
-	}
-
-	func() {
-		r.routingTableLock.Lock()
-		defer r.routingTableLock.Unlock()
-		if globalEvaluator != nil {
-			if _, exists := newRoutingTable[globalModelName]; !exists {
-				newRoutingTable[globalModelName] = globalEvaluator
-			}
-		}
-		r.globalModel = globalEvaluator
-		r.routingMap = newModelMapping
-		r.routerConfig = newConfig
-		r.routingTable = newRoutingTable
-	}()
-
-	for model := range modelsToUnload {
-		routerModelUnloadGauge.WithLabelValues(r.routerName).Inc()
-
-		go func(modelName string) {
-			defer routerModelUnloadGauge.WithLabelValues(r.routerName).Dec()
-
-			ctxTo, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if err := r.unloadModel(ctxTo, modelName); err != nil {
-				log.Printf("failed to unload model %s: %v\n", modelName, err)
-			}
-		}(model)
-	}
-
-	return nil
-}
-
-func (r *Router) unloadModel(ctx context.Context, modelName string) error {
-	defer routerModelUnloadGauge.WithLabelValues(r.routerName).Dec()
-	if err := r.tritonClient.ModelUnload(ctx, modelName); err != nil {
-		return fmt.Errorf("failed to unload model %s: %w", modelName, err)
-	}
 	return nil
 }

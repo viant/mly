@@ -22,43 +22,19 @@ type HTTPClient struct {
 	debug bool
 }
 
-func (c *HTTPClient) sendRequestCheckStatus(ctx context.Context, method, path string) (*http.Response, error) {
-	if c.debug {
-		log.Printf("Sending request %s %s\n", method, path)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, method, c.serverURL+path, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	resp, err := c.handleRequestWithRetry(ctx, httpReq, nil)
-
-	if err != nil {
-		return nil, err
-	}
-
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return resp, fmt.Errorf("triton server http status code: %d for %s %s", resp.StatusCode, method, path)
-	}
-
-	return resp, nil
-}
-
 func (c *HTTPClient) ServerReady(ctx context.Context) error {
 	path := "/v2/health/ready"
 	_, err := c.sendRequestCheckStatus(ctx, "GET", path)
 	return err
 }
 
-func (c *HTTPClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error) {
+func (c *HTTPClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) (map[string]interface{}, error) {
 	tritonRequest, err := convertToTritonRequest(inputs, indexToName)
 	if err != nil {
 		return nil, err
 	}
 
-	tritonResponse, err := c.sendRequest(ctx, modelName, tritonRequest)
+	tritonResponse, err := c.sendInferRequest(ctx, modelName, tritonRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -96,8 +72,130 @@ func (c *HTTPClient) ModelUnload(ctx context.Context, modelName string) error {
 	return err
 }
 
+func (c *HTTPClient) ModelMetadata(ctx context.Context, modelName string) (*ModelMetadata, error) {
+	url := c.serverURL + "/v2/models/" + modelName
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	resp, err := c.handleRequestWithRetry(ctx, req, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("triton server http status code: %d for %s", resp.StatusCode, url)
+	}
+
+	modelMetadata := new(ModelMetadata)
+	if err := json.NewDecoder(resp.Body).Decode(modelMetadata); err != nil {
+		return nil, fmt.Errorf("failed to parse Triton response: %w", err)
+	}
+
+	return modelMetadata, nil
+}
+
 func (c *HTTPClient) Close() error {
 	return nil
+}
+
+func (c *HTTPClient) sendRequestCheckStatus(ctx context.Context, method, path string) (*http.Response, error) {
+	if c.debug {
+		log.Printf("Sending request %s %s\n", method, path)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, method, c.serverURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	resp, err := c.handleRequestWithRetry(ctx, httpReq, nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return resp, fmt.Errorf("triton server http status code: %d for %s %s", resp.StatusCode, method, path)
+	}
+
+	return resp, nil
+}
+
+func (c *HTTPClient) sendInferRequest(ctx context.Context, modelName string, request *TritonRequest) (*TritonResponse, error) {
+	url := c.serverURL + "/v2/models/" + modelName + "/infer"
+
+	buf := bytes.NewBuffer(make([]byte, 0, 1024))
+	enc := gojay.NewEncoder(buf)
+	if err := enc.EncodeObject(request); err != nil {
+		return nil, fmt.Errorf("failed to marshal Triton request: %w", err)
+	}
+	jsonData := buf.Bytes()
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.handleRequestWithRetry(ctx, httpReq, jsonData)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("triton server returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tritonResponse TritonResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tritonResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse Triton response: %w", err)
+	}
+
+	return &tritonResponse, nil
+}
+
+func (c *HTTPClient) handleRequestWithRetry(ctx context.Context, httpReq *http.Request, jsonData []byte) (*http.Response, error) {
+	var resp *http.Response
+	var err error
+
+	maxRetries := 3
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		resp, err = c.httpClient.Do(httpReq)
+
+		if err == nil {
+			break
+		} else if resp == nil {
+			// do nothing
+		} else if resp.StatusCode >= 500 {
+			// try again on 5xx
+			resp.Body.Close()
+		} else {
+			break
+		}
+
+		if attempt == maxRetries {
+			return nil, fmt.Errorf("http request failed after %d attempts: %w", maxRetries+1, err)
+		}
+
+		time.Sleep(time.Duration(5*(1<<attempt)) * time.Millisecond)
+
+		if attempt < maxRetries {
+			httpReq.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+		}
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+
+	return resp, nil
 }
 
 // TritonInput represents a single input tensor for Triton
@@ -183,85 +281,8 @@ func (t *TritonInputs) IsNil() bool {
 	return t == nil || len(*t) == 0
 }
 
-func (c *HTTPClient) sendRequest(ctx context.Context, modelName string, request *TritonRequest) (*TritonResponse, error) {
-	url := c.serverURL + "/v2/models/" + modelName + "/infer"
-
-	buf := bytes.NewBuffer(make([]byte, 0, 1024))
-	enc := gojay.NewEncoder(buf)
-	if err := enc.EncodeObject(request); err != nil {
-		return nil, fmt.Errorf("failed to marshal Triton request: %w", err)
-	}
-	jsonData := buf.Bytes()
-
-	// Create HTTP request
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.handleRequestWithRetry(ctx, httpReq, jsonData)
-	if err != nil {
-		return nil, err
-	}
-
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("triton server returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var tritonResponse TritonResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tritonResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse Triton response: %w", err)
-	}
-
-	return &tritonResponse, nil
-}
-
-func (c *HTTPClient) handleRequestWithRetry(ctx context.Context, httpReq *http.Request, jsonData []byte) (*http.Response, error) {
-	var resp *http.Response
-	var err error
-
-	maxRetries := 3
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		resp, err = c.httpClient.Do(httpReq)
-
-		if err == nil {
-			break
-		} else if resp == nil {
-			// do nothing
-		} else if resp.StatusCode >= 500 {
-			// try again on 5xx
-			resp.Body.Close()
-		} else {
-			break
-		}
-
-		if attempt == maxRetries {
-			return nil, fmt.Errorf("http request failed after %d attempts: %w", maxRetries+1, err)
-		}
-
-		time.Sleep(time.Duration(5*(1<<attempt)) * time.Millisecond)
-
-		if attempt < maxRetries {
-			httpReq.Body = io.NopCloser(bytes.NewBuffer(jsonData))
-		}
-
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-	}
-
-	return resp, nil
-}
-
 // convertToTritonRequest converts Feeds ([numInputs]([batchSize][1]T)) to Triton request format
 func convertToTritonRequest(params []interface{}, indexToName map[int]string) (*TritonRequest, error) {
-	if len(params) == 0 {
-		return nil, fmt.Errorf("no input parameters provided")
-	}
-
 	var inputs []TritonInput
 
 	// Convert each parameter to Triton input format
@@ -347,25 +368,32 @@ func convertToTritonRequest(params []interface{}, indexToName map[int]string) (*
 	return &TritonRequest{Inputs: inputs}, nil
 }
 
-// convertFromTritonResponse converts Triton response to [numOutputs]([batchSize]D_T) - shape depends on model output.
-func convertFromTritonResponse(response *TritonResponse) ([]interface{}, error) {
-	var result []interface{}
+// convertFromTritonResponse maps the Triton response into output tensors keyed by
+// name; each value is [batchSize][1]float32. Ordering into signature order is the
+// evaluator's responsibility.
+func convertFromTritonResponse(response *TritonResponse) (map[string]interface{}, error) {
+	result := make(map[string]interface{}, len(response.Outputs))
 
 	for outputOffset, output := range response.Outputs {
-		if data, ok := output.Data.([]interface{}); ok && len(data) > 0 {
-			batchSize := len(data)
-			converted := make([][]float32, batchSize)
-			for i, v := range data {
-				if f, ok := v.(float64); ok {
-					converted[i] = []float32{float32(f)}
-				} else {
-					return nil, fmt.Errorf("unsupported output type for %s: %T, for batch item %d of output offset %d", output.Name, v, i, outputOffset)
-				}
-			}
-			result = append(result, converted)
-		} else {
+		data, ok := output.Data.([]interface{})
+		if !ok || len(data) == 0 {
 			return nil, fmt.Errorf("unsupported output type for %s: %T, for output offset %d", output.Name, output.Data, outputOffset)
 		}
+
+		batchSize := len(data)
+		converted := make([][]float32, batchSize)
+		for i, v := range data {
+			f, ok := v.(float64)
+			if !ok {
+				return nil, fmt.Errorf("unsupported output type for %s: %T, for batch item %d of output offset %d", output.Name, v, i, outputOffset)
+			}
+			converted[i] = []float32{float32(f)}
+		}
+
+		if _, dup := result[output.Name]; dup {
+			return nil, fmt.Errorf("duplicate output name %q in response", output.Name)
+		}
+		result[output.Name] = converted
 	}
 
 	return result, nil

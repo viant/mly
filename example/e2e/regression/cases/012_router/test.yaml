@@ -1,0 +1,21 @@
+init:
+  parentPath: $parent.path
+
+pipeline:
+  test:
+    action: exec:run
+    target: $target
+    checkError: true
+    commands:
+      - /tmp/e2e/mlyc -m sli_router -a 'routing_id|int:1;sa:b;sl:a;aux:1'
+      - /tmp/e2e/mlyc -m sli_router -a 'routing_id|int:2;sa:b;sl:a;aux:2'
+
+  # assert:
+  #   action: validator:assert
+  #   actual: $AsJSON($test.Cmd[0].Stdout)
+  #   expect: $LoadJSON('${parentPath}/expect.json')
+
+  # assertCache:
+  #   action: validator:assert
+  #   actual: $AsJSON($test.Cmd[1].Stdout)
+  #   expect: $LoadJSON('${parentPath}/expect-cache.json')

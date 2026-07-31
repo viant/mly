@@ -13,43 +13,15 @@ pipeline:
 
   assert:
     action: validator:assert
-    init:
-      actual: $AsJSON($test.Cmd[0].Stdout)
-    actual: $actual
-    expect: |
-      {
-        "data": {
-          "D": {
-            "expand": 25
-          }
-        }
-      }
+    actual: $AsJSON($test.Cmd[0].Stdout)
+    expect: $LoadJSON('${parentPath}/expect-sli.json')
 
   assertStorable:
     action: validator:assert
-    init:
-      actual: $AsJSON($test.Cmd[1].Stdout)
-    actual: $actual
-    expect: |
-      {
-        "data": [
-          {
-            "Class": "five"
-          },
-          {
-            "Class": "five"
-          }
-        ]
-      }
+    actual: $AsJSON($test.Cmd[1].Stdout)
+    expect: $LoadJSON('${parentPath}/expect-slft_batch.json')
 
   assertCustom:
     action: validator:assert
-    init:
-      actual: $AsJSON($test.Cmd[2].Stdout)
-    actual: $actual
-    expect: |
-      {
-        "data": {
-          "Class": "five"
-        }
-      }
+    actual: $AsJSON($test.Cmd[2].Stdout)
+    expect: $LoadJSON('${parentPath}/expect-slft_batch-maker.json')

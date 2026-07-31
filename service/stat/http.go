@@ -17,7 +17,12 @@ type http struct{}
 type ReadError struct{ Error error }
 
 // implements fmt.Stringer
-func (r ReadError) String() string { return r.Error.Error() }
+func (r ReadError) String() string {
+	if r.Error == nil {
+		return ""
+	}
+	return r.Error.Error()
+}
 
 // implements github.com/viant/gmetric/counter.CustomCounter
 func (r ReadError) Aggregate(interface{}) {}
@@ -25,7 +30,12 @@ func (r ReadError) Aggregate(interface{}) {}
 type UnmarshalError struct{ Error error }
 
 // implements fmt.Stringer
-func (r UnmarshalError) String() string { return r.Error.Error() }
+func (r UnmarshalError) String() string {
+	if r.Error == nil {
+		return ""
+	}
+	return r.Error.Error()
+}
 
 // implements github.com/viant/gmetric/counter.CustomCounter
 func (r UnmarshalError) Aggregate(interface{}) {}

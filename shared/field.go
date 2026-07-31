@@ -15,7 +15,6 @@ type (
 		Index int
 
 		// The type of the field.
-		// Supports "float" which maps to float32.
 		// Otherwise, refer to reflect.Type.Name().
 		DataType string `json:",omitempty" yaml:",omitempty"`
 
@@ -39,8 +38,8 @@ type (
 	MetaInput struct {
 		Inputs []*Field
 
-		// This is used to order inputs and provide extra caching information to the client.
-		// All inputs from the model will automatically be added here.
+		// KeyFields is a method of forcing inputs to be part of the key even if not part of the model input.
+		// The primary use case of this is when there is a Transformer that depends on an Auxiliary input.
 		KeyFields []string `json:",omitempty" yaml:",omitempty"`
 
 		// Deprecated: use Field.Auxiliary
@@ -78,9 +77,6 @@ func (f *Field) DataTypeToRawType() {
 // fieldDataTypeToRawType is a subset of reverse Name() to reflect.Type
 func fieldDataTypeToRawType(dataType string) reflect.Type {
 	switch dataType {
-	case "float":
-		// provided as a convenience
-		return reflect.TypeOf(float32(0))
 	case "":
 		// this case is treated as string in common.DataType(), but here it's not OK.
 		panic(fmt.Sprintf("unsupported data type: %s", dataType))
@@ -119,6 +115,8 @@ func (m *MetaInput) OutputByName() map[string]*Field {
 	return outputByName
 }
 
+// TODO look into history of this method then document its purpose.
+// Is "key" key as in "important" or as in "cache key"?
 func (d *MetaInput) KeysLen() int {
 	return len(d.Inputs)
 }
@@ -135,7 +133,6 @@ func (m *MetaInput) FieldByName() map[string]*Field {
 // On the server, it is called after reading the configuration file.
 // On the client, it is called after fetching the configuration from the server, which will have already processed it via reconcileIOFromSignature().
 func (m *MetaInput) Init() {
-	// TODO assess why this approach was taken - this condition could be improved by having a map to see if the field by name already exists
 	if len(m.Inputs) == 0 {
 		// Add KeyFields to Inputs
 		if len(m.KeyFields) > 0 {

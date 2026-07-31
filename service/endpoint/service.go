@@ -207,7 +207,7 @@ func New(cfg *Config) (*Service, error) {
 		return nil, fmt.Errorf("failed to create datastores: %w", err)
 	}
 
-	tritonClients := make(map[string]triton.TritonClient)
+	tritonServices := make(map[string]*triton.Service)
 	for _, server := range cfg.TritonServers {
 		tritonClient, err := triton.NewClient(server)
 		if err != nil {
@@ -223,14 +223,14 @@ func New(cfg *Config) (*Service, error) {
 			return nil, fmt.Errorf("failed to check triton server %s health: %w", server.ID, err)
 		}
 
-		tritonClients[server.ID] = tritonClient
+		tritonServices[server.ID] = triton.NewService(tritonClient)
 	}
 
 	hooks := []Hook{
 		healthHandler,
 	}
 
-	err = Build(mux, cfg, datastores, tritonClients, hooks, metrics, promReg)
+	err = Build(mux, cfg, datastores, tritonServices, hooks, metrics, promReg)
 	if err != nil {
 		return nil, err
 	}

@@ -10,11 +10,11 @@ import (
 // dataType == "" is treated as a string type.
 func DataType(dataType string) (reflect.Type, error) {
 	switch strings.ToLower(dataType) {
-	case "string":
+	case "string", "":
 		return reflect.TypeOf(""), nil
 	case "float64":
 		return reflect.TypeOf(float64(0)), nil
-	case "float32", "float":
+	case "float32":
 		return reflect.TypeOf(float32(0)), nil
 	case "int":
 		return reflect.TypeOf(int(0)), nil
@@ -35,9 +35,6 @@ func DataType(dataType string) (reflect.Type, error) {
 	case "[]float64":
 		return reflect.TypeOf([]float64{}), nil
 	default:
-		if dataType == "" {
-			return reflect.TypeOf(""), nil
-		}
 		return nil, fmt.Errorf("unsupported data type: %v", dataType)
 	}
 }

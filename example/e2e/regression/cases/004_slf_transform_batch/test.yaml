@@ -13,21 +13,16 @@ pipeline:
 
   assert:
     action: validator:assert
-    init:
-      expect: expect
     actual: $AsJSON($test.Cmd[0].Stdout)
-    expect: $LoadJSON('${parentPath}/${expect}.json')
+    expect: $LoadJSON('${parentPath}/expect.json')
 
   assertBatch:
     action: validator:assert
     init:
-      expect: expect-batch
     actual: $AsJSON($test.Cmd[1].Stdout)
-    expect: $LoadJSON('${parentPath}/${expect}.json')
+    expect: $LoadJSON('${parentPath}/expect-batch.json')
 
   assertBatchCache:
     action: validator:assert
-    init:
-      expect: expect-batch-cache
     actual: $AsJSON($test.Cmd[2].Stdout)
-    expect: $LoadJSON('${parentPath}/${expect}.json')
+    expect: $LoadJSON('${parentPath}/expect-batch-cache.json')

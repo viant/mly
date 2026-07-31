@@ -6,18 +6,20 @@ type RouterConfig struct {
 	// Required if Model.Mode is "router".
 	ConfigURL string
 
-	// Required
+	// Required name of the input that will route the request to the backend.
 	InputName string `json:",omitempty" yaml:",omitempty"`
 
-	// Unimplemented.
-	// If true, the router will batch the requests to the backend.
-	BatchBackend bool `json:",omitempty" yaml:",omitempty"`
+	// ForceBatchSize1 controls whether the router sends individual samples or batches by model.
+	// When false (default), requests within a single Predict() call that route to the
+	// same model evaluator are grouped into a single batched prediction call.
+	// When true, each sample is sent as an individual prediction request with batch size 1.
+	ForceBatchSize1 bool `json:",omitempty" yaml:",omitempty"`
 
-	// The maximum number of concurrent requests to the backend.
+	// The maximum number of concurrent batches dispatched to model evaluators.
 	// Defaults to 50.
 	Workers int `json:",omitempty" yaml:",omitempty"`
 
-	// The maximum number of requests to queue.
+	// The maximum number of batches to queue before rejecting.
 	// Defaults to 1000.
 	MaxQueueSize int `json:",omitempty" yaml:",omitempty"`
 
@@ -64,6 +66,10 @@ func (o *RouterConfig) Init() {
 	if o.MaxQueueSize == 0 {
 		o.MaxQueueSize = 1000
 	}
+
+	if o.Output.NoModelID == "" {
+		o.Output.NoModelID = "none"
+	}
 }
 
 func (o *RouterConfig) Validate() error {
@@ -85,10 +91,6 @@ func (o *RouterConfig) Validate() error {
 
 	if !o.Global.Exists && len(o.Global.PredictionReplacements) == 0 {
 		return fmt.Errorf("global model does not exist but no prediction replacements were provided")
-	}
-
-	if o.Output.NoModelID == "" {
-		o.Output.NoModelID = "none"
 	}
 
 	return nil

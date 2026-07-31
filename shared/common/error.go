@@ -1,9 +1,10 @@
 package common
 
 import (
+	"strings"
+
 	"github.com/aerospike/aerospike-client-go/types"
 	"github.com/pkg/errors"
-	"strings"
 )
 
 const (
@@ -11,10 +12,10 @@ const (
 	connRefusedError = "refused"
 )
 
-//ErrNodeDown node down error
+// ErrNodeDown node down error
 var ErrNodeDown = errors.New("node is down")
 
-//IsKeyNotFound returns true if key not found error
+// IsKeyNotFound returns true if key not found error
 func IsKeyNotFound(err error) bool {
 	if err == nil {
 		return false
@@ -33,7 +34,7 @@ func IsKeyNotFound(err error) bool {
 	return aeroError.ResultCode() == types.KEY_NOT_FOUND_ERROR
 }
 
-//IsTimeout returns true if timeout error
+// IsTimeout returns true if timeout error
 func IsTimeout(err error) bool {
 	if err == nil {
 		return false
@@ -52,12 +53,13 @@ func IsTimeout(err error) bool {
 	return aeroError.ResultCode() == types.TIMEOUT
 }
 
-//IsTransientError returns if transient error
+// IsTransientError returns if transient error
+// NOTE: This has an inverted dependency on Aerospike; the downstream implementation detail is not abstracted out.
 func IsTransientError(err error) bool {
 	return IsKeyNotFound(err) || IsInvalidNode(err) || IsTimeout(err) || IsInvalidNode(err) || IsConnectionError(err)
 }
 
-//IsInvalidNode returns true is node/cluster is down
+// IsInvalidNode returns true is node/cluster is down
 func IsInvalidNode(err error) bool {
 	if err == nil {
 		return false
@@ -79,7 +81,7 @@ func IsInvalidNode(err error) bool {
 	return aeroError.ResultCode() == types.INVALID_NODE_ERROR
 }
 
-//IsConnectionError returns true if error is connection errpr
+// IsConnectionError returns true if error is connection errpr
 func IsConnectionError(err error) bool {
 	if err == nil {
 		return false

@@ -6,6 +6,18 @@ Generated proto files are **committed to the repository** for build reliability.
 
 Triton uses `raw_output_contents` for performance (binary format vs. structured).
 
+# Output Tensor Ordering
+
+The KServe/Triton v2 protocol only guarantees that `raw_output_contents[i]`
+aligns with `outputs[i]` in a `ModelInfer` response. It does **not** guarantee
+that the `outputs` order matches the order reported by `ModelMetadata` — a model
+whose metadata lists `[a, b]` may return inference outputs as `[b, a]`. Every
+response tensor carries its own `name`, so mly addresses outputs by name: the
+client returns outputs keyed by tensor name and `TritonEvaluator.Predict`
+reorders them into signature order (see the `service/triton` package doc). Do
+not reintroduce positional handling of response tensors — when two outputs share
+a datatype, a positional mismatch mislabels values with no error.
+
 # When to Regenerate Proto Files
 
 Regenerate only when:

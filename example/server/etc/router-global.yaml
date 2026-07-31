@@ -1,0 +1,4 @@
+entityMapping:
+  - entityID: 1
+    modelName: sli_1
+globalModelName: sli_2

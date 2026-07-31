@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/viant/afs"
 	"github.com/viant/gmetric"
 	"github.com/viant/gtly"
@@ -18,19 +19,16 @@ import (
 	serrs "github.com/viant/mly/service/errors"
 	"github.com/viant/mly/service/gtlyop"
 	"github.com/viant/mly/service/platform"
-	"github.com/viant/mly/service/platform/factory"
 	"github.com/viant/mly/service/request"
 	"github.com/viant/mly/service/stat"
 	"github.com/viant/mly/service/stream"
 	"github.com/viant/mly/service/transform"
-	"github.com/viant/mly/service/triton"
 	"github.com/viant/mly/shared"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/common/storable"
 	"github.com/viant/mly/shared/datastore"
 	sstat "github.com/viant/mly/shared/stat"
 	"github.com/viant/xunsafe"
-	"golang.org/x/sync/semaphore"
 )
 
 // Service serves as the entrypoint for using the ML model.
@@ -45,12 +43,14 @@ type Service struct {
 	// continueOnRecover if false, will re-panic on recover
 	continueOnRecover bool
 
-	// TODO how does this interact with Service.inputs
+	// inputProvider is used in transformer.Transform()
 	inputProvider *gtly.Provider
 
 	// health status for centralized health reporting
-	// Deprecated: use GetHealth() instead
+	// Deprecated: use GetHealth() or healthGauge
 	ReloadOK int32
+
+	healthGauge prometheus.Gauge
 
 	reloadPollTicker *time.Ticker
 	reloadTimeout    time.Duration
@@ -64,7 +64,6 @@ type Service struct {
 
 	// outputs
 	transformer domain.Transformer
-	newStorable func() common.Storable
 
 	// serviceMetric measures validate + model + transformer
 	serviceMetric *gmetric.Operation
@@ -93,6 +92,8 @@ func (s *Service) Config() *config.Model {
 	return s.config
 }
 
+// Signature is invoked after at least 1 successful ReloadIfNeeded().
+// Considered hot path.
 func (s *Service) Signature() *domain.Signature {
 	return s.evaluator.Signature()
 }
@@ -306,6 +307,14 @@ func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs a
 	}
 
 	atomic.StoreInt32(&s.ReloadOK, 1)
+	if s.healthGauge != nil {
+		s.healthGauge.Set(1)
+	}
+
+	signature := s.Signature()
+	if signature == nil {
+		return fmt.Errorf("signature could not be determined")
+	}
 
 	s.transformer, err = transform.Get(cfg.Transformer)
 	if err != nil {
@@ -313,7 +322,7 @@ func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs a
 	}
 
 	if err = s.initDatastore(cfg, datastores); err != nil {
-		return err
+		return fmt.Errorf("failed to initialize datastore: %w", err)
 	}
 
 	if cfg.Stream != nil {
@@ -336,59 +345,6 @@ func (s *Service) initializeService(ctx context.Context, cfg *config.Model, fs a
 	return nil
 }
 
-// New creates a service with platform router support
-func New(
-	ctx context.Context,
-	cfg *config.Model,
-	fs afs.Service,
-	metrics *gmetric.Service,
-	datastores map[string]*datastore.Service,
-	tritonClients map[string]triton.TritonClient,
-	sema *semaphore.Weighted,
-	maxEvaluatorWait time.Duration,
-	options ...Option,
-) (*Service, error) {
-
-	if metrics == nil {
-		metrics = gmetric.New()
-	}
-
-	location := reflect.TypeOf(Service{}).PkgPath()
-
-	cfg.Init(nil)
-
-	// Create platform evaluator context
-	evaluatorContext, err := factory.CreateEvaluator(cfg, fs, metrics, sema, maxEvaluatorWait, tritonClients)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create platform evaluator for model %s: %w", cfg.ID, err)
-	}
-
-	srv := &Service{
-		config:           cfg,
-		evaluator:        evaluatorContext,
-		useDatastore:     cfg.UseDictionary() && cfg.DataStore != "",
-		serviceMetric:    metrics.MultiOperationCounter(location, cfg.ID+"Perf", cfg.ID+" service performance", time.Microsecond, time.Minute, 2, stat.NewProvider()),
-		reloadPollTicker: time.NewTicker(time.Duration(cfg.ReloadPollIntervalSeconds) * time.Second),
-		reloadTimeout:    time.Duration(cfg.ReloadTimeoutSeconds) * time.Second,
-	}
-
-	// Set up reload metrics for platforms that support reloading
-	srv.reloadMetric = metrics.MultiOperationCounter(location, cfg.ID+"Reload", cfg.ID+" reloading", time.Microsecond, time.Minute, 1, sstat.NewCtxErrOnly())
-
-	for _, opt := range options {
-		opt.Apply(srv)
-	}
-
-	err = srv.initializeService(ctx, cfg, fs, metrics, datastores)
-	if err != nil {
-		return nil, err
-	}
-
-	go srv.pollModelReload()
-
-	return srv, err
-}
-
 // NewRequest should be used for Do()
 func (s *Service) NewRequest() *request.Request {
 	numKeyInputs := s.config.KeysLen()
@@ -407,10 +363,11 @@ func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datast
 
 	signature := s.Signature()
 	if signature == nil {
-		return fmt.Errorf("signature was emtpy")
+		return fmt.Errorf("signature was not provided")
 	}
 
 	if len(cfg.KeyFields) == 0 {
+		// add all inputs from model signature as a key field
 		for _, input := range signature.Inputs {
 			cfg.KeyFields = append(cfg.KeyFields, input.Name)
 		}
@@ -433,10 +390,6 @@ func (s *Service) initDatastore(cfg *config.Model, datastores map[string]*datast
 		_ = datastoreConfig.FieldsDescriptor(fields)
 	}
 
-	if s.newStorable == nil {
-		s.newStorable = getStorable(datastoreConfig)
-	}
-
 	return nil
 }
 
@@ -448,33 +401,40 @@ func (s *Service) GetHealth() int32 {
 
 func (s *Service) pollModelReload() {
 	for range s.reloadPollTicker.C {
-		ctx, cancel := context.WithTimeout(context.Background(), s.reloadTimeout)
-		defer cancel()
-
-		stats := sstat.NewValues()
-		if s.reloadMetric != nil {
-			onDone := s.reloadMetric.Begin(time.Now())
-			defer func() {
-				onDone(time.Now(), stats.Values()...)
-			}()
-		}
-
-		var reloadOK int32
-		err := s.evaluator.ReloadIfNeeded(ctx)
-		if err != nil {
-			stats.AppendError(err)
-			log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
-
-			reloadOK = 0
-		} else {
-			reloadOK = 1
-		}
-
-		atomic.StoreInt32(&s.ReloadOK, reloadOK)
 
 		if atomic.LoadInt32(&s.closed) != 0 {
 			log.Printf("[%s reload] shutting down, stopping reload loop", s.config.ID)
 			return
 		}
+
+		func() {
+			ctx, cancel := context.WithTimeout(context.Background(), s.reloadTimeout)
+			defer cancel()
+
+			stats := sstat.NewValues()
+			if s.reloadMetric != nil {
+				onDone := s.reloadMetric.Begin(time.Now())
+				defer func() {
+					onDone(time.Now(), stats.Values()...)
+				}()
+			}
+
+			var reloadOK int32
+			err := s.evaluator.ReloadIfNeeded(ctx)
+			if err != nil {
+				stats.AppendError(err)
+				log.Printf("[%s reload] failed to reload model:%v", s.config.ID, err)
+
+				reloadOK = 0
+			} else {
+				reloadOK = 1
+			}
+
+			if s.healthGauge != nil {
+				s.healthGauge.Set(float64(reloadOK))
+			}
+
+			atomic.StoreInt32(&s.ReloadOK, reloadOK)
+		}()
 	}
 }

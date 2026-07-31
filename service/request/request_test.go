@@ -21,14 +21,13 @@ func TestDecode(t *testing.T) {
 		},
 	}
 
-	inputs := make(map[string]*domain.Input, len(modelInputs))
+	numInputs := len(modelInputs)
+	inputs := make(map[string]*domain.Input, numInputs)
 
 	for i, modelInput := range modelInputs {
 		modelInput.Index = i
 		inputs[modelInput.Name] = modelInput
 	}
-
-	numInputs := len(modelInputs)
 
 	testCases := []struct {
 		desc            string
@@ -41,7 +40,7 @@ func TestDecode(t *testing.T) {
 			requestEnc: `{
 	"batch_size": 1,
 	"a2": ["a2_0"],
-	"a1": ["a1_0"], 
+	"a1": ["a1_0"],
 	"a3": ["a3_0"],
 	"cache_key": ["ck1"],
 }`,
@@ -61,7 +60,7 @@ func TestDecode(t *testing.T) {
 			desc: "invalid",
 			requestEnc: `{
 	"batch_size": 1,
-	"a1": ["a1_0"], 
+	"a1": ["a1_0"],
 	"a3": ["a3_0"],
 	"cache_key": ["ck1"],
 }`,
@@ -71,9 +70,9 @@ func TestDecode(t *testing.T) {
 			desc: "duplicate_aux",
 			requestEnc: `{
 	"batch_size": 1,
-	"a1": ["a1_0"], 
-	"a2": ["a1_0"], 
-	"a3": ["a3_0"], 
+	"a1": ["a1_0"],
+	"a2": ["a1_0"],
+	"a3": ["a3_0"],
 	"a3": ["a3_1"],
 	"cache_key": ["ck1"],
 }`,
@@ -83,9 +82,9 @@ func TestDecode(t *testing.T) {
 			desc: "duplicate_input",
 			requestEnc: `{
 	"batch_size": 1,
-	"a1": ["a1_0"], 
-	"a2": ["a2_0"], 
-	"a2": ["a2_1"], 
+	"a1": ["a1_0"],
+	"a2": ["a2_0"],
+	"a2": ["a2_1"],
 	"a3": ["a3_0"],
 	"cache_key": ["ck1"],
 }`,
@@ -101,8 +100,8 @@ func TestDecode(t *testing.T) {
 			desc: "bad_batch_expansion",
 			requestEnc: `{
 	"batch_size": 2,
-	"a1": ["a1_0"], 
-	"a2": ["a2_0", "a2_1"], 
+	"a1": ["a1_0"],
+	"a2": ["a2_0", "a2_1"],
 	"a3": ["a3_0", "a3_1"],
 	"cache_key": ["ck1", "ck2"],
 }`,
@@ -130,10 +129,7 @@ func TestDecode(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		r := &Request{
-			inputs: inputs,
-			Feeds:  make([]interface{}, numInputs, numInputs),
-		}
+		r := NewRequest(numInputs, inputs)
 
 		err := gojay.Unmarshal([]byte(tc.requestEnc), r)
 

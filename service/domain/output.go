@@ -8,14 +8,19 @@ import (
 
 // Output represents model output
 type Output struct {
+	// Used in Stream
 	Name string
 
-	// Primarily shown in config
+	// Shown in config
 	DataType string
 
-	// DataTypeKind is used only for GBQ tool
+	// Only for GBQ tool
 	DataTypeKind reflect.Kind
-	Index        int
+
+	// Used to extract output from *tf.Operation.
+	// Eventually becomes part of tf.Session.Run() parameter fetches ([]tf.Output).
+	Index int
+
 	*tf.Operation
 
 	goType reflect.Type

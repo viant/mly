@@ -70,11 +70,19 @@ func Parse(p string, cp *CliPayload) error {
 	for _, chunk := range chunks {
 		def := strings.Split(chunk, ":")
 		if len(def) != 2 {
-			return fmt.Errorf("chunk \"%s\" missing or has more than one \":\"", chunk)
+			return fmt.Errorf("chunk \"%s\" has more than one \":\"", chunk)
+		}
+
+		valStr := def[1]
+		var vals []string
+		var err error
+		if valStr == "" {
+			vals = []string{""}
+		} else {
+			vals, err = csv.NewReader(strings.NewReader(valStr)).Read()
 		}
 
 		field := def[0]
-		vals, err := csv.NewReader(strings.NewReader(def[1])).Read()
 		if err != nil {
 			return fmt.Errorf("csv error for field %s: %v", field, err)
 		}

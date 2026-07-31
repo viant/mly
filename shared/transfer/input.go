@@ -6,9 +6,14 @@ import (
 
 type Input struct {
 	BatchSize int
-	Keys      Strings
+
+	// cache keys
+	Keys Strings
+
 	Values
-	Unmapped Values // values that are not part of an input
+
+	// values that are not part of an input
+	Unmapped Values
 }
 
 func (i *Input) BatchMode() bool {

@@ -12,19 +12,45 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// A TritonClient represents a client to a single Triton server.
 type TritonClient interface {
 	ServerReady(ctx context.Context) error
 
 	// inputs is expected to be [numInputs]([batchSize][1]T) (see service/request.Request.Feeds)
-	ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error)
+	// inputs will never be empty
+	//
+	// Returns the output tensors keyed by their Triton output tensor name. Callers
+	// (the evaluator) are responsible for mapping these into signature order; the
+	// map deliberately carries no positional/order information so no consumer can
+	// depend on the order Triton happens to return tensors in.
+	ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) (map[string]interface{}, error)
 
 	ModelReady(ctx context.Context, modelName string) (bool, error)
 
 	ModelLoad(ctx context.Context, modelName string) error
 
-	ModelUnload(ctx context.Context, modelName string) error
+	ModelUnloader
+
+	ModelMetadata(ctx context.Context, modelName string) (*ModelMetadata, error)
 
 	Close() error
+}
+
+type ModelUnloader interface {
+	ModelUnload(ctx context.Context, modelName string) error
+}
+
+// https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#model-metadata-response-json-object `$metadata_tensor`
+type MetadataTensor struct {
+	Name     string  `json:"name"`
+	Datatype string  `json:"datatype"`
+	Shape    []int64 `json:"shape"`
+}
+
+// stripped down version of https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#model-metadata-response-json-object
+type ModelMetadata struct {
+	Inputs  []MetadataTensor `json:"inputs"`
+	Outputs []MetadataTensor `json:"outputs"`
 }
 
 // NewClient creates either an HTTP or gRPC client.
@@ -53,7 +79,6 @@ func NewClient(server config.TritonServer) (TritonClient, error) {
 	}
 
 	// HTTP options seem a bit bare
-	// TODO see if DRY with
 	return NewMeteredTritonClient(&HTTPClient{
 		httpClient: &http.Client{
 			Timeout: time.Duration(server.HTTPClientTimeoutMs) * time.Millisecond,

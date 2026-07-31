@@ -1,6 +1,8 @@
 package client
 
 import (
+	"time"
+
 	"github.com/viant/gmetric"
 	cconfig "github.com/viant/mly/shared/client/config"
 	"github.com/viant/mly/shared/datastore"
@@ -37,6 +39,21 @@ func (o *gmetricsOpt) Apply(c *Service) {
 // WithGmetrics binds the *gmetric.Service to the client.
 func WithGmetrics(gmetrics *gmetric.Service) Option {
 	return &gmetricsOpt{gmetrics: gmetrics}
+}
+
+type prometheusMetricsOpt struct {
+	enable bool
+}
+
+func (o *prometheusMetricsOpt) Apply(c *Service) {
+	c.noPrometheusMetrics = !o.enable
+}
+
+// WithPrometheusMetrics enables or disables native Prometheus client
+// metrics. Metrics are enabled by default; disable them for short-lived
+// helper clients that should not register long-lived model series.
+func WithPrometheusMetrics(enable bool) Option {
+	return &prometheusMetricsOpt{enable: enable}
 }
 
 type dictHashValidationOpt struct {
@@ -145,4 +162,30 @@ func (o *clientOptionsOption) Apply(c *Service) {
 // WithClientOptions adds shared/datastore/client.Option options.
 func WithClientOptions(clientOptions ...dscli.Option) Option {
 	return &clientOptionsOption{clientOptions: clientOptions}
+}
+
+type latencyBreakerOpt struct {
+	latest, rolling, window time.Duration
+	k                       int
+	fraction                float64
+}
+
+func (o *latencyBreakerOpt) Apply(c *Service) {
+	c.Config.LatencyBreakerLatestThreshold = o.latest
+	c.Config.LatencyBreakerRollingThreshold = o.rolling
+	c.Config.LatencyBreakerRollingWindow = o.window
+	c.Config.LatencyBreakerKConsecutive = o.k
+	c.Config.LatencyBreakerPassThroughFraction = o.fraction
+}
+
+// WithLatencyBreaker enables the latency-aware breaker on each host
+// constructed for this Service. Defaults are applied during Service
+// init: pass-through fraction 0.01, rolling window 1s, KConsecutive 3.
+//
+// Setting both latest and rolling to zero leaves the breaker disabled
+// (backward compatible). Both thresholds are taken as raw durations;
+// the caller is responsible for sizing them appropriately for the
+// model's traffic profile and the caller's request timeout.
+func WithLatencyBreaker(latest, rolling, window time.Duration, k int, fraction float64) Option {
+	return &latencyBreakerOpt{latest: latest, rolling: rolling, window: window, k: k, fraction: fraction}
 }

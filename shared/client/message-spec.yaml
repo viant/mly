@@ -1,0 +1,43 @@
+"$schema": "https://json-schema.org/draft/2020-12/schema"
+$title: Message Specification v1.0
+type: object
+
+properties:
+  batch_size:
+    type: integer
+    default: 0
+    description: |
+      The number of samples in this request.
+      Must be the first property present if batch mode is to be enabled, with a value greater than 0.
+
+  cache_key:
+    oneOf:
+      - type: string
+        description: A single cache key for this request.
+      - type: array
+        items:
+          type: string
+        description: |
+          An array of cache keys for this request, corresponding to each batched sample.
+          Must be of length equal to batch_size.
+
+patternProperties:
+  ".*":
+    oneOf:
+      - oneOf:
+        - type: string
+        - type: number
+        description: A single value for this input.
+      - type: array
+        items:
+          oneOf:
+            - type: string
+            - type: number
+        description: |
+          A batch of values for input.
+          Must be of length equal to batch_size, or of length 1.
+
+examples:
+  - cache_key: "1234567890"
+    input1: "value1"
+    input2: "value2"

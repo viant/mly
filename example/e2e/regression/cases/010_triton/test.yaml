@@ -1,0 +1,22 @@
+init:
+  parentPath: $parent.path
+
+pipeline:
+  test:
+    action: http/runner:send
+    requests:
+      - Method: POST
+        URL: http://127.0.0.1:8086/v1/api/model/sli_triton/eval
+        JSONBody: $LoadJSON('${parentPath}/request.json')
+        Expect:
+          Code: 200
+          Body: $LoadJSON('${parent.path}/expect.json')
+
+  testMlyCli:
+    action: exec:run
+    target: $target
+    checkError: true
+    commands:
+      - /tmp/e2e/mlyc -m sli_triton -a 'sa:a;sl:a;aux:test'
+      - /tmp/e2e/mlyc -m sli_triton -a 'sa:b;sl:a;aux:test'
+      - /tmp/e2e/mlyc -m sli_triton_grpc_explicit -a 'sa:c;sl:a;aux:test'

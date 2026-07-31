@@ -3,13 +3,16 @@ package client
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
 	aero "github.com/aerospike/aerospike-client-go"
+	"github.com/viant/gmetric"
 	"github.com/viant/mly/shared/circut"
 	"github.com/viant/mly/shared/common"
 	"github.com/viant/mly/shared/config/datastore"
+	"github.com/viant/mly/shared/stat"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -27,6 +30,10 @@ const (
 // Service represents aerospike client Service
 type Service struct {
 	Client Aero
+
+	gmOpGet     *gmetric.Operation
+	gmOpPutReq  *gmetric.Operation
+	gmOpPutExec *gmetric.Operation
 
 	config *datastore.Connection
 
@@ -54,6 +61,12 @@ func (s *Service) Get(ctx context.Context, key *aero.Key, binNames ...string) (r
 		return nil, common.ErrNodeDown
 	}
 
+	onDone := s.gmOpGet.Begin(time.Now())
+	stats := stat.NewValues()
+	defer func() {
+		onDone(time.Now(), stats.Values()...)
+	}()
+
 	defer func() {
 		if r := recover(); r != nil {
 			connection := s.config.ID
@@ -63,6 +76,8 @@ func (s *Service) Get(ctx context.Context, key *aero.Key, binNames ...string) (r
 
 	record, err = s.Client.Get(s.basePolicy, key, binNames...)
 	s.checkConnectionError(err)
+	stats.AppendError(err)
+
 	return record, err
 }
 
@@ -78,6 +93,12 @@ func (s *Service) Put(writePolicy *aero.WritePolicy, key *aero.Key, value aero.B
 	}
 
 	keyStr := keyString(key)
+
+	onDone := s.gmOpPutReq.Begin(time.Now())
+	stats := stat.NewValues()
+	defer func() {
+		onDone(time.Now(), stats.Values()...)
+	}()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -97,8 +118,16 @@ func (s *Service) Put(writePolicy *aero.WritePolicy, key *aero.Key, value aero.B
 	defer cancel()
 
 	ch := s.group.DoChan(keyStr, func() (interface{}, error) {
+		onDone := s.gmOpPutExec.Begin(time.Now())
+		stats := stat.NewValues()
+		defer func() {
+			onDone(time.Now(), stats.Values()...)
+		}()
+
 		err := s.Client.Put(writePolicy, key, value)
 		s.checkConnectionError(err)
+		stats.AppendError(err)
+
 		return nil, err
 	})
 
@@ -110,7 +139,7 @@ func (s *Service) Put(writePolicy *aero.WritePolicy, key *aero.Key, value aero.B
 			err = fmt.Errorf("put aerospike[%s] key: %s shared: %v error: %w", s.config.ID, keyStr, res.Shared, res.Err)
 		}
 	}
-
+	stats.AppendError(err)
 	return err
 }
 
@@ -189,12 +218,29 @@ func New(config *datastore.Connection) (*Service, error) {
 }
 
 func NewWithOptions(config *datastore.Connection, options ...Option) (*Service, error) {
+	return NewWithOptionsV2(config, nil, options...)
+}
+
+func NewWithOptionsV2(config *datastore.Connection, gmetrics *gmetric.Service, options ...Option) (*Service, error) {
+	if gmetrics == nil {
+		gmetrics = gmetric.New()
+	}
+
+	location := reflect.TypeOf(Service{}).PkgPath()
+	gmOpGet := gmetrics.MultiOperationCounter(location, config.ID+"AerospikeGet", config.ID+" get performance", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly())
+	gmOpPutReq := gmetrics.MultiOperationCounter(location, config.ID+"AerospikePutRequested", config.ID+" put performance including singleflight", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly())
+	gmOpPutExec := gmetrics.MultiOperationCounter(location, config.ID+"AerospikePutExecuted", config.ID+" put performance", time.Microsecond, time.Minute, 2, stat.NewCtxErrOnly())
+
 	srv := &Service{
-		config: config,
-		group:  new(singleflight.Group),
+		config:      config,
+		group:       new(singleflight.Group),
+		gmOpGet:     gmOpGet,
+		gmOpPutReq:  gmOpPutReq,
+		gmOpPutExec: gmOpPutExec,
 	}
 
 	srv.init(options...)
+
 	breaker := circut.New(time.Second, srv)
 	srv.Breaker = breaker
 	return srv, srv.connect()

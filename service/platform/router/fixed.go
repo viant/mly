@@ -1,15 +1,28 @@
 package router
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/viant/mly/service/config"
-	"github.com/viant/mly/service/request/shape"
 )
+
+// preparedReplacement holds a pre-parsed replacement value for fixed evaluator outputs
+type preparedReplacement struct {
+	name  string
+	typ   string
+	value interface{}
+}
 
 type fixedEvaluator struct {
 	prepared []preparedReplacement
+}
+
+func (f *fixedEvaluator) OutputNames() []string {
+	names := make([]string, len(f.prepared))
+	for i, p := range f.prepared {
+		names[i] = p.name
+	}
+	return names
 }
 
 func newFixedEvaluator(repls []config.PredictionReplacement) (*fixedEvaluator, error) {
@@ -71,7 +84,7 @@ func newFixedEvaluator(repls []config.PredictionReplacement) (*fixedEvaluator, e
 				default:
 					return fmt.Errorf("router replacement %q: value %T not coercible to int64", r.Name, r.Value)
 				}
-			case "float", "float32":
+			case "float32":
 				switch n := r.Value.(type) {
 				case int:
 					pr = preparedReplacement{typ: "float32", value: float32(n)}
@@ -105,6 +118,7 @@ func newFixedEvaluator(repls []config.PredictionReplacement) (*fixedEvaluator, e
 				return fmt.Errorf("unsupported router replacement type %q for %q", r.Type, r.Name)
 			}
 
+			pr.name = r.Name
 			prepared = append(prepared, pr)
 		}
 
@@ -117,12 +131,7 @@ func newFixedEvaluator(repls []config.PredictionReplacement) (*fixedEvaluator, e
 	return &fixedEvaluator{prepared: prepared}, nil
 }
 
-func (f *fixedEvaluator) Predict(ctx context.Context, params []interface{}) ([]interface{}, error) {
-	batchSize, err := shape.DetermineBatchSize(params)
-	if err != nil {
-		return nil, err
-	}
-
+func (f *fixedEvaluator) Predict(batchSize int) ([]interface{}, error) {
 	makeString := func(v string) [][]string {
 		out := make([][]string, batchSize)
 		for i := 0; i < batchSize; i++ {
@@ -182,8 +191,6 @@ func (f *fixedEvaluator) Predict(ctx context.Context, params []interface{}) ([]i
 			results[i] = makeInt32(repl.value.(int32))
 		case "int64":
 			results[i] = makeInt64(repl.value.(int64))
-		case "float":
-			results[i] = makeFloat32(repl.value.(float32))
 		case "float32":
 			results[i] = makeFloat32(repl.value.(float32))
 		case "float64":

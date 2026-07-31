@@ -28,23 +28,22 @@ var (
 		[]string{"router", "fixed_only"},
 	)
 
-	routerWorkerChannelQueuedSummary = prometheus.NewSummaryVec(
-		prometheus.SummaryOpts{
-			Namespace:  "mly",
-			Subsystem:  "router",
-			Name:       "worker_channel_queued_summary",
-			Help:       "Number of router predictions queued in the worker channel.",
-			Objectives: buckets.CommonSummaryObjectives,
-		},
-		[]string{"router"},
-	)
-
 	routerPredictDroppedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "mly",
 			Subsystem: "router",
 			Name:      "predict_dropped_counter",
 			Help:      "Number of router predictions dropped.",
+		},
+		[]string{"router"},
+	)
+
+	routerQueueDurationMicrosSummary = prometheus.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Namespace: "mly",
+			Subsystem: "router",
+			Name:      "queue_duration_summary_us",
+			Help:      "Duration of router queueing.",
 		},
 		[]string{"router"},
 	)
@@ -64,6 +63,6 @@ func init() {
 	prometheus.MustRegister(routerPredictDurationMicrosSummary)
 	prometheus.MustRegister(routerReloadDurationMicrosSummary)
 	prometheus.MustRegister(routerModelUnloadGauge)
+	prometheus.MustRegister(routerQueueDurationMicrosSummary)
 	prometheus.MustRegister(routerPredictDroppedCounter)
-	prometheus.MustRegister(routerWorkerChannelQueuedSummary)
 }

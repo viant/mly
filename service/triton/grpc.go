@@ -24,26 +24,13 @@ func NewGRPCClient(grpcConn *grpc.ClientConn) *GRPCClient {
 	}
 }
 
-// preparedInput represents processed input data ready for gRPC transport
-type preparedInput struct {
-	name     string
-	datatype string      // Triton datatype: "BYTES", "INT32", "INT64", "FP32", "FP64"
-	shape    []int64     // Shape in int64 for gRPC compatibility
-	data     interface{} // Flattened data: []string, []int32, []int64, []float32, []float64
-}
-
 func (c *GRPCClient) ServerReady(ctx context.Context) error {
 	_, err := c.grpcClient.ServerReady(ctx, &triton.ServerReadyRequest{})
 	return err
 }
 
-func (c *GRPCClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error) {
-	preparedInputs, err := prepareInputs(indexToName, inputs)
-	if err != nil {
-		return nil, err
-	}
-
-	grpcRequest, err := buildGRPCRequest(modelName, preparedInputs)
+func (c *GRPCClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) (map[string]interface{}, error) {
+	grpcRequest, err := toGRPCRequest(modelName, inputs, indexToName)
 	if err != nil {
 		return nil, err
 	}
@@ -53,12 +40,7 @@ func (c *GRPCClient) ModelInfer(ctx context.Context, modelName string, inputs []
 		return nil, err
 	}
 
-	result, err := convertGRPCResponse(grpcResponse)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return convertGRPCResponse(grpcResponse)
 }
 
 func (c *GRPCClient) ModelReady(ctx context.Context, modelName string) (bool, error) {
@@ -94,48 +76,144 @@ func (c *GRPCClient) ModelUnload(ctx context.Context, modelName string) error {
 	return nil
 }
 
+func (c *GRPCClient) ModelMetadata(ctx context.Context, modelName string) (*ModelMetadata, error) {
+	grpcResponse, err := c.grpcClient.ModelMetadata(ctx, &triton.ModelMetadataRequest{
+		Name: modelName,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return convertGRPCModelMetadataResponse(grpcResponse), nil
+}
+
+func convertGRPCModelMetadataResponse(response *triton.ModelMetadataResponse) *ModelMetadata {
+	inputs := make([]MetadataTensor, len(response.Inputs))
+	for i, input := range response.Inputs {
+		inputs[i] = MetadataTensor{
+			Name:     input.Name,
+			Datatype: input.Datatype,
+			Shape:    input.Shape,
+		}
+	}
+
+	outputs := make([]MetadataTensor, len(response.Outputs))
+	for i, output := range response.Outputs {
+		outputs[i] = MetadataTensor{
+			Name:     output.Name,
+			Datatype: output.Datatype,
+			Shape:    output.Shape,
+		}
+	}
+
+	return &ModelMetadata{
+		Inputs:  inputs,
+		Outputs: outputs,
+	}
+}
+
 func (c *GRPCClient) Close() error {
 	return c.grpcConn.Close()
 }
 
-func buildGRPCRequest(modelName string, preparedInputs []preparedInput) (*triton.ModelInferRequest, error) {
+func toGRPCRequest(modelName string, params []interface{}, indexToName map[int]string) (*triton.ModelInferRequest, error) {
 	req := &triton.ModelInferRequest{
 		ModelName: modelName,
-		Inputs:    make([]*triton.ModelInferRequest_InferInputTensor, len(preparedInputs)),
+		Inputs:    make([]*triton.ModelInferRequest_InferInputTensor, len(params)),
 	}
 
-	for i, input := range preparedInputs {
-		tensor := &triton.ModelInferRequest_InferInputTensor{
-			Name:     input.name,
-			Datatype: input.datatype,
-			Shape:    input.shape,
-			Contents: &triton.InferTensorContents{},
+	for i, param := range params {
+		inputName, exists := indexToName[i]
+		if !exists {
+			return nil, fmt.Errorf("no input name found for index %d", i)
 		}
 
-		switch data := input.data.(type) {
-		case []string:
-			tensor.Contents.BytesContents = make([][]byte, len(data))
-			for j, s := range data {
-				tensor.Contents.BytesContents[j] = []byte(s)
+		inputContents := &triton.InferTensorContents{}
+
+		inputTensor := &triton.ModelInferRequest_InferInputTensor{
+			Name:     inputName,
+			Contents: inputContents,
+		}
+
+		var batchSize int
+		var datatype string
+
+		switch v := param.(type) {
+		case [][]string:
+			if len(v) > 0 {
+				batchSize = len(v)
+				datatype = "BYTES"
+
+				inputContents.BytesContents = make([][]byte, batchSize)
+				for j := range batchSize {
+					inputContents.BytesContents[j] = []byte(v[j][0])
+				}
 			}
-		case []int32:
-			tensor.Contents.IntContents = data
-		case []int64:
-			tensor.Contents.Int64Contents = data
-		case []float32:
-			tensor.Contents.Fp32Contents = data
-		case []float64:
-			tensor.Contents.Fp64Contents = data
+		case [][]int:
+			if len(v) > 0 {
+				batchSize = len(v)
+				datatype = "INT32"
+
+				inputContents.IntContents = make([]int32, batchSize)
+				for j := range batchSize {
+					inputContents.IntContents[j] = int32(v[j][0])
+				}
+			}
+		case [][]int32:
+			if len(v) > 0 {
+				batchSize = len(v)
+				datatype = "INT32"
+
+				inputContents.IntContents = make([]int32, batchSize)
+				for j := range batchSize {
+					inputContents.IntContents[j] = v[j][0]
+				}
+
+			}
+		case [][]int64:
+			if len(v) > 0 {
+				batchSize = len(v)
+				datatype = "INT64"
+
+				inputContents.Int64Contents = make([]int64, batchSize)
+				for j := range batchSize {
+					inputContents.Int64Contents[j] = v[j][0]
+				}
+
+			}
+		case [][]float32:
+			if len(v) > 0 {
+				batchSize = len(v)
+				datatype = "FP32"
+
+				inputContents.Fp32Contents = make([]float32, batchSize)
+				for j := range batchSize {
+					inputContents.Fp32Contents[j] = v[j][0]
+				}
+			}
+		case [][]float64:
+			if len(v) > 0 {
+				batchSize = len(v)
+				datatype = "FP64"
+
+				inputContents.Fp64Contents = make([]float64, batchSize)
+				for j := range batchSize {
+					inputContents.Fp64Contents[j] = v[j][0]
+				}
+			}
 		default:
-			return nil, fmt.Errorf("unsupported input data type %T for %s", data, input.name)
+			return nil, fmt.Errorf("unsupported input type for %s at index %d: %T", inputName, i, param)
 		}
 
-		req.Inputs[i] = tensor
+		inputTensor.Datatype = datatype
+		inputTensor.Shape = []int64{int64(batchSize), 1}
+
+		req.Inputs[i] = inputTensor
 	}
 
 	return req, nil
 }
 
+// parseRawOutput if output is provided in raw format.
 func parseRawOutput(rawData []byte, datatype string, batchSize int) (interface{}, error) {
 	switch datatype {
 	case "INT64":
@@ -207,130 +285,15 @@ func parseRawOutput(rawData []byte, datatype string, batchSize int) (interface{}
 	}
 }
 
-func prepareInputs(indexToName map[int]string, params []interface{}) ([]preparedInput, error) {
-	if len(params) == 0 {
-		return nil, fmt.Errorf("no input parameters provided")
-	}
-
-	var inputs []preparedInput
-
-	for i, param := range params {
-		inputName, exists := indexToName[i]
-		if !exists {
-			return nil, fmt.Errorf("no input name found for index %d", i)
-		}
-
-		switch v := param.(type) {
-		case [][]string:
-			if len(v) > 0 {
-				batchSize := len(v)
-				data := make([]string, batchSize)
-				for j := 0; j < batchSize; j++ {
-					if len(v[j]) > 0 {
-						data[j] = v[j][0]
-					}
-				}
-				inputs = append(inputs, preparedInput{
-					name:     inputName,
-					shape:    []int64{int64(batchSize), 1},
-					datatype: "BYTES",
-					data:     data,
-				})
-			}
-		case [][]int:
-			if len(v) > 0 {
-				batchSize := len(v)
-				data := make([]int32, batchSize)
-				for j := 0; j < batchSize; j++ {
-					if len(v[j]) > 0 {
-						data[j] = int32(v[j][0])
-					}
-				}
-				inputs = append(inputs, preparedInput{
-					name:     inputName,
-					shape:    []int64{int64(batchSize), 1},
-					datatype: "INT32",
-					data:     data,
-				})
-			}
-		case [][]int32:
-			if len(v) > 0 {
-				batchSize := len(v)
-				data := make([]int32, batchSize)
-				for j := 0; j < batchSize; j++ {
-					if len(v[j]) > 0 {
-						data[j] = v[j][0]
-					}
-				}
-				inputs = append(inputs, preparedInput{
-					name:     inputName,
-					shape:    []int64{int64(batchSize), 1},
-					datatype: "INT32",
-					data:     data,
-				})
-			}
-		case [][]int64:
-			if len(v) > 0 {
-				batchSize := len(v)
-				data := make([]int64, batchSize)
-				for j := 0; j < batchSize; j++ {
-					if len(v[j]) > 0 {
-						data[j] = v[j][0]
-					}
-				}
-				inputs = append(inputs, preparedInput{
-					name:     inputName,
-					shape:    []int64{int64(batchSize), 1},
-					datatype: "INT64",
-					data:     data,
-				})
-			}
-		case [][]float32:
-			if len(v) > 0 {
-				batchSize := len(v)
-				data := make([]float32, batchSize)
-				for j := 0; j < batchSize; j++ {
-					if len(v[j]) > 0 {
-						data[j] = v[j][0]
-					}
-				}
-				inputs = append(inputs, preparedInput{
-					name:     inputName,
-					shape:    []int64{int64(batchSize), 1},
-					datatype: "FP32",
-					data:     data,
-				})
-			}
-		case [][]float64:
-			if len(v) > 0 {
-				batchSize := len(v)
-				data := make([]float64, batchSize)
-				for j := 0; j < batchSize; j++ {
-					if len(v[j]) > 0 {
-						data[j] = v[j][0]
-					}
-				}
-				inputs = append(inputs, preparedInput{
-					name:     inputName,
-					shape:    []int64{int64(batchSize), 1},
-					datatype: "FP64",
-					data:     data,
-				})
-			}
-		default:
-			return nil, fmt.Errorf("unsupported input type for %s at index %d: %T", inputName, i, param)
-		}
-	}
-
-	return inputs, nil
-}
-
-func convertGRPCResponse(response *triton.ModelInferResponse) ([]interface{}, error) {
+// convertGRPCResponse maps the response tensors into a map keyed by output name.
+// Ordering into signature order is the evaluator's responsibility; keying by name
+// here removes any reliance on the order Triton returns tensors in.
+func convertGRPCResponse(response *triton.ModelInferResponse) (map[string]interface{}, error) {
 	if len(response.Outputs) == 0 {
 		return nil, fmt.Errorf("no outputs in response")
 	}
 
-	result := make([]interface{}, len(response.Outputs))
+	result := make(map[string]interface{}, len(response.Outputs))
 	useRawContents := len(response.RawOutputContents) > 0
 
 	for i, output := range response.Outputs {
@@ -338,6 +301,8 @@ func convertGRPCResponse(response *triton.ModelInferResponse) ([]interface{}, er
 		if len(output.Shape) > 0 {
 			batchSize = int(output.Shape[0])
 		}
+
+		var parsed interface{}
 
 		if useRawContents {
 			if i >= len(response.RawOutputContents) {
@@ -348,101 +313,55 @@ func convertGRPCResponse(response *triton.ModelInferResponse) ([]interface{}, er
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse raw output %s: %w", output.Name, err)
 			}
-			result[i] = parsedData
-			continue
-		}
+			parsed = parsedData
+		} else {
+			if output.Contents == nil {
+				return nil, fmt.Errorf("output %s missing contents", output.Name)
+			}
 
-		if output.Contents == nil {
-			return nil, fmt.Errorf("output %s missing contents", output.Name)
-		}
-
-		switch output.Datatype {
-		case "FP32":
-			if len(output.Contents.Fp32Contents) == 0 {
-				converted := make([][]float32, batchSize)
-				for j := 0; j < batchSize; j++ {
-					converted[j] = []float32{0.0}
-				}
-				result[i] = converted
-			} else {
+			switch output.Datatype {
+			case "FP32":
 				converted := make([][]float32, batchSize)
 				for j := 0; j < batchSize && j < len(output.Contents.Fp32Contents); j++ {
 					converted[j] = []float32{output.Contents.Fp32Contents[j]}
 				}
-				result[i] = converted
-			}
-
-		case "FP64":
-			if len(output.Contents.Fp64Contents) == 0 {
-				converted := make([][]float64, batchSize)
-				for j := 0; j < batchSize; j++ {
-					converted[j] = []float64{0.0}
-				}
-				result[i] = converted
-			} else {
+				parsed = converted
+			case "FP64":
 				converted := make([][]float64, batchSize)
 				for j := 0; j < batchSize && j < len(output.Contents.Fp64Contents); j++ {
 					converted[j] = []float64{output.Contents.Fp64Contents[j]}
 				}
-				result[i] = converted
-			}
+				parsed = converted
 
-		case "INT32":
-			if len(output.Contents.IntContents) == 0 {
-				converted := make([][]int32, batchSize)
-				for j := 0; j < batchSize; j++ {
-					converted[j] = []int32{0}
-				}
-				result[i] = converted
-			} else {
+			case "INT32":
 				converted := make([][]int32, batchSize)
 				for j := 0; j < batchSize && j < len(output.Contents.IntContents); j++ {
 					converted[j] = []int32{output.Contents.IntContents[j]}
 				}
-				result[i] = converted
-			}
-
-		case "INT64":
-			if len(output.Contents.Int64Contents) == 0 {
-				converted := make([][]int64, batchSize)
-				for j := 0; j < batchSize; j++ {
-					converted[j] = []int64{0}
-				}
-				result[i] = converted
-			} else {
+				parsed = converted
+			case "INT64":
 				converted := make([][]int64, batchSize)
 				for j := 0; j < batchSize && j < len(output.Contents.Int64Contents); j++ {
 					converted[j] = []int64{output.Contents.Int64Contents[j]}
 				}
-				result[i] = converted
-			}
+				parsed = converted
 
-		case "BYTES":
-			if len(output.Contents.BytesContents) == 0 {
-				converted := make([][]string, batchSize)
-				for j := 0; j < batchSize; j++ {
-					converted[j] = []string{""}
-				}
-				result[i] = converted
-			} else {
+			case "BYTES":
 				converted := make([][]string, batchSize)
 				for j := 0; j < batchSize && j < len(output.Contents.BytesContents); j++ {
 					converted[j] = []string{string(output.Contents.BytesContents[j])}
 				}
-				result[i] = converted
-			}
+				parsed = converted
 
-		default:
-			if len(output.Contents.Fp32Contents) > 0 {
-				converted := make([][]float32, batchSize)
-				for j := 0; j < batchSize && j < len(output.Contents.Fp32Contents); j++ {
-					converted[j] = []float32{output.Contents.Fp32Contents[j]}
-				}
-				result[i] = converted
-			} else {
+			default:
 				return nil, fmt.Errorf("unsupported output datatype %s for %s", output.Datatype, output.Name)
 			}
 		}
+
+		if _, dup := result[output.Name]; dup {
+			return nil, fmt.Errorf("duplicate output name %q in response", output.Name)
+		}
+		result[output.Name] = parsed
 	}
 
 	return result, nil

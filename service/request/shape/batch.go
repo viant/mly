@@ -1,6 +1,9 @@
 package shape
 
-import "fmt"
+import (
+	"fmt"
+	"reflect"
+)
 
 // DetermineBatchSize determines batch size from a service.Request.Feeds slice.
 func DetermineBatchSize(inputs []interface{}) (int, error) {
@@ -66,7 +69,96 @@ func Debatch(untypedBatch interface{}, i int) (interface{}, error) {
 	return nil, fmt.Errorf("unexpected batch type: %T", untypedBatch)
 }
 
-// concatAxis0 concatenates two tensors along axis 0 (batch dimension).
+// AppendRowToBatch appends a single debatched row to an accumulating batch.
+// If the accumulator is nil, it initializes it with the row's type.
+// The row is expected to be in debatched form: [][]T with shape [1][1].
+// The accumulator will grow to shape [N][1] after N appends.
+func AppendRowToBatch(accumulator interface{}, row interface{}) (interface{}, error) {
+	if accumulator == nil {
+		// Initialize with the row (already in correct shape [1][1])
+		return row, nil
+	}
+
+	switch accTyped := accumulator.(type) {
+	case [][]int32:
+		rowTyped, ok := row.([][]int32)
+		if !ok {
+			return nil, fmt.Errorf("type mismatch: accumulator is [][]int32, row is %T", row)
+		}
+		return append(accTyped, rowTyped...), nil
+	case [][]int64:
+		rowTyped, ok := row.([][]int64)
+		if !ok {
+			return nil, fmt.Errorf("type mismatch: accumulator is [][]int64, row is %T", row)
+		}
+		return append(accTyped, rowTyped...), nil
+	case [][]float32:
+		rowTyped, ok := row.([][]float32)
+		if !ok {
+			return nil, fmt.Errorf("type mismatch: accumulator is [][]float32, row is %T", row)
+		}
+		return append(accTyped, rowTyped...), nil
+	case [][]float64:
+		rowTyped, ok := row.([][]float64)
+		if !ok {
+			return nil, fmt.Errorf("type mismatch: accumulator is [][]float64, row is %T", row)
+		}
+		return append(accTyped, rowTyped...), nil
+	case [][]string:
+		rowTyped, ok := row.([][]string)
+		if !ok {
+			return nil, fmt.Errorf("type mismatch: accumulator is [][]string, row is %T", row)
+		}
+		return append(accTyped, rowTyped...), nil
+	default:
+		return nil, fmt.Errorf("unsupported accumulator type: %T", accumulator)
+	}
+}
+
+// ExtractRowFromBatch extracts a single row from a batch at the given index.
+// The batch is expected to have shape [N][M] and the result will have shape [1][M].
+func ExtractRowFromBatch(batch interface{}, index int) (interface{}, error) {
+	switch typedBatch := batch.(type) {
+	case [][]int32:
+		if index >= len(typedBatch) {
+			return nil, fmt.Errorf("index %d out of range for batch of size %d", index, len(typedBatch))
+		}
+		return [][]int32{typedBatch[index]}, nil
+	case [][]int64:
+		if index >= len(typedBatch) {
+			return nil, fmt.Errorf("index %d out of range for batch of size %d", index, len(typedBatch))
+		}
+		return [][]int64{typedBatch[index]}, nil
+	case [][]float32:
+		if index >= len(typedBatch) {
+			return nil, fmt.Errorf("index %d out of range for batch of size %d", index, len(typedBatch))
+		}
+		return [][]float32{typedBatch[index]}, nil
+	case [][]float64:
+		if index >= len(typedBatch) {
+			return nil, fmt.Errorf("index %d out of range for batch of size %d", index, len(typedBatch))
+		}
+		return [][]float64{typedBatch[index]}, nil
+	case [][]string:
+		if index >= len(typedBatch) {
+			return nil, fmt.Errorf("index %d out of range for batch of size %d", index, len(typedBatch))
+		}
+		return [][]string{typedBatch[index]}, nil
+	default:
+		return nil, fmt.Errorf("unsupported batch type: %T", batch)
+	}
+}
+
+// BatchSize returns the batch size (first dimension) of a batch tensor.
+func BatchSize(batch interface{}) (int, error) {
+	val := reflect.ValueOf(batch)
+	if val.Kind() != reflect.Slice {
+		return 0, fmt.Errorf("expected slice, got %T", batch)
+	}
+	return val.Len(), nil
+}
+
+// ConcatAxis0 concatenates two tensors along axis 0 (batch dimension).
 func ConcatAxis0(x []interface{}, y []interface{}) ([]interface{}, error) {
 	if len(x) != len(y) {
 		return nil, fmt.Errorf("x and y must have the same length: %d vs %d", len(x), len(y))

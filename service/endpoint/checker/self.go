@@ -14,7 +14,7 @@ import (
 )
 
 func SelfTest(host []*client.Host, timeout time.Duration, modelID string, usesTransformer bool, tp config.TestPayload, debug bool) error {
-	cli, err := client.New(modelID, host, client.WithDebug(true))
+	cli, err := client.New(modelID, host, client.WithDebug(true), client.WithPrometheusMetrics(false))
 	if err != nil {
 		return fmt.Errorf("%s:%w", modelID, err)
 	}

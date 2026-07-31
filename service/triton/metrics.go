@@ -76,6 +76,16 @@ var (
 		[]string{"model"},
 	)
 
+	modelMetadataDurationMicrosSummary = prometheus.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Namespace:  "mly",
+			Subsystem:  "triton",
+			Name:       "model_metadata_duration_summary_us",
+			Help:       "Duration of Triton ModelMetadata RPCs, labeled by model name, successful only.",
+			Objectives: buckets.CommonSummaryObjectives,
+		},
+		[]string{"model"},
+	)
 )
 
 func init() {
@@ -88,6 +98,7 @@ func init() {
 	prometheus.MustRegister(modelReadyDurationMicrosSummary)
 	prometheus.MustRegister(modelLoadDurationMicrosSummary)
 	prometheus.MustRegister(modelUnloadDurationMicrosSummary)
+	prometheus.MustRegister(modelMetadataDurationMicrosSummary)
 }
 
 type MeteredTritonClient struct {
@@ -113,8 +124,8 @@ func withGatherers(fn func() error, fnObserve func(float64)) error {
 	return nil
 }
 
-func (c *MeteredTritonClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) ([]interface{}, error) {
-	var result []interface{}
+func (c *MeteredTritonClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) (map[string]interface{}, error) {
+	var result map[string]interface{}
 	var err error
 
 	err = withGatherers(func() error {
@@ -167,6 +178,19 @@ func (c *MeteredTritonClient) ModelUnload(ctx context.Context, modelName string)
 		modelUnloadDurationMicrosSummary.WithLabelValues(modelName).Observe(duration)
 	})
 	return err
+}
+
+func (c *MeteredTritonClient) ModelMetadata(ctx context.Context, modelName string) (*ModelMetadata, error) {
+	var metadata *ModelMetadata
+	var err error
+	err = withGatherers(func() error {
+		metadata, err = c.client.ModelMetadata(ctx, modelName)
+		return err
+	}, func(duration float64) {
+		modelMetadataDurationMicrosSummary.WithLabelValues(modelName).Observe(duration)
+	})
+
+	return metadata, err
 }
 
 func (c *MeteredTritonClient) Close() error {

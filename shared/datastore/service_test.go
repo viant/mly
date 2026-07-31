@@ -3,13 +3,12 @@ package datastore
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/aerospike/aerospike-client-go"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/viant/mly/shared/circut"
 	"github.com/viant/mly/shared/common"
+	"github.com/viant/mly/shared/config/datastore"
 	"github.com/viant/mly/shared/datastore/client"
 )
 
@@ -42,10 +41,16 @@ func TestFromClientMapsRecordAndDoesNotMapHashBin(t *testing.T) {
 		"Field":        "value",
 		common.HashBin: 123,
 	}}
-	clientSvc := &client.Service{
-		Client:  stubAeroRecord{record: rec},
-		Breaker: circut.New(time.Second*10, &stubProber{}),
+
+	config := &datastore.Connection{
+		ID: "test",
 	}
+	config.Init()
+
+	clientSvc, _ := client.New(config)
+	// ignore err since we're mocking the client and don't need ot actually connect
+
+	clientSvc.Client = stubAeroRecord{record: rec}
 
 	key := &Key{Namespace: "ns", Set: "set", Value: "key"}
 	type Foo struct {

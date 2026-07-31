@@ -11,6 +11,7 @@ type fieldOffset int
 
 const (
 	// oov = out of vocabulary
+	// TODO - technically the OOV value can be overwritten - [UNK] may be a valid value
 	oovString = "[UNK]"
 	oovInt    = 0
 
@@ -19,13 +20,16 @@ const (
 	unknownKeyField = fieldOffset(-1)
 )
 
-// Dictionary helps identify any out-of-vocabulary input values for reducing the cache space - this enables us to leverage any
-// dimensionality reduction within the model to optimize wall-clock performance. This is primarily useful for categorical inputs
-// as well as any continous inputs with an acceptable quantization.
+// Dictionary helps identify any out-of-vocabulary input values for reducing the cache space, as well as an explicit cache-invalidation strategy via hash.
+// See shared/common.Dictionary
 type Dictionary struct {
-	hash     int
+	hash int
+
+	// registry key is the input name
 	registry map[string]*entry
-	inputs   map[string]*shared.Field
+
+	// inputs is an index, key is the input name
+	inputs map[string]*shared.Field
 }
 
 func (d *Dictionary) KeysLen() int {
@@ -34,10 +38,6 @@ func (d *Dictionary) KeysLen() int {
 
 func (d *Dictionary) inputSize() int {
 	return len(d.inputs)
-}
-
-func (d *Dictionary) size() int {
-	return len(d.registry)
 }
 
 // TODO refactor, this has a singular use case
@@ -73,12 +73,15 @@ func (d *Dictionary) getEntry(n string) *entry {
 	}
 
 	if elem == nil {
+		// generally speaking, if d.registry has data, it should have data for ALL columns
+		// TODO this shouldn't print, it should tick some counter
 		log.Printf("registry entry was nil for %v", n)
 	}
 
 	return elem
 }
 
+// lookupString returns the mapped key, or unknownKeyField, meaning no mapping exists
 func (d *Dictionary) lookupString(key string, value string) (string, fieldOffset) {
 	input := d.getInput(key)
 	if input == nil {
@@ -103,7 +106,7 @@ func (d *Dictionary) lookupString(key string, value string) (string, fieldOffset
 	return oovString, ii
 }
 
-// TODO integration and boundary testing; OOV may depend on vocabulary
+// lookupInt returns the mapped key, or unknownKeyField, meaning no mapping exists
 func (d *Dictionary) lookupInt(key string, value int) (int, fieldOffset) {
 	input := d.getInput(key)
 	if input == nil {
@@ -128,6 +131,7 @@ func (d *Dictionary) lookupInt(key string, value int) (int, fieldOffset) {
 	return oovInt, ii
 }
 
+// reduceFloat returns a lower-precision float key, or unknownKeyField, meaning no reduction exists
 func (d *Dictionary) reduceFloat(key string, value float32) (float32, int, fieldOffset) {
 	input := d.getInput(key)
 	if input == nil {

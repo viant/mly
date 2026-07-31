@@ -2,10 +2,10 @@
   "status": "ok",
   "data": [
     {
-			"Class": "five"
-		}, 
-		{
-			"Class": "two"
-		}
-	]
+      "Class": "five"
+    },
+    {
+      "Class": "two"
+    }
+  ]
 }

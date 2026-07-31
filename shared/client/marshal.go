@@ -7,6 +7,7 @@ import (
 	"github.com/francoispqt/gojay"
 )
 
+// Deprecated. No need to be exported.
 func Marshal(data interface{}, id string) ([]byte, error) {
 	if data == nil {
 		return nil, fmt.Errorf("data was nil")

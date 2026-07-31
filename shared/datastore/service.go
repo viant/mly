@@ -263,7 +263,8 @@ func (s *Service) updateCache(keyString string, entryData EntryData, dictHash in
 	return nil
 }
 
-// reads from local
+// readFromCache reads from local.
+// This can return an error if the cache cannot be unmarshalled.
 func (s *Service) readFromCache(keyString string, value Value, stats *stat.Values) (CacheStatus, int, error) {
 	data, _ := s.cache.Get(keyString)
 	if len(data) == 0 {

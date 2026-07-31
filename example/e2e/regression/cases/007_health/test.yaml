@@ -10,8 +10,8 @@ pipeline:
 
   assertMetrics:
     action: validator:assert
-    init:
-      actual: $AsJSON($test.Cmd[0].Stdout)
-    actual: $actual
-    expect: $LoadJSON('${parentPath}/metrics.json')
-
+    actual: $AsJSON($test.Cmd[0].Stdout)
+    expect: |
+      {
+        "sli": 1
+      }

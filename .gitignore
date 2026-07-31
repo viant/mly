@@ -3,10 +3,13 @@
 .DS_Cache
 .DS_Store
 
+__debug_bin*
+
 /devdata
 /vendor
 
 /example/e2e/logs
+/example/e2e/data/triton_model_repository
 
 # binaries
 /example/client/mlyc/mlyc

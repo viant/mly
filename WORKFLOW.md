@@ -51,7 +51,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant client as client.Service
-    
+
     participant mlyserver as mly Server
     participant serverds as Server datastore.Service
 
@@ -74,7 +74,7 @@ sequenceDiagram
         aerospike-->>datastore: KEY_NOT_FOUND_ERROR
         Note over datastore: L1NoSuchKey
 
-        alt L2 is configured 
+        alt L2 is configured
             datastore->>aerospikel2: Get()
             aerospikel2-->>datastore: KEY_NOT_FOUND_ERROR
             Note over datastore: L2NoSuchKey
@@ -94,14 +94,14 @@ sequenceDiagram
 
     alt mly Prediction Required
         client->>mlyserver: postRequest()
-        
+
         activate mlyserver
         Note over mlyserver: Run TensorFlow model graph
 
-        par 
+        par
             mlyserver->>serverds: Put()
             serverds->>aerospike: Put()
-        and 
+        and
             mlyserver-->>client: response
         end
 
@@ -143,6 +143,6 @@ sequenceDiagram
 
     client->>datastore: Put()
     datastore->>scache: Put()
-    
+
     deactivate client
 ```
