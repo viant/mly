@@ -199,6 +199,19 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 		delete(modelsToUnload, globalModelName)
 	}
 
+	newlyCreated := make(map[string]struct{})
+	committed := false
+	defer func() {
+		if committed || r.unloader == nil {
+			return
+		}
+		for model := range newlyCreated {
+			if err := r.unloadModel(ctx, model); err != nil {
+				log.Printf("[%s Router] cleanup unload after failed reload of %s: %v", r.routerName, model, err)
+			}
+		}
+	}()
+
 	newRoutingTable := make(map[string]platform.PlatformEvaluator)
 	for _, entity := range newConfig.EntityMapping {
 		model := entity.ModelName
@@ -217,6 +230,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 			return fmt.Errorf("failed to create Routed Evaluator for model %s: %w", model, err)
 		}
 
+		newlyCreated[model] = struct{}{}
 		newRoutingTable[model] = evaluator
 	}
 
@@ -234,6 +248,7 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 			if err != nil {
 				return fmt.Errorf("failed to create Routed Evaluator for global model %s: %w", globalModelName, err)
 			}
+			newlyCreated[globalModelName] = struct{}{}
 		}
 	}
 
@@ -492,6 +507,8 @@ func (r *Router) applyRouterConfig(ctx context.Context, newConfig *router.Routin
 			r.ioState = ioState
 		}
 	}()
+
+	committed = true
 
 	for model := range modelsToUnload {
 		r.unloadGauge.Inc()

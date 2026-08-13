@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/viant/afs"
 	"github.com/viant/gmetric"
 	srvConfig "github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/endpoint/checker"
@@ -223,7 +224,7 @@ func New(cfg *Config) (*Service, error) {
 			return nil, fmt.Errorf("failed to check triton server %s health: %w", server.ID, err)
 		}
 
-		tritonServices[server.ID] = triton.NewService(tritonClient)
+		tritonServices[server.ID] = triton.NewServiceWithLocalRepository(tritonClient, triton.NewLocalRepository(server, afs.New()))
 	}
 
 	hooks := []Hook{

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/viant/afs"
 	"github.com/viant/mly/service/config"
 	"github.com/viant/mly/service/domain"
@@ -1159,6 +1162,91 @@ func TestRouter_applyRouterConfig_sharedTritonServer(t *testing.T) {
 	assert.True(t, tritonServer.readyState["modelB"], "modelB should still be loaded")
 	assert.True(t, tritonServer.readyState["modelC"], "modelC should be loaded")
 }
+
+func TestRouter_applyRouterConfig_RemovesLocalOnFailedLoad(t *testing.T) {
+	ctx := context.Background()
+	remote := t.TempDir()
+	local := t.TempDir()
+	modelName := "modelX"
+	require.NoError(t, os.MkdirAll(filepath.Join(remote, modelName, "1"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(remote, modelName, "config.pbtxt"), []byte("name: \"modelX\"\n"), 0o644))
+
+	mock := &evalTritonClient{
+		readyState:   map[string]bool{modelName: false},
+		modelLoadErr: map[string]error{modelName: errors.New("load failure")},
+	}
+	localRepo := triton.NewLocalRepository(config.TritonServer{
+		LocalModelRepository: local,
+		RemoteRepositoryURI:  "file://" + filepath.ToSlash(remote),
+		ModelLoadConcurrency: 1,
+	}, afs.New())
+	svc := triton.NewServiceWithLocalRepository(mock, localRepo)
+
+	cfg := &config.Model{
+		ID:       "cleanup_router",
+		Platform: "triton",
+		Mode:     "router",
+		Triton:   &config.TritonConfig{ServerID: "s"},
+	}
+	cfg.Init(nil)
+	clients := map[string]*triton.Service{"s": svc}
+
+	router := &Router{
+		routerName: cfg.ID,
+		unloader:   svc,
+		makeRoutedEvaluator: func(modelName string) (platform.PlatformEvaluator, error) {
+			return triton.NewRoutedTritonEvaluator(modelName, cfg, clients)
+		},
+		unloadGauge: routerModelUnloadGauge.WithLabelValues("cleanup_router"),
+	}
+
+	err := router.applyRouterConfig(ctx, &sharedrouter.RoutingConfig{
+		EntityMapping: []sharedrouter.EntityKV{{EntityID: 1, ModelName: modelName}},
+	})
+	require.Error(t, err)
+
+	_, statErr := os.Stat(filepath.Join(local, modelName))
+	assert.True(t, os.IsNotExist(statErr), "failed load must not leave a local model tree")
+}
+
+type evalTritonClient struct {
+	readyState   map[string]bool
+	modelLoadErr map[string]error
+}
+
+func (m *evalTritonClient) ServerReady(ctx context.Context) error { return nil }
+func (m *evalTritonClient) ModelInfer(ctx context.Context, modelName string, inputs []interface{}, indexToName map[int]string) (map[string]interface{}, error) {
+	return nil, nil
+}
+func (m *evalTritonClient) ModelReady(ctx context.Context, modelName string) (bool, error) {
+	if m.readyState != nil {
+		return m.readyState[modelName], nil
+	}
+	return true, nil
+}
+func (m *evalTritonClient) ModelLoad(ctx context.Context, modelName string) error {
+	if err := m.modelLoadErr[modelName]; err != nil {
+		return err
+	}
+	if m.readyState == nil {
+		m.readyState = map[string]bool{}
+	}
+	m.readyState[modelName] = true
+	return nil
+}
+func (m *evalTritonClient) ModelUnload(ctx context.Context, modelName string) error {
+	if m.readyState != nil {
+		m.readyState[modelName] = false
+	}
+	return nil
+}
+func (m *evalTritonClient) ModelMetadata(ctx context.Context, modelName string) (*triton.ModelMetadata, error) {
+	return &triton.ModelMetadata{
+		Inputs:  []triton.MetadataTensor{{Name: "input1", Datatype: "BYTES"}},
+		Outputs: []triton.MetadataTensor{{Name: "score", Datatype: "FP32"}},
+	}, nil
+}
+func (m *evalTritonClient) Close() error { return nil }
 
 func waitForCalls(t *testing.T, ch <-chan string, count int) []string {
 	t.Helper()

@@ -166,3 +166,22 @@ func TestTritonConfigValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestTritonServerValidate_LocalRequiresRemote(t *testing.T) {
+	s := &TritonServer{ID: "sid", GRPCBaseURL: "localhost:8001", LocalModelRepository: "/tmp/models"}
+	s.Init()
+	err := s.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "RemoteRepositoryURI")
+
+	s.RemoteRepositoryURI = "s3://bucket/triton_model_repository"
+	s.Init()
+	assert.NoError(t, s.Validate())
+	assert.Equal(t, 16, s.ModelLoadConcurrency)
+}
+
+func TestTritonServerInit_NoConcurrencyDefaultWithoutLocal(t *testing.T) {
+	s := &TritonServer{ID: "sid", GRPCBaseURL: "localhost:8001"}
+	s.Init()
+	assert.Equal(t, 0, s.ModelLoadConcurrency)
+}

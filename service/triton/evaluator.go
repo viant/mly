@@ -213,7 +213,7 @@ func (t *TritonEvaluator) ReloadIfNeeded(ctx context.Context) error {
 			return fmt.Errorf("model %s not ready and Triton is not in EXPLICIT Model Control Mode: %w", t.modelName, err)
 		}
 
-		err = t.service.Client.ModelLoad(ctx, t.modelName)
+		err = t.service.LoadModel(ctx, t.modelName)
 		if err != nil {
 			return fmt.Errorf("failed to load Triton model %s: %w", t.modelName, err)
 		}

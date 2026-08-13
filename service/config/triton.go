@@ -22,6 +22,21 @@ type TritonServer struct {
 	// StartupTimeoutSeconds is the timeout for the Triton server to start up.
 	// Defaults to 10 seconds.
 	StartupTimeoutSeconds int `json:",omitempty" yaml:",omitempty"`
+
+	// LocalModelRepository is a host directory mly copies model trees into before
+	// RepositoryModelLoad. Empty keeps today's behavior: Triton already has the files
+	// (or loads them from its own --model-repository, including a remote URI).
+	LocalModelRepository string `json:",omitempty" yaml:",omitempty"`
+
+	// RemoteRepositoryURI is the object-store prefix whose child named by the
+	// Triton model name is copied into LocalModelRepository. Required when
+	// LocalModelRepository is set. Load/unload RPCs stay name-only, so this is
+	// valid while Triton still points at the same remote prefix.
+	RemoteRepositoryURI string `json:",omitempty" yaml:",omitempty"`
+
+	// ModelLoadConcurrency bounds concurrent EnsureLocal+ModelLoad work when
+	// LocalModelRepository is set. Defaults to 16. Ignored when the local path is empty.
+	ModelLoadConcurrency int `json:",omitempty" yaml:",omitempty"`
 }
 
 // Copy of google.golang.org/grpc/backoff.Config (https://pkg.go.dev/google.golang.org/grpc/backoff#Config)
@@ -64,6 +79,10 @@ func (t *TritonServer) Init() {
 	if t.GRPCConnectParams.MaxDelayMs == 0 {
 		t.GRPCConnectParams.MaxDelayMs = 150
 	}
+
+	if t.LocalModelRepository != "" && t.ModelLoadConcurrency == 0 {
+		t.ModelLoadConcurrency = 16
+	}
 }
 
 func (t *TritonServer) Validate() error {
@@ -73,6 +92,10 @@ func (t *TritonServer) Validate() error {
 
 	if t.HTTPBaseURL == "" && t.GRPCBaseURL == "" {
 		return fmt.Errorf("triton server HTTPBaseURL or GRPCBaseURL must be set for server %s", t.ID)
+	}
+
+	if t.LocalModelRepository != "" && t.RemoteRepositoryURI == "" {
+		return fmt.Errorf("triton server %s RemoteRepositoryURI is required when LocalModelRepository is set", t.ID)
 	}
 
 	return nil
