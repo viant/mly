@@ -7,6 +7,13 @@ pipeline:
     dest:
       URL: /tmp/e2e/config.yaml
 
+  clearLocalRepo:
+    action: exec:run
+    target: $target
+    checkError: true
+    commands:
+      - rm -rf /tmp/e2e/triton_local_repo
+
   stop:
     action: process:stop
     target: $target

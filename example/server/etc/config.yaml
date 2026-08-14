@@ -23,6 +23,30 @@ models:
       - name: expand
         dataType: int
 
+  - id: sli_triton_local_fs
+    platform: triton
+    triton:
+      modelName: sli_local
+      serverID: triton_grpc_local_fs
+    useDict: true
+    debug: false
+    datastore: sli_triton
+    keyfields:
+      - sa
+      - sl
+      - aux
+    inputs:
+      - name: sa
+        wildcard: true
+      - name: sl
+        wildcard: true
+      - name: aux
+        wildcard: true
+        auxiliary: true
+    outputs:
+      - name: expand
+        dataType: int
+
   - id: sli_triton_grpc_explicit
     platform: triton
     triton:
@@ -230,6 +254,17 @@ connections:
 tritonServers:
   - id: triton_grpc_explicit
     grpcBaseURL: localhost:8101
+    grpcConnectParams:
+      baseDelayMs: 10
+      multiplier: 2
+      jitter: 0.1
+      maxDelayMs: 150
+
+  # Copies the fixture tree into /tmp; Triton still loads by name from its mount.
+  - id: triton_grpc_local_fs
+    grpcBaseURL: localhost:8101
+    localModelRepository: /tmp/e2e/triton_local_repo
+    remoteRepositoryURI: file://${appPath}/example/e2e/data/triton_model_repository
     grpcConnectParams:
       baseDelayMs: 10
       multiplier: 2

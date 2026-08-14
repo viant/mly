@@ -1,0 +1,16 @@
+init:
+  parentPath: $parent.path
+
+pipeline:
+  test:
+    action: exec:run
+    target: $target
+    checkError: true
+    commands:
+      - test -f /tmp/e2e/triton_local_repo/sli_local/1/model.savedmodel/saved_model.pb
+      - /tmp/e2e/mlyc -m sli_triton_local_fs -a 'sa:a;sl:a;aux:local-fs'
+
+  assert:
+    action: validator:assert
+    actual: $AsJSON($test.Cmd[1].Stdout)
+    expect: $LoadJSON('${parentPath}/expect.json')
