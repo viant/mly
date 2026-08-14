@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -31,6 +32,20 @@ type failingFS struct {
 
 func (f *failingFS) Copy(ctx context.Context, sourceURL, destURL string, options ...storage.Option) error {
 	return errors.New("copy failed")
+}
+
+// peerDestFS copies to staging, then installs dest as a concurrent winner would.
+type peerDestFS struct {
+	afs.Service
+	installDest func()
+}
+
+func (p *peerDestFS) Copy(ctx context.Context, sourceURL, destURL string, options ...storage.Option) error {
+	if err := p.Service.Copy(ctx, sourceURL, destURL, options...); err != nil {
+		return err
+	}
+	p.installDest()
+	return nil
 }
 
 func fileURL(path string) string {
@@ -69,6 +84,50 @@ func TestLocalRepository_EnsureCopiesThenSkips(t *testing.T) {
 
 	require.NoError(t, repo.Ensure(ctx, "modelA"))
 	assert.Equal(t, int32(1), counter.copies.Load())
+}
+
+func TestLocalRepository_EnsureDestExistsAfterCopyIsSuccess(t *testing.T) {
+	remote := t.TempDir()
+	local := t.TempDir()
+	writeModelTree(t, remote, "modelA")
+	dest := filepath.Join(local, "modelA")
+
+	fs := &peerDestFS{
+		Service: afs.New(),
+		installDest: func() {
+			writeModelTree(t, local, "modelA")
+		},
+	}
+	repo := newTestLocalRepo(t, fs, local, remote)
+	require.NoError(t, repo.Ensure(context.Background(), "modelA"))
+	require.FileExists(t, filepath.Join(dest, "config.pbtxt"))
+	_, stagingErr := os.Stat(filepath.Join(local, ".modelA.staging"))
+	assert.True(t, os.IsNotExist(stagingErr))
+}
+
+func TestLocalRepository_EnsureConcurrentSameName(t *testing.T) {
+	remote := t.TempDir()
+	local := t.TempDir()
+	writeModelTree(t, remote, "modelA")
+	repo := newTestLocalRepo(t, afs.New(), local, remote)
+	ctx := context.Background()
+
+	const n = 16
+	var wg sync.WaitGroup
+	errCh := make(chan error, n)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			errCh <- repo.Ensure(ctx, "modelA")
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+	require.FileExists(t, filepath.Join(local, "modelA", "config.pbtxt"))
 }
 
 func TestLocalRepository_EnsureFailureLeavesNoDest(t *testing.T) {

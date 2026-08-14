@@ -11,6 +11,7 @@ import (
 	"github.com/viant/afs/option"
 	"github.com/viant/mly/service/config"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/sync/singleflight"
 )
 
 // fallback when LocalModelRepository is set but Init did not run.
@@ -24,6 +25,7 @@ type LocalRepository struct {
 	localRoot string
 	remoteURI string
 	sema      *semaphore.Weighted
+	inflight  singleflight.Group
 }
 
 // NewLocalRepository returns a manager when LocalModelRepository is set, else nil.
@@ -85,7 +87,18 @@ func (r *LocalRepository) remoteURL(modelName string) (string, error) {
 // Ensure copies remoteURI/modelName into localRoot/modelName if that directory
 // is not already present. A sibling staging directory is used so Triton never
 // sees a half-written tree.
+//
+// Same-name calls share one in-flight copy. If dest is already there when
+// rename runs (another process won the install), that is success: the tree
+// is not needed.
 func (r *LocalRepository) Ensure(ctx context.Context, modelName string) error {
+	_, err, _ := r.inflight.Do(modelName, func() (interface{}, error) {
+		return nil, r.ensureOnce(ctx, modelName)
+	})
+	return err
+}
+
+func (r *LocalRepository) ensureOnce(ctx context.Context, modelName string) error {
 	dest, err := r.destPath(modelName)
 	if err != nil {
 		return err
@@ -118,9 +131,17 @@ func (r *LocalRepository) Ensure(ctx context.Context, modelName string) error {
 	}
 	if err := os.Rename(staging, dest); err != nil {
 		_ = os.RemoveAll(staging)
+		if destInstalled(dest) {
+			return nil
+		}
 		return fmt.Errorf("install Triton model %s: %w", dest, err)
 	}
 	return nil
+}
+
+func destInstalled(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // Remove deletes the local model directory and any leftover staging dir.
