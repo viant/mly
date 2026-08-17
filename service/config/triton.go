@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"runtime"
+)
 
 type TritonServer struct {
 	ID string
@@ -35,8 +38,19 @@ type TritonServer struct {
 	RemoteRepositoryURI string `json:",omitempty" yaml:",omitempty"`
 
 	// ModelLoadConcurrency bounds concurrent EnsureLocal+ModelLoad work when
-	// LocalModelRepository is set. Defaults to 16. Ignored when the local path is empty.
+	// LocalModelRepository is set. Defaults to runtime.NumCPU(). Ignored when
+	// the local path is empty.
 	ModelLoadConcurrency int `json:",omitempty" yaml:",omitempty"`
+}
+
+// DefaultModelLoadConcurrency is the copy-then-load bound when
+// ModelLoadConcurrency is unset and LocalModelRepository is set.
+func DefaultModelLoadConcurrency() int {
+	n := runtime.NumCPU()
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 // Copy of google.golang.org/grpc/backoff.Config (https://pkg.go.dev/google.golang.org/grpc/backoff#Config)
@@ -81,7 +95,7 @@ func (t *TritonServer) Init() {
 	}
 
 	if t.LocalModelRepository != "" && t.ModelLoadConcurrency == 0 {
-		t.ModelLoadConcurrency = 16
+		t.ModelLoadConcurrency = DefaultModelLoadConcurrency()
 	}
 }
 

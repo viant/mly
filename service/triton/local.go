@@ -14,9 +14,6 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// fallback when LocalModelRepository is set but Init did not run.
-const defaultModelLoadConcurrency = 16
-
 // LocalRepository copies Triton model trees from a remote prefix onto a local
 // directory that Triton can later use as --model-repository. Load/unload RPCs
 // stay name-only, so copies are valid while Triton still points at the remote URI.
@@ -35,7 +32,7 @@ func NewLocalRepository(server config.TritonServer, fs afs.Service) *LocalReposi
 	}
 	n := int64(server.ModelLoadConcurrency)
 	if n <= 0 {
-		n = defaultModelLoadConcurrency
+		n = int64(config.DefaultModelLoadConcurrency())
 	}
 	return &LocalRepository{
 		fs:        fs,

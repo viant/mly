@@ -106,7 +106,7 @@ List of Triton Inference Server sidecars. Each model with `Platform: triton` ref
 - `HTTPBaseURL` / `GRPCBaseURL`: one of these is required. gRPC is preferred (`localhost:8001`).
 - `LocalModelRepository`: `string` - optional. When set, mly copies each Triton model tree from `RemoteRepositoryURI/<modelName>` into this directory before `RepositoryModelLoad`. Empty leaves today's behavior (files already present, or Triton loads from its own `--model-repository`).
 - `RemoteRepositoryURI`: `string` - required when `LocalModelRepository` is set. Object-store prefix (for example `s3://bucket/triton_model_repository`). Load and unload RPCs stay name-only, so this is valid while Triton still uses that remote URI as `--model-repository`.
-- `ModelLoadConcurrency`: `int` - optional, default `16` when `LocalModelRepository` is set. Bounds concurrent copy-then-load work for this server.
+- `ModelLoadConcurrency`: `int` - optional, default `runtime.NumCPU()` when `LocalModelRepository` is set. Bounds concurrent copy-then-load work for this server.
 
 ## Client
 

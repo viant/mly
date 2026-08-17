@@ -177,7 +177,7 @@ func TestTritonServerValidate_LocalRequiresRemote(t *testing.T) {
 	s.RemoteRepositoryURI = "s3://bucket/triton_model_repository"
 	s.Init()
 	assert.NoError(t, s.Validate())
-	assert.Equal(t, 16, s.ModelLoadConcurrency)
+	assert.Equal(t, DefaultModelLoadConcurrency(), s.ModelLoadConcurrency)
 }
 
 func TestTritonServerInit_NoConcurrencyDefaultWithoutLocal(t *testing.T) {
