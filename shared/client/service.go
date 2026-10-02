@@ -822,14 +822,11 @@ func (s *Service) httpPost(ctx context.Context, data []byte, host *Host) ([]byte
 			if data != nil {
 				postBody = data
 			}
-		}
-
-		if terminate || ctx.Err() != nil {
-			// stop trying if deadline exceeded or canceled
-			break
-		}
-
-		if data != nil && err == nil {
+			if terminate || ctx.Err() != nil {
+				break
+			}
+		} else if data != nil {
+			// EOF can already be in hand when the caller context is canceled.
 			return data, nil
 		}
 	}
